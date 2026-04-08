@@ -20,6 +20,7 @@ export function enviarWhatsapp(orcamento: OrcamentoWhatsapp) {
   let mensagem = `*${orcamento.empresa?.nome_empresa || 'ORÇAMENTO'}*\n\n`
 
   mensagem += `Cliente: ${orcamento.cliente_nome}\n`
+
   if (orcamento.telefone) {
     mensagem += `Telefone: ${orcamento.telefone}\n`
   }
@@ -38,6 +39,7 @@ export function enviarWhatsapp(orcamento: OrcamentoWhatsapp) {
   }
 
   const numero = (orcamento.telefone || '').replace(/\D/g, '')
+
   const url = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`
 
   window.open(url, '_blank')

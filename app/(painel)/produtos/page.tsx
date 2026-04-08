@@ -8,6 +8,8 @@ type Categoria = {
   ativa: boolean
 }
 
+type TipoCalculoProduto = 'unidade' | 'm2'
+
 type Produto = {
   id: number
   nome: string
@@ -17,6 +19,7 @@ type Produto = {
   estoque: number
   descricao: string
   ativo: boolean
+  tipoCalculo?: TipoCalculoProduto
 }
 
 const CATEGORIAS_KEY = 'connect_categorias'
@@ -84,6 +87,7 @@ export default function ProdutosPage() {
   const [custo, setCusto] = useState('')
   const [estoque, setEstoque] = useState('')
   const [descricao, setDescricao] = useState('')
+  const [tipoCalculo, setTipoCalculo] = useState<TipoCalculoProduto>('unidade')
 
   useEffect(() => {
     const atualizarTela = () => setIsMobile(window.innerWidth <= 900)
@@ -162,6 +166,7 @@ export default function ProdutosPage() {
         estoque: Number(item.estoque || 0),
         descricao: String(item.descricao || ''),
         ativo: Boolean(item.ativo ?? true),
+        tipoCalculo: item.tipoCalculo === 'm2' ? 'm2' : 'unidade',
       }))
 
       setProdutos(normalizados)
@@ -182,6 +187,7 @@ export default function ProdutosPage() {
     setCusto('')
     setEstoque('')
     setDescricao('')
+    setTipoCalculo('unidade')
     setEditandoId(null)
   }
 
@@ -192,6 +198,7 @@ export default function ProdutosPage() {
     setCusto(String(produto.custo))
     setEstoque(String(produto.estoque))
     setDescricao(produto.descricao)
+    setTipoCalculo(produto.tipoCalculo === 'm2' ? 'm2' : 'unidade')
     setEditandoId(produto.id)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -233,6 +240,7 @@ export default function ProdutosPage() {
               custo: custoNumero,
               estoque: estoqueNumero,
               descricao: descricao.trim(),
+              tipoCalculo,
             }
           : item,
       )
@@ -249,6 +257,7 @@ export default function ProdutosPage() {
         estoque: estoqueNumero,
         descricao: descricao.trim(),
         ativo: true,
+        tipoCalculo,
       }
 
       salvarListaProdutos([novo, ...produtos])
@@ -284,7 +293,8 @@ export default function ProdutosPage() {
       return (
         produto.nome.toLowerCase().includes(termo) ||
         produto.categoria.toLowerCase().includes(termo) ||
-        produto.descricao.toLowerCase().includes(termo)
+        produto.descricao.toLowerCase().includes(termo) ||
+        (produto.tipoCalculo || 'unidade').toLowerCase().includes(termo)
       )
     })
   }, [busca, produtos])
@@ -501,6 +511,28 @@ export default function ProdutosPage() {
                 </select>
               </div>
 
+              <div>
+                <label
+                  style={{
+                    display: 'block',
+                    marginBottom: 6,
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: '#374151',
+                  }}
+                >
+                  📐 Tipo de cálculo
+                </label>
+                <select
+                  value={tipoCalculo}
+                  onChange={(e) => setTipoCalculo(e.target.value as TipoCalculoProduto)}
+                  style={campo}
+                >
+                  <option value="unidade">Unidade</option>
+                  <option value="m2">Metro quadrado (m²)</option>
+                </select>
+              </div>
+
               <div
                 style={{
                   display: 'grid',
@@ -518,7 +550,7 @@ export default function ProdutosPage() {
                       color: '#374151',
                     }}
                   >
-                    💰 Preço
+                    💰 {tipoCalculo === 'm2' ? 'Preço por m²' : 'Preço'}
                   </label>
                   <input
                     placeholder="0,00"
@@ -692,7 +724,7 @@ export default function ProdutosPage() {
               </div>
 
               <input
-                placeholder="Buscar produto, categoria ou descrição..."
+                placeholder="Buscar produto, categoria, descrição ou tipo..."
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
                 style={{
@@ -756,7 +788,11 @@ export default function ProdutosPage() {
                       </div>
 
                       <div style={{ color: '#4b5563', fontSize: 14 }}>
-                        Preço: {moeda(produto.preco)}
+                        Tipo: {produto.tipoCalculo === 'm2' ? 'Metro quadrado (m²)' : 'Unidade'}
+                      </div>
+
+                      <div style={{ color: '#4b5563', fontSize: 14 }}>
+                        {produto.tipoCalculo === 'm2' ? 'Preço por m²' : 'Preço'}: {moeda(produto.preco)}
                       </div>
 
                       <div style={{ color: '#4b5563', fontSize: 14 }}>
