@@ -1,18 +1,9 @@
-import './globals.css'
+import PainelShell from './components/PainelShell'
 
-export const metadata = {
-  title: 'Connect Sistema',
-  description: 'Sistema premium',
-}
-
-export default function RootLayout({
+export default function PainelLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  return (
-    <html lang="pt-BR">
-      <body>{children}</body>
-    </html>
-  )
+  return <PainelShell>{children}</PainelShell>
 }
