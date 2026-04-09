@@ -1,31 +1,39 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
 
-  const rotasPublicas = ['/login', '/publico', '/bloqueado']
-
-  const ehPublica =
-    rotasPublicas.some((rota) => pathname.startsWith(rota)) ||
+  // ROTAS LIVRES (SEM LOGIN)
+  const rotasPublicas =
+    pathname === '/login' ||
+    pathname === '/bloqueado' ||
+    pathname.startsWith('/publico') ||
+    pathname.startsWith('/impressao-orcamento') ||
+    pathname.startsWith('/impressao-ordem-servico') ||
     pathname.startsWith('/_next') ||
-    pathname.startsWith('/api') ||
-    pathname === '/favicon.ico' ||
-    pathname.includes('.')
+    pathname.startsWith('/favicon.ico') ||
+    pathname.startsWith('/logo-connect.png') ||
+    pathname.startsWith('/manifest.json')
 
-  if (ehPublica) {
+  if (rotasPublicas) {
     return NextResponse.next()
   }
 
-  const logado = req.cookies.get('connect_auth')
+  // COOKIE/TOKEN DE AUTENTICAÇÃO
+  const token =
+    request.cookies.get('sb-access-token')?.value ||
+    request.cookies.get('supabase-auth-token')?.value
 
-  if (!logado) {
-    return NextResponse.redirect(new URL('/login', req.url))
+  // SE NÃO ESTIVER LOGADO, REDIRECIONA
+  if (!token) {
+    const loginUrl = new URL('/login', request.url)
+    return NextResponse.redirect(loginUrl)
   }
 
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
 }
