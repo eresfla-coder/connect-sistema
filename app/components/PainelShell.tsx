@@ -89,26 +89,31 @@ export default function PainelShell({
 
     async function verificarAcesso() {
       try {
-        const { data: authData } = await supabase.auth.getUser()
-        const user = authData?.user
+        const { data: authData, error: authError } = await supabase.auth.getUser()
 
-        if (!user) {
+        if (!componenteAtivo) return
+
+        if (authError || !authData?.user) {
+          setCarregandoAcesso(false)
           router.replace('/login')
           return
         }
 
-        const { data: perfilData, error } = await supabase
+        const user = authData.user
+
+        const { data: perfilData, error: perfilError } = await supabase
           .from('perfis')
           .select('id, email, ativo, status, vencimento')
           .eq('id', user.id)
           .single()
 
-        if (error || !perfilData) {
+        if (!componenteAtivo) return
+
+        if (perfilError || !perfilData) {
+          setCarregandoAcesso(false)
           router.replace('/bloqueado')
           return
         }
-
-        if (!componenteAtivo) return
 
         setPerfil(perfilData)
 
@@ -118,13 +123,16 @@ export default function PainelShell({
           venceuPerfil(perfilData.vencimento)
 
         if (bloqueado) {
+          setCarregandoAcesso(false)
           router.replace('/bloqueado')
           return
         }
 
         setCarregandoAcesso(false)
       } catch {
-        router.replace('/bloqueado')
+        if (!componenteAtivo) return
+        setCarregandoAcesso(false)
+        router.replace('/login')
       }
     }
 
@@ -133,7 +141,13 @@ export default function PainelShell({
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session?.user) router.replace('/login')
+      if (!componenteAtivo) return
+
+      if (!session?.user) {
+        setPerfil(null)
+        setCarregandoAcesso(false)
+        router.replace('/login')
+      }
     })
 
     return () => {
@@ -248,8 +262,12 @@ export default function PainelShell({
           </div>
           <style jsx>{`
             @keyframes spin {
-              from { transform: rotate(0deg); }
-              to { transform: rotate(360deg); }
+              from {
+                transform: rotate(0deg);
+              }
+              to {
+                transform: rotate(360deg);
+              }
             }
           `}</style>
         </div>
