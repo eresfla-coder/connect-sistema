@@ -1,0 +1,35 @@
+V81 - BASE FINAL DADOS SUPABASE / SEM DESMONTAR
+
+Base usada: V78_SUPABASE_MOBILE_SEGURO_PRONTO_COLAR.
+
+Alteração cirúrgica:
+- Não mexe no visual.
+- Não mexe em PDF.
+- Não mexe em WhatsApp.
+- Não mexe em aprovação de orçamento/OS.
+- Não mexe no menu.
+- Não mexe em PWA/cache agressivo.
+
+Correção feita:
+- CloudSyncClient refeito em modo seguro V81.
+- O sistema agora tenta puxar dados logo após a sessão ficar pronta.
+- Corrige o caso em que o RootLayout carregava antes do token e demorava demais para trazer OS/orçamentos em outro navegador.
+- Mantém push leve para Supabase via connect_storage.
+- Sem realtime pesado.
+- Sem sync em toda troca de módulo.
+- Sem focus listener agressivo.
+
+Objetivo:
+- Abrir em outro navegador/celular e puxar Orçamentos, OS, Clientes e Produtos com mais previsibilidade.
+- Reduzir dependência prática de localStorage vazio em navegador novo.
+
+Teste recomendado:
+1. Subir limpo na Vercel.
+2. Abrir painel.appconnectpro.com.br em janela anônima ou outro navegador.
+3. Fazer login.
+4. Esperar 5 a 10 segundos na primeira carga.
+5. Abrir Orçamentos e OS.
+6. Se os dados aparecerem, validar cadastro novo e confirmar se aparece depois em outro navegador.
+
+Observação:
+Esta versão NÃO faz mudança estrutural de tabelas separadas no Supabase. Ela usa a tabela connect_storage já criada/rodada no SQL, preservando a arquitetura atual e evitando desmontar o sistema.

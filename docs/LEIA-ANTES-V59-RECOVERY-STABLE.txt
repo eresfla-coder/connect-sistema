@@ -1,0 +1,24 @@
+V59 Recovery Stable
+
+Base usada: V54 enviada pelo usuário.
+
+Objetivo:
+- recuperar estabilidade depois dos travamentos gerais;
+- neutralizar service worker/PWA antigo;
+- reduzir sincronização agressiva;
+- manter sincronização leve via connect_storage;
+- corrigir bloco Produtos/Serviços no mobile sem mexer pesado no layout.
+
+O que mudou:
+1. PWAClient não registra mais service worker. Ele apenas tenta remover service workers/caches antigos de forma silenciosa.
+2. ConnectCloudStorageSync virou sincronização silenciosa e leve:
+   - sem toast de falha;
+   - sem reload automático;
+   - sem listeners de focus/visibility/online;
+   - sem loop agressivo;
+   - upload em debounce de 2,5s ao salvar localStorage das chaves do Connect.
+3. Produtos/Serviços: bloco Precificação Inteligente fica em coluna única no mobile.
+
+Não precisa rodar SQL novo se o SQL V55/V54 já foi aplicado.
+
+Depois do deploy, recomenda-se testar primeiro no navegador normal antes de reinstalar atalho no celular.

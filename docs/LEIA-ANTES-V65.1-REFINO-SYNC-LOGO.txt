@@ -1,0 +1,21 @@
+V65.1 - Refinamento estável
+
+Base: V65 sync seguro Supabase.
+
+Correções aplicadas:
+- Logo do menu lateral menor e sem moldura/branco sobrando.
+- Ícone PWA/atalho atualizado com a arte Connect enviada.
+- Manifest com nova versão para forçar atualização do atalho.
+- Botão Sair agora fica vermelho e mostra feedback "Saindo..." ao clicar.
+- Dashboard não usa mais a logo fixa do sistema como fallback. Só mostra a logo cadastrada em Configurações do cliente.
+- Sync inicial mais rápido ao abrir pelo atalho/celular.
+- Badges e dashboard escutam evento do sync para atualizar logo após puxar dados.
+- Mantido sem service worker/cache agressivo.
+- Mantido sem realtime pesado para evitar travamentos antigos.
+
+Depois de subir:
+1. Apague o atalho antigo do celular.
+2. Abra painel.appconnectpro.com.br pelo navegador.
+3. Faça login.
+4. Aguarde 2 a 5 segundos na primeira abertura para hidratar dados.
+5. Crie o novo atalho.

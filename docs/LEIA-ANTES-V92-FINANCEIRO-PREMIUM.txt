@@ -1,0 +1,28 @@
+V92 - FINANCEIRO PREMIUM + COBRANCA EM MASSA SEGURA
+
+Base usada: V91 cliente + cobranca Supabase direto.
+
+O que entrou:
+- Status financeiro inteligente: Pago, Hoje, A vencer, Atrasado e Parcial.
+- Dashboard financeiro premium: recebido no mes, vencendo hoje, total atrasado, inadimplencia, aberto e clientes ativos.
+- Alerta automatico quando existir cobranca atrasada.
+- Botao "Cobrar atrasados" com envio uma conversa por vez para evitar bloqueio do navegador.
+- Destaque visual mais forte para atrasados e vencendo hoje.
+- Base de link de pagamento em /pagar/[id].
+
+Importante:
+- Nao foi adicionado sync automatico pesado.
+- Nao foi adicionado bloqueio/assinatura.
+- Nao precisa rodar SQL novo se voce ja rodou o SQL da V91.
+
+Para testar local:
+rmdir /s /q .next
+npm install
+npm run dev
+
+Teste recomendado:
+1. Abrir Financeiro.
+2. Criar uma parcela com vencimento hoje e outra vencida.
+3. Verificar badges Hoje/Atrasado.
+4. Clicar em Cobrar atrasados.
+5. Abrir uma conversa no WhatsApp, depois clicar em Proximo.

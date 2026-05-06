@@ -1,0 +1,29 @@
+CONNECT SISTEMA — V30 PWA PREMIUM + LOGO APP + INSTALAÇÃO IPHONE
+
+O que foi ajustado:
+
+1. Ícone premium do aplicativo
+- Criada pasta public/icons.
+- O app instalado no celular agora usa ícone próprio do Connect.
+- Manifest atualizado para Android/PWA.
+- Apple touch icon atualizado para iPhone.
+
+2. Instalação no iPhone
+- O iPhone não mostra botão automático igual Android.
+- Agora o sistema detecta iPhone e mostra orientação:
+  Safari > Compartilhar > Adicionar à Tela de Início.
+
+3. Menu mobile
+- Corrigido espaçamento para o botão hambúrguer não ficar por cima da logo.
+- Logo reduzida no mobile e com respiro no topo.
+
+Como testar no iPhone:
+1. Suba para Vercel.
+2. Abra no Safari.
+3. Toque em Compartilhar.
+4. Toque em Adicionar à Tela de Início.
+5. O ícone Connect aparecerá na tela inicial.
+
+IMPORTANTE:
+- Preserve seu .env.local.
+- Depois de colar, rode npm run build.

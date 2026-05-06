@@ -1,0 +1,37 @@
+CONNECT SISTEMA - RESET SENHA ADMIN + LINK OS LOCAL V3
+
+O QUE FOI AJUSTADO:
+
+1) Link da OS no ambiente local
+- Quando estiver rodando em localhost, 127.0.0.1, 192.168.x.x, 10.x.x.x ou .local,
+  o link da OS agora usa a origem local atual, por exemplo:
+  http://localhost:3000/impressao-ordem-servico/...
+- Quando subir para Vercel, mantém a URL pública definida em NEXT_PUBLIC_SITE_URL.
+
+2) Reset de senha sem depender de e-mail SMTP
+- Foi criado o endpoint:
+  app/api/admin/clientes/reset-senha/route.ts
+- No painel admin, em Ações do cliente, foi adicionado:
+  Resetar senha / WhatsApp
+- Ele gera uma senha provisória, altera direto no Auth do Supabase via Service Role
+  e abre o WhatsApp com o texto pronto para enviar ao cliente.
+
+IMPORTANTE:
+- Para o reset admin funcionar local e Vercel, o projeto precisa ter SUPABASE_SERVICE_ROLE_KEY configurado.
+- No .env.local, adicione:
+  SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key_do_supabase
+- Na Vercel, também adicione essa variável em Project Settings > Environment Variables.
+- Nunca exponha a service role no frontend. Ela está sendo usada somente em rota API server-side.
+
+COMO TESTAR:
+1) Cole/substitua os arquivos do ZIP.
+2) Rode npm install se necessário.
+3) Rode npm run dev.
+4) Entre no painel admin.
+5) Em um cliente, clique em Ações > Resetar senha / WhatsApp.
+6) O WhatsApp deve abrir com login e senha provisória.
+7) Teste o link da OS local pelo botão/copiar link/WhatsApp.
+
+OBS:
+- O reset por e-mail do Supabase continua dependendo do SMTP.
+- Este ajuste resolve o atendimento imediato do cliente sem depender do envio de e-mail.

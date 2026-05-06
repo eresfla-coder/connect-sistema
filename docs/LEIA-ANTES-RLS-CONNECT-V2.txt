@@ -1,0 +1,18 @@
+CONNECT SISTEMA - BLINDAGEM RLS V2
+
+O que este pacote entrega:
+- Arquivo SQL pronto para colar no Supabase.
+- RLS por usuário/empresa nas principais tabelas.
+- Admin eresfla@gmail.com e lojaconnect@hotmail.com continuam com visão geral.
+- Linhas antigas sem dono são atribuídas ao admin eresfla@gmail.com para não sumirem.
+
+Como aplicar:
+1. Faça backup do projeto Supabase antes.
+2. Abra Supabase > SQL Editor.
+3. Cole o conteúdo de supabase/rls-connect-sistema-v2.sql.
+4. Clique em RUN.
+5. Confira no resultado se as tabelas aparecem com rls_ativo = true.
+6. Teste login de um cliente normal e confirme se ele não vê dados de outro cliente.
+
+Observação importante:
+O sistema atual ainda tem alguns módulos que usam localStorage. O RLS protege as tabelas Supabase. Depois vamos migrar orçamento/OS/produtos/localStorage para banco com owner_uuid para a blindagem ficar 100% server-side.

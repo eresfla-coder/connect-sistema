@@ -1,0 +1,18 @@
+V61 - Atalho limpo / sem PWA agressivo
+
+Esta versão mantém o Supabase e remove o comportamento de PWA instalado que podia abrir em contexto/cache separado.
+
+O que foi feito:
+- Manifest alterado para display browser, evitando contexto standalone separado.
+- start_url atualizado para /dashboard?atalho=limpo&v=61.
+- Service worker autodestrutivo: remove caches e se desregistra.
+- PWAClient limpa service workers/caches antigos ao abrir o sistema.
+- Headers no next.config.js impedem cache persistente de sw.js e manifest.json.
+
+Depois de subir:
+1. Abra painel.appconnectpro.com.br no Chrome do celular.
+2. Apague o atalho antigo.
+3. Crie um novo atalho.
+4. Entre com a mesma conta.
+
+Objetivo: o atalho passa a funcionar como atalho web limpo, usando a mesma sessão/armazenamento do navegador e evitando travamentos antigos.

@@ -1,0 +1,14 @@
+V70.2 MODO SEGURO ANTI-TRAVA
+
+Base: V69.1 corrigida/build ok.
+
+Objetivo:
+- Remover ajustes recentes que podiam causar travamento ao clicar.
+- Manter aprovação no painel da V69.1.
+- Corrigir rolagem por CSS leve, sem listener global de mouse/wheel.
+- Não mexer em Supabase, realtime, sync, PWA/cache, nem lógica principal.
+
+Importante sobre WhatsApp:
+- Link wa.me SEMPRE envia pelo WhatsApp logado no aparelho/navegador.
+- Para enviar automaticamente pelo número cadastrado na configuração da empresa, precisa WhatsApp Business API/Cloud API com número oficial configurado.
+- Sem API, o sistema consegue preencher mensagem e destino do cliente, mas não consegue trocar o remetente.

@@ -1,0 +1,19 @@
+Connect Sistema — V58.1
+
+Base: V58 sobre a V57.1 estável.
+
+Correções desta versão:
+- Mantém fluxo V58: orçamento de produto gera venda; serviço continua separado para OS.
+- Corrige bloco Produtos/Serviços no mobile: Precificação Inteligente vira coluna única e não cria faixa branca gigante.
+- Corrige PWA/atalho travando na segunda abertura: limpa service worker/cache antigo e remove interceptação de páginas.
+- Mantém Supabase como fonte oficial de sincronização.
+
+SQL:
+- Não precisa rodar SQL novo se o SQL da V55 já foi executado e a sincronização PC/celular já funcionou.
+
+Depois de subir:
+1. Apague o atalho antigo do celular.
+2. Abra https://www.appconnectpro.com.br no Chrome.
+3. Toque em Atualizar se aparecer o banner.
+4. Feche e abra novamente.
+5. Crie o atalho novo.

@@ -1,0 +1,29 @@
+CONNECT SISTEMA - CONTROLE DE SESSÃO PREMIUM V36
+
+O QUE FOI IMPLEMENTADO
+- 1 conta = 1 sessão ativa por vez.
+- Quando o cliente entra em outro celular/computador, a sessão anterior é encerrada.
+- Tela premium: "Sessão encerrada".
+- Admin continua livre para acessar sem bloqueio de sessão.
+- Estrutura pronta para planos futuros: 1, 2 ou 5 usuários.
+
+ANTES DE TESTAR
+1) Abra o Supabase > SQL Editor.
+2) Execute o arquivo:
+   supabase/controle-sessao-premium-v36.sql
+
+3) Confirme se sua Vercel tem esta variável:
+   SUPABASE_SERVICE_ROLE_KEY
+
+4) Depois rode local:
+   npm run build
+
+COMO TESTAR
+1) Entre com o cliente no celular.
+2) Entre com o mesmo e-mail em outro navegador/computador.
+3) Volte no primeiro celular.
+4) Em até 15 segundos, ou ao voltar o foco, a sessão antiga será encerrada.
+
+OBSERVAÇÃO
+- Isso não impede o cliente de passar a senha, mas impede uso simultâneo com a mesma conta.
+- Para vender planos maiores futuramente, basta evoluir o limite por plano.

@@ -1,0 +1,19 @@
+V79 - Produtos Mobile Premium + Painel refinado
+
+Base: V78 estável mobile/supabase.
+
+Alterações cirúrgicas:
+- Ajuste da tela/modal Novo produto/serviço no celular.
+- Modal abre sempre no topo do formulário.
+- Modal com área útil mais segura para iPhone/Chrome/Safari.
+- Cabeçalho do modal mais compacto e premium.
+- Botão Fechar mais visível.
+- Botões do painel/menu com acabamento premium, mais próximos do padrão visual da dashboard.
+- Removidos re-renders de toque desnecessários no menu para ajudar na estabilidade mobile.
+
+Não alterado:
+- Sync Supabase.
+- Aprovação de orçamento/OS.
+- PDF.
+- WhatsApp.
+- PWA/cache.

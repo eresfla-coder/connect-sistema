@@ -1,0 +1,29 @@
+V88 - BASE ESTAVEL PRESERVADA
+
+Esta versão foi feita em cima do backup enviado: "my-next-app- etsvavel cel e pc".
+
+Objetivo:
+- Preservar a versão que estava estável no celular e no PC.
+- Não reintroduzir banco blindado, bloqueio duro, middleware de assinatura ou sincronização automática global.
+- Remover apenas pontos com risco de travamento: service worker antigo e sync global por localStorage.
+
+Alterações aplicadas:
+1. public/sw.js removido.
+2. app/components/CloudSyncClient.tsx desligado de forma segura, retornando null.
+3. next.config.js atualizado para identificar a versão como v88-base-estavel-sem-sync-global.
+4. Visual Connect preservado.
+5. Estrutura de rotas preservada.
+
+Como rodar:
+1. Apague .next.
+2. Rode npm install.
+3. Rode npm run dev.
+
+Comando Windows:
+rmdir /s /q .next
+npm install
+npm run dev
+
+Importante:
+- Não ativar sincronização automática global de banco/localStorage.
+- Próxima evolução deve ser por módulo, começando por clientes ou orçamentos, com salvamento manual no Supabase.

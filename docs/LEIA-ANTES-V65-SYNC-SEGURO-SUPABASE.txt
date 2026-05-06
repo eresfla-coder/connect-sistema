@@ -1,0 +1,17 @@
+V65 - Sync seguro Supabase + ícone premium
+
+Base: V64/V63 estável preservada.
+
+O que foi feito:
+- Ícone do atalho recriado exatamente a partir da imagem premium enviada.
+- Manifest atualizado com versão nova para forçar o celular a buscar o ícone correto.
+- Sync reforçado sem realtime pesado e sem service worker/cache agressivo.
+- A API connect-storage agora mescla arrays no servidor antes de salvar, evitando que um aparelho/atalho com lista vazia apague dados já salvos no Supabase.
+- Configurações continuam salvando normalmente.
+- Orçamentos, OS, clientes, produtos, categorias, formas de pagamento, vendas, recibos e financeiro continuam sincronizando pelo connect_storage.
+
+Importante:
+- Não reativar PWA antigo com cache agressivo.
+- Não instalar next-pwa agora.
+- Não trocar o domínio limpo painel.appconnectpro.com.br.
+- Depois de subir, remover o atalho antigo do celular e criar um novo.

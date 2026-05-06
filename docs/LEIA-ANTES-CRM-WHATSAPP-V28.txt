@@ -1,0 +1,19 @@
+CONNECT SISTEMA - V28 CRM + AUTOMACAO WHATSAPP INTELIGENTE
+
+O que entrou:
+- Nova tela /crm no menu lateral.
+- Central de relacionamento com orcamentos parados, cobrancas, OS em acompanhamento/prontas e clientes sem movimento.
+- Botao Enviar WhatsApp com mensagem pronta por tipo de acao.
+- Botao Copiar texto.
+- Indicadores: acoes sugeridas, cobrancas, leads quentes e valor em jogo.
+- Filtros por status e busca por cliente/documento.
+
+Como testar:
+1. Preserve seu .env.local.
+2. Cole/substitua os arquivos do ZIP por cima do projeto atual.
+3. Rode: npm run build
+4. Rode: npm run dev
+5. Abra /crm pelo menu lateral.
+
+Observacao:
+Esta versao usa os dados locais ja existentes do Connect Sistema: clientes, orcamentos, ordens de servico e financeiro. Nao altera regras de OS, orcamento, financeiro, RLS nem links curtos.

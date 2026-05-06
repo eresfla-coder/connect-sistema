@@ -1,0 +1,20 @@
+CONNECT SISTEMA — V26 — MODO BALCÃO PRO
+
+Aplicado em cima da base V25.
+
+O que entrou:
+- Confirmação visual grande ao bipar produto.
+- Vibração no celular quando o navegador permitir.
+- Histórico dos últimos produtos bipados.
+- Botão rápido "Foco no leitor".
+- Subtotal flutuante melhorado com quantidade total de unidades.
+- Fluxo contínuo para leitor USB/Bluetooth/OTG.
+
+Importante:
+- Preserve seu arquivo .env.local antes de colar por cima.
+- Depois rode npm run build.
+- Se passar, suba para Vercel com vercel --prod.
+
+Observação:
+- A vibração depende do navegador/celular permitir navigator.vibrate.
+- O leitor OTG continua funcionando como teclado: bipou + ENTER = adiciona.

@@ -1,0 +1,11 @@
+V70.1 — Correção cirúrgica real
+
+- Corrige rolagem vertical com a roda/botão do mouse.
+- Roda normal: sobe/desce a página.
+- Shift + roda: rola tabelas horizontalmente no PC.
+- WhatsApp abre sem trocar a rota do painel, reduzindo tela branca ao voltar.
+- Não altera Supabase, sync, lógica de orçamento, lógica de OS nem cache/PWA.
+
+Observação importante:
+O WhatsApp Web/App sempre envia pelo número logado no aparelho/navegador.
+Para enviar automaticamente pelo número cadastrado na Config, só com WhatsApp Business API oficial integrada.

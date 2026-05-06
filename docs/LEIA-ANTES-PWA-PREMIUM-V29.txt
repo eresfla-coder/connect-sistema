@@ -1,0 +1,20 @@
+CONNECT SISTEMA — V29 PWA PREMIUM + NOTIFICAÇÕES INTELIGENTES
+
+O que entrou:
+- Manifest premium para instalar no celular como aplicativo.
+- Service Worker com cache inteligente básico.
+- Banner de instalação no navegador compatível.
+- Modo standalone/tela cheia.
+- Atalhos rápidos do app: Orçamento, OS, Financeiro e CRM.
+- Estrutura preparada para push notifications futuras.
+
+Como testar:
+1) Preserve o .env.local.
+2) Rode: npm run build
+3) Rode: vercel --prod
+4) No celular Android, abra no Chrome e escolha "Adicionar à tela inicial".
+5) Depois abra pelo ícone instalado.
+
+Observação importante:
+- Push notification real exige etapa posterior com VAPID/server subscription.
+- Esta versão prepara a base segura do PWA sem quebrar os módulos atuais.

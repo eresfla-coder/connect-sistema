@@ -1,0 +1,19 @@
+V63 - Configuração sincronizada entre PCs
+
+Base: V62 / domínio limpo painel.appconnectpro.com.br
+
+Correções:
+- Central de Configuração agora carrega dados diretamente da nuvem ao abrir.
+- Botão Salvar configurações grava também no Supabase via /api/connect-storage.
+- Configurações, categorias e formas de pagamento passam a sincronizar entre PCs com a mesma conta.
+- Ajuste na mesclagem do cloud storage: objetos simples como connect_configuracoes passam a respeitar a nuvem como fonte oficial ao carregar em outro dispositivo.
+- Sem PWA agressivo, sem service worker novo, sem SQL novo.
+
+Como testar:
+1. No PC 1, abrir Configurações, alterar nome/logo/telefone e clicar Salvar configurações.
+2. No PC 2, entrar com a mesma conta e abrir Configurações.
+3. Se já estiver na tela, atualizar a página uma vez.
+4. Os dados devem aparecer iguais.
+
+Observação:
+- Não precisa executar SQL se o connect_storage da V55 já foi aplicado.

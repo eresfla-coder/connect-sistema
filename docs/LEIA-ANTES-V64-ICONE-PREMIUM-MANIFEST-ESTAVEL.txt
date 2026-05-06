@@ -1,0 +1,31 @@
+CONNECT SISTEMA - V64 ICONE PREMIUM + MANIFEST ESTAVEL
+
+Base usada: V63 config sincronizada PCs.
+
+O que foi alterado nesta V64:
+1. Criado pacote completo de ícones premium em /public/icons.
+2. Corrigido /public/favicon.ico para um arquivo válido.
+3. Atualizado /public/manifest.json para v64, com start_url no painel e ícones versionados.
+4. Atualizado app/layout.tsx para declarar manifest, favicon e apple-touch-icon via metadata.
+5. Mantido /public/sw.js autodestrutivo, sem cache e sem interceptar requisições.
+6. Atualizado PWAClient para limpar cache/service worker antigo uma vez por sessão na chave v64.
+7. Atualizado cabeçalho X-Connect-Version para v64.
+
+Importante:
+- Esta versão NÃO reintroduz cache agressivo.
+- Esta versão NÃO depende de service worker para funcionar.
+- A sincronização existente foi preservada.
+- O domínio recomendado continua sendo painel.appconnectpro.com.br.
+
+Depois de subir na Vercel:
+1. Acesse https://painel.appconnectpro.com.br/manifest.json?v=64 e confirme que abriu o manifest novo.
+2. No celular, remova o atalho antigo da tela inicial.
+3. Abra o painel pelo navegador.
+4. Entre no sistema.
+5. Crie novamente o atalho na tela inicial.
+
+Se o ícone antigo ainda aparecer no celular:
+- Apague o atalho antigo.
+- Feche o navegador.
+- Abra novamente o painel.
+- Crie o atalho de novo.

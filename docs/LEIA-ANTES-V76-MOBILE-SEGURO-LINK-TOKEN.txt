@@ -1,0 +1,1 @@
+V76: menu mobile sem overlay que trava navegador interno; botão hambúrguer vira X para fechar; links públicos não carregam mais por ID em navegador sem dados locais, apenas por token ?p=. Não altera sync/Supabase/PDF.

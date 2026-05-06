@@ -1,0 +1,25 @@
+CONNECT SISTEMA — V14 AJUSTES PDF + ORÇAMENTO FLASH
+
+Aplicado:
+1. PDF do orçamento:
+   - aumentei a fonte e o tamanho do card onde aparecem E-mail e Endereço.
+   - mantive a tabela compacta para continuar cabendo bastante item no A4.
+   - fiz pequena compactação na tabela de itens para ajudar a caber até cerca de 30 itens, dependendo do tamanho das descrições.
+
+2. Orçamento flash:
+   - agora permite salvar orçamento sem selecionar cliente.
+   - também permite gerar PDF sem cliente.
+   - o documento mostra Cliente não informado quando for orçamento rápido/flash.
+
+3. Configurações:
+   - campos principais ganharam botão Limpar para apagar tudo de uma vez:
+     Nome da empresa, telefone, e-mail, responsável, endereço e cidade/UF.
+   - mantém clique/foco selecionando o texto para substituir rápido.
+
+4. Frete/entrega:
+   - mantido campo aceitando apagar e digitar novamente.
+
+IMPORTANTE:
+- Preserve seu .env.local.
+- Depois de colar, rode: npm run build
+- Se passar, suba: vercel --prod

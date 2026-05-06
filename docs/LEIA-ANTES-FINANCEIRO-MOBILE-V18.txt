@@ -1,0 +1,14 @@
+CONNECT SISTEMA - V18 FINANCEIRO MOBILE
+
+Ajuste aplicado:
+- Corrigida sobreposicao do Simulador de parcelas sobre a Lista financeira no mobile.
+- O financeiro agora empilha corretamente em telas pequenas.
+- A tabela financeira ficou dentro de rolagem horizontal segura.
+- Mantido o visual premium e sem alterar regras de cobrança, recebimento ou automacao.
+
+Arquivos principais alterados:
+- components/financeiro/FinanceiroModule.tsx
+
+Importante:
+- Preserve seu .env.local ao colar o pacote.
+- Depois rode npm run build antes de subir para Vercel.

@@ -1,0 +1,14 @@
+CONNECT SISTEMA - V16 CONFIGURAÇÕES MAIS RÁPIDAS
+
+Ajuste cirúrgico feito na tela de Configurações:
+- Removido salvamento/commit enquanto digita nos campos principais.
+- Campos da empresa agora digitam de forma nativa e leve.
+- Dados só atualizam ao sair do campo ou ao salvar.
+- Reduzido re-render do preview enquanto digita.
+- Mantido visual Connect e estrutura atual.
+
+IMPORTANTE:
+- Preserve seu .env.local.
+- Cole os arquivos por cima do projeto atual.
+- Depois rode: npm run dev
+- Para produção: npm run build e vercel --prod

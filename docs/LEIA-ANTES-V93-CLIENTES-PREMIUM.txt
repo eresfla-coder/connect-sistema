@@ -1,0 +1,27 @@
+V93 - CLIENTES PREMIUM 360
+
+Base: V92 estável.
+Alteração principal: aba Clientes refeita com visual premium e ações rápidas.
+
+Entrou nesta versão:
+- Layout Cliente 360 com cards e tabela.
+- Destaque de cliente selecionado.
+- Painel lateral com ações rápidas.
+- WhatsApp direto no cadastro do cliente.
+- Link direto para financeiro do cliente.
+- Filtros rápidos: todos, com WhatsApp, incompletos e sem cidade.
+- Indicador de qualidade do cadastro.
+- Modal de cadastro mais premium.
+- Busca de CEP para preencher endereço, bairro e cidade.
+- Sem sincronização automática pesada.
+- Sem alteração de banco obrigatória.
+
+Como testar:
+1. rmdir /s /q .next
+2. npm install
+3. npm run dev
+4. Abrir Clientes
+5. Cadastrar / editar / chamar no WhatsApp / abrir financeiro
+
+Observação:
+Se o Edge travar, limpar dados do site no Edge uma vez.

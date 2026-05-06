@@ -1,0 +1,14 @@
+V80 - Mobile Chrome + Produtos Premium
+
+Base: V78 estabilizada.
+
+Alterações cirúrgicas:
+- Modal de produto/serviço ajustado para iPhone: altura segura, rodapé fixo para Cancelar/Salvar e sem cortar botões.
+- Menu mobile mais seguro para Chrome no iPhone: evita fixed/overflow agressivo no painel lateral.
+- Botões do painel/menu com acabamento premium: cantos maiores, sombra e espaçamento melhor.
+
+Não alterado:
+- Sync/Supabase
+- Aprovação de orçamento/OS
+- WhatsApp
+- PDF/impressão

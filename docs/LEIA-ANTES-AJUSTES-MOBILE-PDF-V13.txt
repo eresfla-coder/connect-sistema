@@ -1,0 +1,24 @@
+CONNECT SISTEMA — AJUSTES V13
+
+Ajustes cirúrgicos aplicados:
+
+1) Produtos/Serviços no celular
+- Drawer/modal agora usa altura dinâmica do celular.
+- Rodapé com botões Cancelar/Salvar ficou fixado e visível.
+- Adicionado espaço inferior seguro para não cortar os botões.
+
+2) PDF do orçamento A4
+- Apenas fonte/tamanho de leitura foi aumentado.
+- Mantido layout, cores, estrutura e lógica do PDF.
+- Letras de tabela, cliente, totais e rodapé ficaram maiores.
+
+3) Frete/Entrega no orçamento
+- Campo não fica mais preso no zero.
+- Ao focar, seleciona o valor e permite apagar/digitar normalmente.
+
+4) Configurações
+- Campos principais selecionam o texto ao tocar/clicar.
+- Facilita apagar/substituir nome da empresa, telefone, e-mail, responsável, endereço e cidade.
+
+Preserve o .env.local ao colar o projeto.
+Depois rode: npm run build

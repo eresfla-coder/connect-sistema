@@ -1,0 +1,17 @@
+V67 visual seguro
+
+Base: V65_2_VISUAL_SEGURO_SEM_SYNC_PRONTO_COLAR.
+
+Alterações cirúrgicas:
+- Logo do menu reduzida e centralizada acima dos botões.
+- Login ajustado para azul/verde da logomarca, removendo aparência de botão Entrar duplicado no seletor superior.
+- Ícones PWA/atalho refeitos com a logomarca correta enviada pelo cliente.
+- PDF da OS compactado para caber em 1 página quando possível, preservando lógica e dados.
+- Sync global ficou em modo leve: sem realtime, sem monkeypatch de localStorage, sem reload automático e sem loop agressivo.
+- Mantido PWA sem service worker/cache agressivo.
+
+Após subir:
+1. Remover o atalho antigo do celular.
+2. Abrir painel.appconnectpro.com.br pelo navegador.
+3. Criar o atalho novamente.
+4. Se o navegador ainda mostrar ícone antigo, limpar dados do site antes de recriar.

@@ -1,0 +1,14 @@
+CONNECT SISTEMA - V23
+Correção cirúrgica do WhatsApp da OS
+
+O que foi ajustado:
+- WhatsApp da OS agora usa wa.me em vez de api.whatsapp.com/send.
+- Link público da OS continua aceitando #d=.
+- O payload da OS não envia mais logo em base64 dentro do link.
+- Isso evita links gigantes, erro HTTP 431 e falha de conexão no WhatsApp.
+- Arquivo restaurado completo para evitar erro: default export is not a React Component.
+
+IMPORTANTE:
+- Preserve o arquivo .env.local.
+- Substitua os arquivos do projeto por esta versão.
+- Rode npm run build antes de subir.

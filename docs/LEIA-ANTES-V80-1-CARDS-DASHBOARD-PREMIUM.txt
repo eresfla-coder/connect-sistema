@@ -1,0 +1,12 @@
+V80.1 - Cards premium do dashboard
+
+Base: V80/V78 estável.
+Alteração cirúrgica: apenas visual dos cards pequenos do dashboard (Orçamentos, OS, Produtos, Serviços, Cód. barras, Valor estoque, Margem média e Risco).
+
+Não alterado:
+- sync
+- Supabase
+- aprovação OS/orçamento
+- WhatsApp
+- PDF
+- mobile/modal produto

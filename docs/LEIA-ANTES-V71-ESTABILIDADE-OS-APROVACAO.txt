@@ -1,0 +1,16 @@
+V71 - ESTABILIDADE + APROVAÇÃO DE OS
+
+Base usada: última versão enviada pelo usuário (my-next-app(8).zip).
+
+O que foi aplicado:
+- Aprovação digital da OS no mesmo padrão do orçamento.
+- Botões na visualização pública da OS: Aprovar OS / Recusar.
+- Salva status da OS como Aprovada/Recusada no localStorage e tenta gravar em /api/public-docs.
+- Dispara eventos locais para o painel atualizar sem usar realtime pesado.
+- Não foi adicionado service worker novo.
+- Não foi adicionado realtime pesado do Supabase.
+- Não foi alterado PDF do orçamento.
+- Não foi alterada lógica de cálculo da OS.
+
+Observação importante:
+Este pacote foi preparado como correção cirúrgica em cima do ZIP fornecido nesta conversa.

@@ -1,0 +1,20 @@
+V58 - Venda real, estoque e correção mobile
+
+Base usada: V57.1 estável.
+
+Ajustes principais:
+- Corrigido o bloco Precificação Inteligente em Produtos/Serviços no mobile.
+- No celular, o bloco de lucro passa a ficar abaixo do texto, evitando tela espremida e faixa branca gigante.
+- Dashboard mobile com cards auxiliares em uma coluna para evitar corte de valores.
+- Orçamento de produto agora finaliza venda sem virar OS.
+- Venda baixa estoque automaticamente nos itens de produto.
+- Venda lança contas a receber no financeiro.
+- OS segue reservada para serviço técnico.
+
+SQL:
+- Não precisa rodar SQL novo se a V55 já foi aplicada.
+
+Deploy:
+npm install
+npm run build
+vercel --prod

@@ -1,0 +1,17 @@
+CONNECT SISTEMA - RESET ADMIN V6
+
+Correção aplicada:
+- O botão "Resetar senha / WhatsApp" não executava porque o próprio menu de ações usava o mesmo estado de carregamento.
+- Agora o menu aberto e a ação em processamento usam estados separados.
+- Ao clicar, deve aparecer a confirmação: "Gerar uma nova senha provisória...".
+
+IMPORTANTE:
+1. Preserve seu arquivo .env.local na raiz do projeto.
+2. Confirme que SUPABASE_SERVICE_ROLE_KEY é a chave service_role do Supabase.
+3. Depois de trocar/colar arquivos, pare o servidor e rode novamente:
+   npm run dev
+
+Teste:
+- Admin > Clientes > Ações > Resetar senha / WhatsApp
+- Confirme a ação
+- O sistema deve gerar uma senha provisória, copiar o texto e abrir o WhatsApp do cliente.

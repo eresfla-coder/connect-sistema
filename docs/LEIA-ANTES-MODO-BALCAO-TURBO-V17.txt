@@ -1,0 +1,24 @@
+CONNECT SISTEMA - V17 - MODO BALCAO TURBO
+
+Alteracoes aplicadas:
+- Adicionado Modo Balcao Turbo no orcamento.
+- Campo de bipagem com foco automatico.
+- Leitor USB/Bluetooth/OTG: bipou, adicionou e volta o foco.
+- Som curto de sucesso/erro ao bipar.
+- Cards rapidos com total, quantidade de itens e ultimo item bipado.
+- Botoes rapidos +1 e -1 nos itens quando o modo turbo estiver ativo.
+- Subtotal flutuante no canto da tela enquanto o modo turbo estiver ativo.
+
+Como testar:
+1. Preserve o arquivo .env.local.
+2. Cole/substitua os arquivos do ZIP por cima do projeto atual.
+3. Rode: npm run build
+4. Rode: npm run dev
+5. Abra Orçamentos.
+6. Cadastre produto com codigo de barras.
+7. Ligue o Modo Balcao Turbo.
+8. Clique no campo de bipagem ou use leitor OTG/USB/Bluetooth.
+
+Observacao:
+- Produtos por kg, m2 e servicos ainda pedem confirmacao de peso/medida/quantidade, para evitar calculo errado.
+- Produto comum/unidade entra automaticamente e soma +1 se ja existir no orçamento.

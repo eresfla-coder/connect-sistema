@@ -1,0 +1,11 @@
+CONNECT SISTEMA - V32
+
+Ajustes desta versão:
+- Corrigido botão do menu no iPhone para não ficar em cima do relógio/status bar.
+- Logo centralizada e maior no menu mobile.
+- Mantido PWA/ícone/app instalado.
+- Ajuste cirúrgico apenas no PainelShell.
+
+IMPORTANTE:
+- Preserve seu .env.local ao colar os arquivos.
+- Rode npm run build antes de subir para Vercel.

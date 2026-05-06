@@ -1,0 +1,42 @@
+CONNECT SISTEMA - RESET ADMINISTRATIVO V5
+
+O que esta versao faz:
+- Para de depender do e-mail de recuperacao do Supabase/Brevo.
+- No painel Admin, use: Acoes > Resetar senha / WhatsApp.
+- O sistema gera uma senha provisoria no Supabase Auth.
+- O texto com login e senha e copiado automaticamente.
+- Se o cliente tiver telefone, abre o WhatsApp com a mensagem pronta.
+
+IMPORTANTE SOBRE .env.local:
+Por seguranca, o .env.local NAO vai dentro do ZIP.
+Voce deve manter seu .env.local na raiz do projeto com:
+
+NEXT_PUBLIC_SUPABASE_URL=SUA_URL_SUPABASE
+NEXT_PUBLIC_SUPABASE_ANON_KEY=SUA_ANON_KEY
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+SUPABASE_SERVICE_ROLE_KEY=SUA_SERVICE_ROLE_KEY
+
+Para pegar a SERVICE_ROLE_KEY:
+Supabase > Settings > API > Project API keys > service_role
+
+ATENCAO:
+- Nunca coloque SUPABASE_SERVICE_ROLE_KEY com NEXT_PUBLIC_.
+- Nunca exponha essa chave no navegador.
+- Ela so e usada na rota server: app/api/admin/clientes/reset-senha/route.ts
+
+Depois de colar o ZIP:
+1) preserve seu .env.local antigo
+2) cole os arquivos por cima
+3) confira se SUPABASE_SERVICE_ROLE_KEY esta no .env.local
+4) reinicie o servidor:
+   npm run dev
+
+Na Vercel:
+Adicione tambem SUPABASE_SERVICE_ROLE_KEY em:
+Vercel > Project > Settings > Environment Variables
+
+Teste:
+1) entre com usuario admin
+2) va em /admin
+3) no cliente, clique em Acoes > Resetar senha / WhatsApp
+4) copie/envie a senha provisoria ao cliente

@@ -1,0 +1,20 @@
+V90 - Destaque do menu + ajuste seguro
+
+Base usada: V89 banco leve estável.
+
+Alteração principal:
+- O item selecionado no menu lateral agora fica com destaque forte.
+- O botão ativo recebe contorno, brilho, barra lateral branca e identificação visual.
+- Em itens com badge, o badge vira ✓ quando a rota está selecionada.
+- A detecção de ativo agora considera subrotas, exemplo: /orcamentos/123 mantém Orçamentos selecionado.
+
+Sobre Edge travando:
+- Se Chrome está liso e Edge trava, normalmente é cache/dados antigos do Edge.
+- Após colar essa versão, limpe uma vez no Edge:
+  Configurações > Privacidade > Limpar dados de navegação
+  ou F12 > Application > Storage > Clear site data.
+
+Rodar:
+rmdir /s /q .next
+npm install
+npm run dev

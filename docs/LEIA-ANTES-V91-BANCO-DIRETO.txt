@@ -1,0 +1,23 @@
+V91 - Cliente + cobrança vinculados direto ao Supabase
+
+1) Execute no Supabase:
+   supabase/connect-banco-direto-v91.sql
+
+2) Rode local primeiro:
+   rmdir /s /q .next
+   npm install
+   npm run dev
+
+3) Teste:
+   - Cadastre um cliente em Clientes
+   - Vá em Financeiro
+   - No campo Cliente cadastrado, digite o nome
+   - Clique no cliente sugerido
+   - Gere parcelas
+   - A cobrança já fica vinculada ao cliente e salva direto no Supabase
+   - Clique WhatsApp/Cobrar para abrir mensagem automática
+
+Importante:
+- Não foi colocado sync automático pesado.
+- O financeiro salva no Supabase em ações controladas: gerar parcela, receber, reabrir, excluir e sincronizar v2.
+- Se o banco estiver indisponível, a tela continua usando os dados locais.

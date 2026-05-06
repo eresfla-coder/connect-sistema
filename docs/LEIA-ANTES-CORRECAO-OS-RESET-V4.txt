@@ -1,0 +1,31 @@
+CONNECT SISTEMA - CORREÇÃO OS LINK + RESET SENHA V4
+
+O QUE FOI AJUSTADO:
+1) Link da Ordem de Serviço corrigido para não gerar HTTP ERROR 431.
+   - Antes o sistema enviava os dados da OS em ?d= na URL.
+   - Agora envia em #d=, que não vai para o servidor e evita erro 431.
+   - Mantém preview, copiar link e WhatsApp funcionando.
+
+2) Portal do cliente / esqueci senha:
+   - O botão continua tentando enviar o reset oficial pelo Supabase.
+   - Se o Supabase/Brevo falhar, o sistema mostra uma mensagem clara orientando o cliente a pedir senha provisória.
+   - Isso evita tela confusa enquanto o SMTP não estabiliza.
+   - Para reset imediato, use Admin > Resetar senha / WhatsApp.
+
+IMPORTANTE SOBRE .ENV.LOCAL:
+Por segurança, o arquivo .env.local real não deve ir dentro do ZIP.
+Use o arquivo .env.local.example como referência e mantenha seu .env.local atual na raiz do projeto.
+
+VARIÁVEIS NECESSÁRIAS:
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+NEXT_PUBLIC_SITE_URL
+SUPABASE_SERVICE_ROLE_KEY
+
+COMO INSTALAR:
+1) Faça backup do seu .env.local.
+2) Cole/substitua os arquivos deste ZIP na pasta do projeto.
+3) Devolva seu .env.local real para a raiz do projeto.
+4) Reinicie: npm run dev
+5) Teste uma OS com link/WhatsApp.
+6) Teste Admin > Resetar senha / WhatsApp.

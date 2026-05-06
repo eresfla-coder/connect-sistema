@@ -1,0 +1,30 @@
+V83 - PAINEL LEVE / PRONTO PARA COLAR
+
+Base: V81 enviada como base final de dados.
+
+Objetivo:
+- Reduzir travamento no primeiro clique do painel/mobile.
+- Não desmontar visual, PDF, WhatsApp, aprovação ou banco.
+
+Alterações cirúrgicas:
+- PainelShell sem listener global de resize.
+- PainelShell sem listener global de storage.
+- Badges do menu atualizam por troca de rota, não por evento global permanente.
+- Removidos estados de pressão touch/mouse dos botões do menu para reduzir re-render no Chrome iOS.
+- Menu mobile mudou de fixed para absolute para reduzir conflito de touch/scroll no Chrome iOS.
+- CSS final liberando scroll e evitando bloqueio de body.
+- Manifest e ícones versionados para v83.
+
+Não mexido:
+- Supabase
+- Cloud sync
+- OS/aprovação
+- PDF
+- WhatsApp
+- Financeiro
+
+Como aplicar:
+1. Extrair o ZIP dentro de C:\orcamento-app\my-next-app
+2. Aceitar substituir arquivos/pastas.
+3. Rodar npm run build
+4. Rodar vercel --prod

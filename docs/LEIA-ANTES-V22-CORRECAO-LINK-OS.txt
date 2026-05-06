@@ -1,0 +1,14 @@
+CONNECT SISTEMA - V22
+Correção cirúrgica do link local/público da OS.
+
+Ajustado:
+- impressão da OS volta a aceitar links antigos e novos.
+- leitura robusta de payload em ?d= e #d=.
+- fallback por localStorage e hashchange.
+- mantém aprovação digital inteligente da v21.
+
+Como aplicar:
+1. Preserve seu .env.local.
+2. Cole/substitua os arquivos deste ZIP por cima do projeto atual.
+3. Rode npm run build.
+4. Se passar, rode vercel --prod.

@@ -1,0 +1,12 @@
+V69 - Correção aprovação pública no painel
+
+Correção cirúrgica:
+- quando o cliente aprova pelo link público, o status agora é gravado em public_documents;
+- ao abrir a tela de Orçamentos, o painel consulta public_documents e atualiza o orçamento local para Aprovado/Cancelado;
+- sem realtime pesado;
+- sem service worker/cache agressivo;
+- sem alterar lógica de cálculo, PDF ou OS.
+
+Observação:
+- WhatsApp automático oficial exige API/integração separada.
+- Nesta versão, o link público registra a aprovação no sistema e abre aviso por WhatsApp como já existia.

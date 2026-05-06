@@ -1,0 +1,18 @@
+V58.4 - MODO SEGURO / BASE V57.1 ESTÁVEL
+
+Base: V57.1 que estabilizou.
+
+Correções aplicadas:
+- Remove loops pesados de PWA/service worker.
+- Service worker ficou neutro, sem cache de páginas.
+- Sincronização Supabase em modo seguro, sem monkey patch no localStorage.
+- Remove toast falso de falha de sincronização.
+- Corrige layout mobile da tela Produtos/Serviços.
+
+Não precisa rodar SQL novo se a V55 já foi aplicada.
+
+Após subir:
+1. Abrir no navegador.
+2. Testar Produtos no PC por alguns minutos.
+3. Testar no celular pelo Chrome.
+4. Só depois criar novo atalho na tela inicial.

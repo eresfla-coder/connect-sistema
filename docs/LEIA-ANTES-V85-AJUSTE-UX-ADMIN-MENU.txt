@@ -1,0 +1,19 @@
+V85 - Ajuste UX Admin + Menu
+
+Base: V84 SaaS trial/bloqueio.
+
+Alterações cirúrgicas:
+- Modal "Novo cliente SaaS" ganhou botão X/Fechar no topo.
+- Botão inferior do modal passou de "Cancelar" para "Fechar".
+- Modal "Editar cliente" também ganhou botão X/Fechar no topo.
+- Menu lateral agora destaca com cor somente o item ativo/clicado.
+- Itens inativos do menu ficam neutros/claros.
+- Logo do sistema no menu lateral foi reduzida.
+
+Não mexido:
+- Supabase
+- trial/bloqueio
+- aprovação OS/orçamento
+- PDF
+- WhatsApp
+- sincronização

@@ -1,0 +1,15 @@
+V72 - Estabilidade + aprovação de OS
+
+Base: última versão enviada pelo usuário.
+
+Ajustes aplicados:
+- Redução do travamento ao trocar módulos: CloudSync deixou de rodar em foco/visibilidade repetidamente.
+- SessionControl menos agressivo: verificação espaçada e listeners limpos corretamente.
+- Aprovação da OS pelo link público com botão verde "Aprovar OS".
+- Aprovação da OS grava em public_documents e atualiza localStorage.
+- Painel de OS sincroniza aprovação pública ao abrir a lista.
+- Status "Aprovada" incluído com cor verde.
+
+Observação:
+- WhatsApp pelo wa.me/api.whatsapp.com continua abrindo o WhatsApp logado no aparelho. Envio automático por número fixo exige API oficial/integração.
+- Sem realtime pesado, sem PWA/cache agressivo.

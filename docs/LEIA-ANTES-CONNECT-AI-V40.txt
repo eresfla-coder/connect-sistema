@@ -1,0 +1,15 @@
+CONNECT SISTEMA — CONNECT AI V1 (V40)
+
+Implementado:
+- Nova rota: /connect-ai
+- Menu lateral com item Connect AI
+- Gerador local de mensagens WhatsApp, cobrança, follow-up, orçamento e resumo de OS
+- Insights automáticos com base em orçamentos, OS, financeiro e produtos salvos no navegador
+- Histórico simples de textos gerados
+- Envio via WhatsApp com mensagem pronta
+
+Observação importante:
+Esta versão não usa API paga ainda. Ela entrega valor imediato com inteligência local e deixa a estrutura pronta para conectar OpenAI/Gemini futuramente.
+
+Depois de colar, rode:
+npm run build

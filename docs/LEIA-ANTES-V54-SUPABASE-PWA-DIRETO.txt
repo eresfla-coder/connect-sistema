@@ -1,0 +1,13 @@
+V54 - Supabase profissional direto no navegador/PWA
+
+Correção aplicada:
+- A sincronização não depende mais da rota /api/connect-storage nem da SERVICE_ROLE_KEY para salvar/carregar OS, orçamentos, clientes, produtos etc.
+- Agora usa o Supabase direto pelo usuário logado e pelas políticas RLS da tabela connect_storage.
+- Isso evita o aviso falso de modo offline quando a Vercel está sem SUPABASE_SERVICE_ROLE_KEY.
+- O app instalado na tela inicial passa a puxar os dados salvos no Supabase assim que abre.
+
+Obrigatório no Supabase:
+1. Execute o SQL: supabase/connect-storage-v54.sql
+2. Suba para Vercel.
+3. No celular, abra pelo navegador normal, faça login e confirme que os dados aparecem.
+4. Depois abra pelo atalho/app instalado. Se ainda estiver antigo, remova o atalho e instale novamente.

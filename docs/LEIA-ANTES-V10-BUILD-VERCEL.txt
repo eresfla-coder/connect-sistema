@@ -1,0 +1,14 @@
+CONNECT SISTEMA — V10 BUILD VERCEL
+
+Correção aplicada:
+- Corrigido erro TypeScript no arquivo app/(painel)/ordens-servico/page.tsx
+- A função de WhatsApp da OS agora usa montarLinkOSGlobal(), disponível no escopo correto
+- Mantido o link da OS com #d= para evitar HTTP ERROR 431
+
+Como aplicar:
+1. Extraia este ZIP por cima do projeto atual.
+2. Preserve seu arquivo .env.local.
+3. Rode localmente:
+   npm run build
+4. Se passar, suba:
+   vercel --prod

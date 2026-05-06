@@ -1,0 +1,22 @@
+CONNECT SISTEMA - V27 DASHBOARD EXECUTIVO PREMIUM
+
+Alteração aplicada:
+- Dashboard refeito em versão executiva premium.
+- Indicadores de faturamento estimado, recebido, a receber, conversão, OS abertas, ticket médio, margem, estoque, produtos com código de barras e alertas inteligentes.
+- Gráfico mensal de orçamentos e OS.
+- Busca executiva unificada.
+- Lista de produtos mais vendidos baseada nos itens dos orçamentos.
+- Atalhos rápidos para módulos principais.
+
+Cuidados preservados:
+- Não altera orçamento turbo/modo balcão.
+- Não altera OS, link curto, WhatsApp ou impressão.
+- Não altera financeiro.
+- Não altera RLS/Supabase.
+- Preserve sempre o arquivo .env.local ao colar o ZIP.
+
+Depois de colar:
+npm run build
+
+Se passar:
+vercel --prod

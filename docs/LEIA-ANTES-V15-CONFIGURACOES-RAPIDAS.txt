@@ -1,0 +1,14 @@
+CONNECT SISTEMA - V15 CONFIGURAÇÕES MAIS RÁPIDAS
+
+Ajustes aplicados:
+- removido botão Limpar dados da tela de configurações da empresa;
+- removidos botões Limpar individuais ao lado dos campos;
+- campos de texto agora digitam/apagam de forma mais leve;
+- atualização das configurações foi desacoplada com pequeno atraso técnico para reduzir travamentos;
+- visual Connect preservado.
+
+Instalação:
+1. Preserve seu .env.local.
+2. Cole os arquivos por cima do projeto atual.
+3. Rode npm run build.
+4. Se passar, suba com vercel --prod.

@@ -1,0 +1,32 @@
+CONNECT SISTEMA - ORÇAMENTO TURBO POR CÓDIGO DE BARRAS V12
+
+O que foi incluído:
+
+1) Cadastro de produtos
+- Novo campo: Código de barras / EAN.
+- Pode digitar manualmente ou bipar com leitor USB/Bluetooth/OTG.
+- O código fica salvo junto ao produto no cadastro local do Connect.
+
+2) Orçamento
+- Nova área: Orçamento Turbo por Código de Barras.
+- Funciona com leitor USB, Bluetooth ou leitor com fio usando adaptador OTG no celular.
+- Clique no campo "Bipar produto aqui" e passe o leitor.
+- O leitor normalmente envia o código + ENTER; o sistema adiciona automaticamente.
+
+3) Comportamento
+- Produto unidade: adiciona direto no orçamento.
+- Se o produto já estiver no orçamento, aumenta a quantidade em +1.
+- Produto por peso, m² ou serviço: localiza o produto e pede para informar peso/medida/quantidade antes de confirmar.
+- Produto não encontrado: mostra aviso de produto não cadastrado.
+
+Como testar:
+
+1. Entre em Produtos.
+2. Edite/cadastre um produto e preencha Código de barras / EAN.
+3. Entre em Orçamentos.
+4. Clique em "Bipar produto aqui".
+5. Bipe o produto com leitor USB/Bluetooth/OTG ou digite o código e aperte ENTER.
+
+IMPORTANTE:
+- Preserve seu .env.local ao colar o projeto.
+- Depois de substituir os arquivos, rode npm run build antes de subir para Vercel.

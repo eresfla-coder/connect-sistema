@@ -1,0 +1,16 @@
+CONNECT SISTEMA - RESET ADMIN V7
+
+Correção aplicada:
+- Corrigido WhatsApp do botão Resetar senha / WhatsApp.
+- A aba do WhatsApp agora é aberta imediatamente no clique do usuário.
+- Isso evita bloqueio de pop-up quando o navegador impede window.open depois de fetch/await.
+
+Como aplicar:
+1. Extraia o ZIP.
+2. Cole por cima do projeto atual.
+3. Preserve seu arquivo .env.local.
+4. Pare o servidor com Ctrl+C.
+5. Rode npm run dev novamente.
+
+Observação:
+- Se o navegador perguntar sobre pop-ups, permita para 192.168.0.187:3000.

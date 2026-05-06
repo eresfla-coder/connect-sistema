@@ -1,0 +1,13 @@
+V73 PERFORMANCE SEM TRAVAR
+
+Base: V72 com aprovação da OS funcionando.
+
+Alterações cirúrgicas:
+- Desligada transição/overlay entre módulos para evitar degradação após várias trocas.
+- CloudSync reduzido: uma carga inicial e salvamento somente por evento explícito, com debounce maior.
+- Removidos listeners de focus/storage pesados do dashboard financeiro.
+- Dashboard deixou de atualizar relógio a cada segundo; agora atualiza a cada minuto.
+- Sincronização de aprovação pública de orçamento/OS limitada aos últimos documentos pendentes.
+- Sem realtime pesado, sem PWA agressivo, sem alteração visual/PDF/WhatsApp.
+
+Objetivo: reduzir travamento ao clicar/trocar módulos e evitar carregamentos em cascata.

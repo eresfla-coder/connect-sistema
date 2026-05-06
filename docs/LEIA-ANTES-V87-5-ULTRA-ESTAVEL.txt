@@ -1,0 +1,24 @@
+V87.5 ULTRA ESTÁVEL - SEM TRAVAMENTO
+
+Esta versão foi feita para isolar o travamento após os primeiros cliques.
+
+Correções aplicadas:
+- Removidos disparos manuais de evento 'storage', que causavam reprocessamento pesado entre módulos.
+- Desativados listeners globais de storage em Dashboard/CRM/Financeiro.
+- Financeiro não sincroniza automaticamente ao abrir; use o botão de sincronizar quando precisar.
+- Sincronização automática de aprovação pública em Orçamento/OS desligada para evitar travamento em cascata.
+- PWA/service worker/cache antigos são limpos de novo com chave V87.5.
+- Manifest PWA agressivo removido do layout para evitar cache preso em navegadores.
+
+Depois de colar:
+1) Feche todos os navegadores do sistema.
+2) Rode:
+   rmdir /s /q .next
+   npm install
+   npm run dev
+3) No navegador, faça uma limpeza única:
+   F12 > Application > Storage > Clear site data
+4) Abra direto:
+   http://localhost:3000/dashboard
+
+Se quiser testar no celular, use o IP local depois que o PC estiver rodando.

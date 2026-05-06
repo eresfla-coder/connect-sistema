@@ -1,0 +1,14 @@
+V70 — WhatsApp, retorno da tela e rolagem
+
+Base: V69.1 corrigida.
+
+Ajustes aplicados:
+- Orçamentos: abertura do WhatsApp em aba/app externo com proteção para não deixar o painel em branco ao voltar.
+- OS: mesma lógica de abertura segura do WhatsApp.
+- Orçamentos e OS: mensagem agora inclui o telefone cadastrado nas Configurações como contato da empresa.
+- Rolagem horizontal: roda do mouse passa a rolar tabelas/listas horizontais quando o cursor estiver sobre a área com barra.
+- Modal de Ações: camada elevada para não abrir escondida por baixo de outros elementos.
+- NEXT_PUBLIC_SITE_URL ajustado para https://painel.appconnectpro.com.br.
+
+Observação importante:
+O navegador/WhatsApp não permite escolher o número REMETENTE por código. O envio sempre sai da conta WhatsApp aberta no aparelho/navegador. Para enviar automaticamente pelo número da empresa, precisa integrar WhatsApp Business API oficial ou provedor como Z-API/360Dialog/Twilio.

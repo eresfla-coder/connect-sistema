@@ -1,0 +1,21 @@
+V52 - Correção de dados zerados no atalho do celular
+
+Problema corrigido:
+- O sistema podia abrir no navegador em www.appconnectpro.com.br e no atalho/app em appconnectpro.com.br.
+- Como o sistema ainda usa localStorage em alguns módulos, cada domínio tem um armazenamento separado.
+- Resultado: no navegador aparecia a OS, mas no atalho do celular aparecia tudo zerado.
+
+O que foi feito:
+- Criado middleware.ts para redirecionar appconnectpro.com.br para www.appconnectpro.com.br.
+- Atualizado o cache do PWA para v52.
+- Manifest atualizado para start_url com versão v52.
+
+Depois de subir:
+1. Acesse https://www.appconnectpro.com.br/ordens-servico no celular.
+2. Remova o atalho antigo da tela inicial.
+3. Limpe cache/dados do site se necessário.
+4. Crie o atalho novamente usando o endereço com www.
+
+Observação importante:
+- Essa correção unifica o domínio.
+- Para persistência real entre navegadores, celulares e deploys futuros, o próximo passo é salvar OS/orçamentos/clientes direto no Supabase em vez de localStorage.

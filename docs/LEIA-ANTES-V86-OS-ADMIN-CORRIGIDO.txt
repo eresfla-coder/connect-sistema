@@ -1,0 +1,29 @@
+V86 - OS + Admin corrigido
+
+Base: my-next-app(9).zip enviado pelo usuário.
+
+Correções aplicadas:
+1. OS pública preserva a configuração da empresa enviada no link público.
+   - Isso corrige mensagem de aprovação indo para WhatsApp errado.
+2. Aprovação da OS salva no servidor com validação.
+   - Se falhar, mostra aviso em vez de fingir que salvou.
+3. Painel de OS agora sincroniza status quando a OS está em "Aguardando aprovação".
+   - Antes esse status era ignorado por conter a palavra "aprovação".
+4. Envio de OS pelo WhatsApp usa whatsapp/telefone do cliente com normalização.
+5. Modal admin já fica com botão X/Fechar e botão inferior Fechar.
+6. Menu lateral mantém apenas botão ativo colorido.
+
+Não mexido:
+- PDF
+- aprovação de orçamento
+- Supabase estrutural
+- trial/bloqueio SaaS
+- visual geral do painel
+
+Como aplicar:
+1. Extraia o conteúdo deste ZIP dentro de C:\orcamento-app\my-next-app
+2. Confirme substituição das pastas app, components, lib, docs etc.
+3. Rode:
+   rmdir /s /q .next
+   npm run build
+   vercel --prod

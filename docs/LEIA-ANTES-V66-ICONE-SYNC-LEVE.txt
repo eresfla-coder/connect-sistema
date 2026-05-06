@@ -1,0 +1,16 @@
+V66 - ÍCONE CORRETO + SYNC LEVE
+
+Base: V65_2 visual seguro.
+
+Alterações:
+- Ícone do atalho recriado 100% a partir da imagem premium enviada pelo cliente.
+- Manifest atualizado para v66.
+- Apple touch icon com arquivo novo para forçar atualização no iPhone.
+- Sync leve: carrega ao abrir e ao voltar o foco, sem realtime e sem loop pesado.
+- Proteção para não salvar antes do primeiro carregamento da nuvem.
+
+Depois de subir:
+1. remover atalho antigo do celular
+2. limpar dados do site se o ícone antigo persistir
+3. abrir painel.appconnectpro.com.br pelo Safari/Chrome
+4. adicionar novamente à tela inicial

@@ -1,0 +1,13 @@
+V87.2 — CORREÇÃO DA TELA 'ACESSO BLOQUEADO'
+
+O que foi corrigido:
+1. Em ambiente local (localhost, 127.0.0.1 ou 192.168.x.x), o painel não trava mais na tela de bloqueio. Isso permite testar o sistema sem ficar preso por trial antigo no banco.
+2. E-mails administradores definidos em lib/access.ts agora são liberados diretamente pela verificação de acesso.
+3. Incluído SQL supabase/desbloquear-usuario-v87-2.sql para liberar um usuário específico no banco em produção.
+
+Depois de colar:
+- rode: rmdir /s /q .next
+- rode: npm install
+- rode: npm run dev
+
+Se na Vercel ainda aparecer bloqueado, execute o SQL desbloquear-usuario-v87-2.sql trocando SEU_EMAIL_AQUI@EXEMPLO.COM pelo e-mail usado no login.

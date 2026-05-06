@@ -1,0 +1,17 @@
+CONNECT SISTEMA — V25 LINK CURTO DA OS NO WHATSAPP
+
+O que foi ajustado:
+- O link da Ordem de Serviço enviado pelo WhatsApp agora sai curto e clicável.
+- O sistema parou de mandar o payload/base64 gigante no WhatsApp.
+- A tela de impressão da OS continua aceitando links antigos com #d= para compatibilidade.
+- O link novo usa apenas: /impressao-ordem-servico/[id]?preview=1
+
+Arquivos principais alterados:
+- app/(painel)/ordens-servico/page.tsx
+- components/documentos/OrdemServicoDocumentoPage.tsx
+
+Importante:
+- Preserve seu .env.local ao colar o ZIP.
+- Rode npm run build antes de subir.
+- Em local, o link curto funciona no mesmo navegador/ambiente onde a OS está salva.
+- Em produção/Vercel, o ideal é manter as OS persistidas no banco/Supabase para o link curto funcionar em qualquer dispositivo.

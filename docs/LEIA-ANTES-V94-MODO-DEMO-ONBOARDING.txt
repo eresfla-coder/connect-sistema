@@ -1,0 +1,17 @@
+V94 - Modo demonstração + onboarding
+
+O que entrou:
+- Botão "Entrar como demonstração" no login.
+- Dados fictícios isolados no localStorage.
+- Página /boas-vindas com tutorial rápido.
+- Botão "Exportar dados" no menu lateral.
+- Modo demo sem Supabase e sem sincronização automática pesada.
+
+Como testar:
+1. rmdir /s /q .next
+2. npm install
+3. npm run dev
+4. Na tela de login, clique em Entrar como demonstração.
+
+Observação:
+O modo demo é para cliente testar sem mexer nos dados reais. Para sair, clique em Sair.

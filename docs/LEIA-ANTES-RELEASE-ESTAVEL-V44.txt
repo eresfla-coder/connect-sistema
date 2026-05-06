@@ -1,0 +1,33 @@
+CONNECT SISTEMA — V44 PRODUÇÃO REFINADA ESTÁVEL
+
+O QUE FOI AJUSTADO
+1. Links públicos de OS e orçamento ficaram mais estáveis.
+   - A página pública agora preserva token curto quando existir.
+   - Quando não houver token na URL, busca pelo ID no Supabase via /api/public-docs.
+   - Evita recriar links gigantes com base64 ao copiar/visualizar.
+
+2. API /api/public-docs reforçada.
+   - Não cria token novo toda vez para o mesmo documento.
+   - Reaproveita o token já existente para o mesmo tipo + documento_id.
+   - Retorna erro mais claro se faltar SUPABASE_SERVICE_ROLE_KEY.
+
+3. Supabase admin blindado para build/deploy.
+   - A chave service_role agora é validada quando a rota usa a API, evitando quebrar importação desnecessária.
+
+4. SQL V44 incluído.
+   - Arquivo: supabase/public-documents-release-estavel-v44.sql
+   - Execute no Supabase para limpar duplicados antigos e criar índice único por tipo + documento_id.
+
+COMO SUBIR
+1. Cole/substitua a pasta do projeto.
+2. Execute no Supabase SQL Editor:
+   supabase/public-documents-release-estavel-v44.sql
+3. Confirme na Vercel as variáveis:
+   NEXT_PUBLIC_SUPABASE_URL
+   NEXT_PUBLIC_SUPABASE_ANON_KEY
+   SUPABASE_SERVICE_ROLE_KEY
+4. Suba na Vercel.
+
+IMPORTANTE
+- Mantive o visual Connect e mexi de forma cirúrgica na camada de link público/API.
+- Os links antigos com ?d= e #d= continuam aceitos pelas telas públicas.

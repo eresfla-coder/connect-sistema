@@ -1,0 +1,1 @@
+V74 modo seguro anti-trava: CloudSync global desligado, PWA cleanup durável, sem RouteTransition, sem remount por key pathname. Aprovação OS/orçamento preservada via módulos/API.

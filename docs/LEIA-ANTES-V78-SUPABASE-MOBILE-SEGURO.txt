@@ -1,0 +1,13 @@
+V78 - Supabase/Mobile Seguro
+
+Base: rollback mobile seguro.
+Correções:
+- Reativado sync estrutural leve via /api/connect-storage para puxar orçamentos, OS, clientes, produtos e demais dados críticos em novos navegadores.
+- Sem realtime, sem intervalos agressivos e sem sync a cada troca de módulo.
+- Salvamento em nuvem via debounce após alterações no localStorage.
+- Chrome mobile: removido bloqueio de rolagem do body e overlay escuro do menu que prendia o navegador.
+- Orçamento público: botão Voltar alterado para Fechar e texto de aprovação profissional.
+- Eventos connect-cloud-hydrated atualizam Orçamentos e OS depois da leitura inicial.
+
+Observação:
+Esta versão preserva a lógica de aprovação da OS/orçamento já funcional e evita PWA/cache agressivo.

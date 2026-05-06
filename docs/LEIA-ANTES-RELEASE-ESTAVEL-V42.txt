@@ -1,0 +1,17 @@
+CONNECT SISTEMA — RELEASE ESTÁVEL DE PRODUÇÃO V42
+
+ANTES DE TESTAR LINKS PÚBLICOS CURTOS:
+1. Supabase > SQL Editor
+2. Execute o arquivo: supabase/public-documents-release-estavel-v42.sql
+3. Confirme que a Vercel tem SUPABASE_SERVICE_ROLE_KEY nas Environment Variables.
+4. Confirme NEXT_PUBLIC_SITE_URL=https://appconnectpro.com.br quando o domínio estiver validado.
+
+Correções principais:
+- Links públicos de orçamento e OS com token curto (?p=token).
+- Fallback para links antigos com ?d= e #d=.
+- Busca pública via API para abrir em outro celular/navegador.
+- Safe-area iPhone/Android em páginas públicas e modais.
+- Botões de aprovação fora da área da hora/notch.
+- Scroll/touch mobile corrigido.
+- WhatsApp usando wa.me e link curto/clicável.
+- Base v40 mantida com Connect AI.

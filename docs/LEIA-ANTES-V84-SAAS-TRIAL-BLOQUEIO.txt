@@ -1,0 +1,51 @@
+V84 - SaaS Base Trial/Bloqueio
+
+O QUE FOI ADICIONADO:
+- criação/garantia automática de empresa ao criar conta ou entrar no painel
+- vínculo perfis.empresa_id -> empresas.id
+- trial de 7 dias na empresa
+- verificação de acesso no painel
+- bloqueio se empresa.ativo = false ou se trial expirou com plano = 'trial'
+- tela /bloqueado
+- tela /pagamento
+
+NÃO FOI MEXIDO:
+- PDF
+- WhatsApp
+- aprovação de orçamento/OS
+- sync dos documentos
+- visual principal do painel
+
+SQL necessário já deve estar aplicado:
+
+alter table empresas
+add column if not exists trial_ate timestamp;
+
+alter table empresas
+add column if not exists ativo boolean default true;
+
+alter table empresas
+add column if not exists plano text default 'trial';
+
+alter table perfis
+add column if not exists empresa_id uuid references empresas(id);
+
+alter table perfis
+add column if not exists email text;
+
+alter table perfis
+add column if not exists nome text;
+
+alter table perfis
+add column if not exists created_at timestamp default now();
+
+COMO LIBERAR UM CLIENTE MANUALMENTE:
+- na tabela empresas, alterar:
+  ativo = true
+  plano = 'mensal'
+  trial_ate = uma data futura ou manter como está
+
+COMO BLOQUEAR:
+- ativo = false
+ou
+- plano = 'trial' e trial_ate vencido

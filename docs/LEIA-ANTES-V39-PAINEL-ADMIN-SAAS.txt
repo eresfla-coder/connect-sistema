@@ -1,0 +1,20 @@
+CONNECT SISTEMA - V39 - PAINEL ADMIN SAAS PREMIUM
+
+O QUE FOI IMPLEMENTADO:
+- Novo painel Admin SaaS Master em /admin.
+- KPIs de MRR potencial, recebido, risco, trial, sessões e clientes.
+- Radar SaaS com vencidos, vencendo em 7 dias, bloqueados e uso total.
+- Abas: Clientes e planos, Sessões ativas, Uso e crescimento.
+- Gestão de clientes, planos, status, trial, bloqueio, cobrança e reset por WhatsApp.
+- Leitura de sessões ativas quando a tabela sessoes_ativas estiver configurada.
+- Leitura de volume operacional: clientes, produtos, orçamentos, OS, financeiro e CRM.
+- Visual premium preservando o Connect.
+
+IMPORTANTE:
+- Preserve seu arquivo .env.local. Ele não deve ser substituído.
+- Se a tabela sessoes_ativas ainda não existir, execute o SQL do controle de sessão v36.
+- Rode npm run build antes de subir para a Vercel.
+
+COMANDOS:
+npm run build
+vercel --prod

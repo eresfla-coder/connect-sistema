@@ -1,0 +1,22 @@
+V87.4 - MODO SEGURO CONTRA TRAVAMENTO
+
+Correção aplicada:
+- Desligado o sincronizador global CloudSyncClient que fazia patch no localStorage.
+- Mantida a limpeza de PWA/service worker, mas agora com execução leve após idle/timeout.
+- Mantida a estrutura visual Connect e as rotas já corrigidas.
+- Mantidas APIs do Supabase e /api/connect-storage para uso direto.
+
+Como rodar:
+1) Substitua os arquivos pelo conteúdo deste ZIP.
+2) Pare o servidor local.
+3) Rode:
+   rmdir /s /q .next
+   npm install
+   npm run dev
+
+Se algum navegador ainda estiver pesado:
+- Abra DevTools > Application > Storage > Clear site data.
+- Ou acesse em aba anônima primeiro para confirmar.
+
+Motivo:
+O travamento vinha do sincronizador global de banco/localStorage tentando hidratar e reenviar dados automaticamente, causando peso e conflito em vários navegadores.

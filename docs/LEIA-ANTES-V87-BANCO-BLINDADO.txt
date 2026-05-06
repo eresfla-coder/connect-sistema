@@ -1,0 +1,38 @@
+V87 - BANCO BLINDADO COM SUPABASE
+
+Base usada:
+- V86_OS_ADMIN_CORRIGIDO_PRONTO_COLAR.zip enviado pelo usuário.
+
+Alterações aplicadas:
+1. CloudSyncClient reforçado.
+   - Puxa do Supabase ao abrir o sistema.
+   - Salva alterações no banco quando qualquer módulo grava localStorage.
+   - Sincroniza ao voltar para a aba e ao reconectar internet.
+
+2. Banco como fonte principal.
+   - Tabelas: connect_storage e public_documents.
+   - Sincroniza clientes, produtos, categorias, formas de pagamento, configurações, orçamentos, OS, vendas, recibos e financeiro.
+
+3. Links públicos preservados.
+   - OS e orçamento continuam com link curto.
+   - Aprovação pública continua salvando no servidor.
+
+4. Anti-travamento.
+   - public/sw.js removido.
+   - PWAClient só limpa service worker/cache antigo.
+   - APIs e impressão com cache no-store.
+
+Antes de subir:
+1. Execute no Supabase SQL Editor:
+   supabase/connect-banco-blindado-v87.sql
+
+2. Na Vercel, confirme:
+   NEXT_PUBLIC_SUPABASE_URL
+   NEXT_PUBLIC_SUPABASE_ANON_KEY
+   SUPABASE_SERVICE_ROLE_KEY
+   NEXT_PUBLIC_SITE_URL=https://painel.appconnectpro.com.br
+
+3. Rode local:
+   rmdir /s /q .next
+   npm install
+   npm run build

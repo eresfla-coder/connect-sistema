@@ -1,0 +1,11 @@
+CONNECT SISTEMA - CONFIGURAÇÕES V8
+
+Correção aplicada:
+- Removidos dados fixos da Loja Connect/ERES como padrão nas configurações.
+- Adicionado botão "Limpar dados" na aba Empresa.
+- Campos agora vêm livres para o cliente personalizar a própria empresa.
+- Inputs receberam placeholders e autoComplete para facilitar edição.
+
+Importante:
+- Preserve sempre o seu .env.local ao substituir os arquivos.
+- Depois de colar, pare o servidor com Ctrl+C e rode npm run dev novamente.

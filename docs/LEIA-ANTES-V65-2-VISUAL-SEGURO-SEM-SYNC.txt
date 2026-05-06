@@ -1,0 +1,21 @@
+V65.2 VISUAL SEGURO - SEM MEXER EM SYNC
+
+Base usada: V64 estável antes do sync que voltou a travar.
+
+Ajustes feitos:
+- PDF da OS com cabeçalho mais compacto e elegante, inspirado no orçamento premium.
+- Redução de espaços verticais no topo, blocos, financeiro e assinaturas.
+- Logo do sistema menor no menu lateral e no rodapé do menu.
+- Botão Sair com visual vermelho e estado "Saindo..." ao clicar.
+- Dashboard sem usar logo fixa do sistema no destaque principal.
+- Logo do cliente na dashboard com efeito power-clip/crop para preencher melhor o espaço.
+
+Importante:
+- Não foi alterado Supabase.
+- Não foi alterado sync.
+- Não foi alterado localStorage.
+- Não foi alterado service worker/PWA/cache.
+- Não foi alterada a lógica da OS, cálculos, status, fluxo de WhatsApp ou impressão.
+
+Objetivo:
+Refino visual cirúrgico sem reintroduzir travamentos.

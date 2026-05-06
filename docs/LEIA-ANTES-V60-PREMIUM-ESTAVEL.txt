@@ -1,0 +1,17 @@
+V60 Premium Estável
+
+Base usada: ZIP do novo domínio estável painel.appconnectpro.com.br.
+
+Ajustes aplicados:
+- Transição visual leve entre módulos.
+- Indicador premium de carregamento ao trocar de módulo.
+- Redução de re-render do relógio lateral: atualização a cada 60s em vez de 1s.
+- Correção robusta do card de Precificação Inteligente em Produtos/Serviços no mobile.
+- Sem reativar PWA agressivo.
+- Sem sync global automático pesado.
+- Sem SQL novo.
+
+Importante:
+- Continuar usando o subdomínio limpo painel.appconnectpro.com.br.
+- Não voltar o service worker/cache antigo sem versionamento.
+- Se o domínio antigo ainda travar, é cache/PWA antigo preso nele.

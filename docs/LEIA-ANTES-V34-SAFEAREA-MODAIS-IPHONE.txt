@@ -1,0 +1,9 @@
+CONNECT SISTEMA — V34
+Ajuste cirúrgico para iPhone/mobile:
+- Modal de produto/serviço respeita área segura do iPhone/Dynamic Island.
+- Botão Fechar fica abaixo da hora/status do celular e volta a ser clicável.
+- Rodapé Salvar/Cancelar preservado com safe-area-bottom.
+- Sem alteração nas regras de negócio.
+
+Depois de colar por cima, preserve seu .env.local e rode:
+npm run build

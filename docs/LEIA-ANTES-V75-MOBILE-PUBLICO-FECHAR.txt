@@ -1,0 +1,1 @@
+V75: correção segura para menu mobile no navegador interno, botão Fechar no link público e texto Aprovar orçamento. Não altera sync/Supabase/cache.

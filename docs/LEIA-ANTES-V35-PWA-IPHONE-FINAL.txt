@@ -1,0 +1,20 @@
+CONNECT SISTEMA — V35 PWA iPhone Final
+
+O que foi ajustado:
+- PWA com versão nova v35 para forçar atualização do app instalado.
+- Service Worker revisado: navegação sempre tenta rede primeiro e limpa caches antigos.
+- Banner de atualização: quando detectar versão nova, mostra “Nova atualização disponível”.
+- Orientação correta para iPhone: Safari > Compartilhar > Adicionar à Tela de Início.
+- Menu mobile reposicionado abaixo da área da hora/notch do iPhone.
+- Drawer/menu com z-index maior e área clicável corrigida.
+- Modal de Produto/Serviço com safe-area reforçada para não ficar atrás do topo do iPhone.
+
+Importante no iPhone:
+- O iPhone não permite abrir automaticamente a tela de “Adicionar à Tela de Início”. O usuário precisa tocar no botão Compartilhar do Safari.
+- Se o app antigo continuar aparecendo, abra o app, toque em “Atualizar” quando aparecer ou remova o atalho antigo e adicione novamente.
+
+Após colar:
+1. Preserve o arquivo .env.local.
+2. Rode: npm run build
+3. Suba: vercel --prod
+4. No iPhone, abra no Safari e adicione à Tela de Início.

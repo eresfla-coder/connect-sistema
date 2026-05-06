@@ -1,0 +1,10 @@
+V56 - Mobile/PWA estável
+
+Correções aplicadas:
+- Dashboard mobile mais estreito e sem card estourando para fora da tela.
+- Orçamentos recebeu botão Voltar para /dashboard.
+- Recibo avulso com ajuste de safe-area, campo data e botões no celular.
+- PWA/service worker atualizado para v56.
+- Sincronização Supabase no atalho instalado ficou menos agressiva: erro transitório não trava a tela e tenta novamente.
+
+SQL: se a V55 já foi executada com sucesso, não precisa novo SQL.

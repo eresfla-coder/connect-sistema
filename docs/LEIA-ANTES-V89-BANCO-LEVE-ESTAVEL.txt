@@ -1,0 +1,30 @@
+V89 BANCO LEVE ESTÁVEL - CONNECT SISTEMA
+
+Base usada: backup estável celular/PC enviado pelo usuário.
+
+O que foi feito:
+1. Mantido o visual Connect e a estrutura estável.
+2. Removido public/sw.js/service-worker para não voltar travamento de PWA/cache antigo.
+3. Banco ativado em modo leve, sem interceptar localStorage e sem sincronização global em loop.
+4. Adicionado botão flutuante discreto ☁ Banco leve:
+   - Puxar: traz dados salvos do Supabase para o navegador.
+   - Salvar: envia os dados atuais do navegador para o Supabase.
+5. Leitura inicial única do banco por sessão, sem ficar rodando a cada clique.
+
+Como testar local:
+1. Execute no Supabase: supabase/connect-banco-leve-v89.sql
+2. Garanta .env.local na raiz com:
+   NEXT_PUBLIC_SUPABASE_URL=...
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+   SUPABASE_SERVICE_ROLE_KEY=...
+3. Rode:
+   rmdir /s /q .next
+   npm install
+   npm run dev
+4. Faça login, cadastre/edite dados, clique no botão ☁ e em Salvar.
+5. Abra em outro navegador/PC/celular, faça login e clique em ☁ > Puxar.
+
+Importante:
+- Esta versão NÃO usa sync automático pesado.
+- O banco só salva quando clicar em Salvar no botão ☁ ou quando algum módulo futuramente chamar o evento connect-cloud-save-now.
+- Isso é proposital para não travar o celular nem navegador.

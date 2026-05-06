@@ -1,0 +1,18 @@
+CONNECT SISTEMA — V31 PWA LOGO + MENU MOBILE PREMIUM
+
+O que foi ajustado:
+- Ícone premium para instalação no celular (Android/iPhone).
+- Logo do menu mais limpa e com mais respiro.
+- Botão de menu afastado da logo no mobile para não ficar em cima.
+- Ajuste de metadata do Next.js 15 para reduzir avisos de themeColor.
+- Consulta do dashboard financeiro ficou mais tolerante para evitar erro 400 quando a tabela tiver variação de colunas.
+
+Como aplicar:
+1. Preserve seu arquivo .env.local.
+2. Cole/substitua os arquivos do ZIP por cima do projeto atual.
+3. Rode: npm run build
+4. Se passar, rode: vercel --prod
+
+Instalação no iPhone:
+Safari → Compartilhar → Adicionar à Tela de Início.
+No Android, o banner de instalação pode aparecer automaticamente ou via menu do Chrome.
