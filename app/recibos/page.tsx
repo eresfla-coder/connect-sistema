@@ -35,6 +35,18 @@ function somenteDigitos(valor?: string) {
   return String(valor || '').replace(/\D/g, '')
 }
 
+function normalizarTelefoneWhatsApp(valor?: string) {
+  const telefone = somenteDigitos(valor)
+  if (!telefone) return ''
+
+  const semPrefixoInternacional = telefone.replace(/^00/, '')
+  const telefoneNacional = semPrefixoInternacional.startsWith('55')
+    ? semPrefixoInternacional.slice(2)
+    : semPrefixoInternacional
+
+  return `55${telefoneNacional.replace(/^0+/, '')}`
+}
+
 function formatarDataBR(data?: string) {
   if (!data) return new Date().toLocaleDateString('pt-BR')
   const d = new Date(`${data}T00:00:00`)
@@ -85,10 +97,10 @@ export default function RecibosPage() {
   const formaPagamento = dados?.formaPagamento || 'Dinheiro'
 
   function enviarWhatsApp() {
-    const telefone = somenteDigitos(dados?.clienteTelefone)
+    const telefone = normalizarTelefoneWhatsApp(dados?.clienteTelefone)
     const mensagem = `Olá ${dados?.nomeCliente || ''}!\n\nSegue seu recibo:\nValor: ${moeda(valorNumerico)}\nReferente: ${dados?.referente || 'pagamento'}\n\nUse o botão "Visualizar / Baixar PDF".`
     const url = telefone
-      ? `https://wa.me/55${telefone}?text=${encodeURIComponent(mensagem)}`
+      ? `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`
       : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
     window.open(url, '_blank')
   }
