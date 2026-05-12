@@ -115,9 +115,7 @@ function extractPayload(row: PublicDocumentRow): PublicDocumentSnapshot | null {
   }
 
   return {
-    documentType: normalizeDocumentType(documentType) || (documentType as PublicDocumentType),
     document_type: normalizeDocumentType(documentType) || (documentType as PublicDocumentType),
-    documentId,
     document_id: documentId,
     document: row,
     createdAt: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
@@ -130,8 +128,14 @@ function payloadMatches(
   documentId: string
 ) {
   const payloadDocument = payload.document as { id?: string | number; numero?: string | number } | undefined
-  const payloadType = normalizeDocumentType(payload.document_type || payload.documentType)
-  const payloadId = payload.document_id || payload.documentId || payloadDocument?.id || payloadDocument?.numero
+  const legacyPayload = payload as PublicDocumentSnapshot & {
+    documentType?: unknown
+    documentId?: unknown
+    type?: unknown
+    tipo?: unknown
+  }
+  const payloadType = normalizeDocumentType(payload.document_type || legacyPayload.documentType)
+  const payloadId = payload.document_id || legacyPayload.documentId || payloadDocument?.id || payloadDocument?.numero
 
   return payloadType === documentType && String(payloadId) === documentId
 }
@@ -155,11 +159,19 @@ export async function POST(request: NextRequest) {
   }
 
   const payload = body.payload
+  const legacyPayload = payload as
+    | (PublicDocumentSnapshot & {
+        documentType?: unknown
+        documentId?: unknown
+        type?: unknown
+        tipo?: unknown
+      })
+    | undefined
   const documentType =
     normalizeDocumentType(body.document_type || body.documentType || body.type || body.tipo) ||
-    normalizeDocumentType(payload?.document_type || payload?.documentType) ||
-    normalizeDocumentType((payload as Record<string, unknown> | undefined)?.type) ||
-    normalizeDocumentType((payload as Record<string, unknown> | undefined)?.tipo) ||
+    normalizeDocumentType(payload?.document_type || legacyPayload?.documentType) ||
+    normalizeDocumentType(legacyPayload?.type) ||
+    normalizeDocumentType(legacyPayload?.tipo) ||
     (looksLikeServiceOrder(payload) ? 'ordem_servico' : null)
   const documentId = String(body.document_id || body.documentId || '')
 
@@ -178,9 +190,7 @@ export async function POST(request: NextRequest) {
   const token = body.token || generateToken()
   const snapshot: PublicDocumentSnapshot = {
     ...payload,
-    documentType,
     document_type: documentType,
-    documentId,
     document_id: documentId,
     createdAt: payload.createdAt || new Date().toISOString(),
   }

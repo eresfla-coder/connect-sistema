@@ -878,8 +878,8 @@ export default function OrcamentoPage() {
   async function publicarOrcamento(orc: OrcamentoSalvo) {
     try {
       const publicado = await savePublicDocument({
-        documentType: 'orcamento',
-        documentId: orc.id,
+        document_type: 'orcamento',
+        document_id: orc.id,
         document: orc,
         config,
       })

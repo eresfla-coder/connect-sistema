@@ -243,8 +243,8 @@ export default function OrdemServicoPage() {
   async function publicarOS(item: OrdemServico) {
     try {
       const publicado = await savePublicDocument({
-        documentType: 'ordem_servico',
-        documentId: item.id,
+        document_type: 'ordem_servico',
+        document_id: item.id,
         document: item,
         config: carregarConfigPublica(),
       })
