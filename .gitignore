@@ -37,3 +37,5 @@ Thumbs.db
 node_modules
 tsconfig.tsbuildinfo
 
+
+.env*.local

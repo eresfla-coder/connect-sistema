@@ -1,13 +1,21 @@
 'use client'
 
+import {
+  buscarConfiguracao,
+  salvarConfiguracao as salvarConfigApi,
+  ConfiguracaoEmpresa,
+  CONFIG_PADRAO as CONFIG_LIB_PADRAO,
+} from '@/lib/configuracaoEmpresa'
 import { ChangeEvent, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase-browser'
+import { Camera, Check, CheckCircle2, ChevronLeft, Lock, Palette, Type, X } from 'lucide-react'
 
 type AbaConfig = 'empresa' | 'visual' | 'pdf' | 'cadastros' | 'seguranca'
 
 type ConfiguracaoSistema = {
   nomeEmpresa: string
   telefone: string
+  celularEmpresa: string
   email: string
   endereco: string
   cidadeUf: string
@@ -31,6 +39,7 @@ const FORMAS_KEY = 'connect_formas_pagamento'
 const CONFIG_PADRAO: ConfiguracaoSistema = {
   nomeEmpresa: '',
   telefone: '',
+  celularEmpresa: '',
   email: '',
   endereco: '',
   cidadeUf: '',
@@ -179,6 +188,54 @@ export default function ConfiguracoesPage() {
     let ativo = true
 
     async function carregarConfiguracoes() {
+      // 1. Tentar Supabase primeiro (fonte de verdade)
+      try {
+        const cfgSupabase = await buscarConfiguracao()
+        if (!ativo) return
+
+        const mapeada: ConfiguracaoSistema = {
+          nomeEmpresa: cfgSupabase.nomeEmpresa || '',
+          telefone: cfgSupabase.telefone || '',
+          celularEmpresa: cfgSupabase.celularEmpresa || '',
+          email: cfgSupabase.email || '',
+          endereco: cfgSupabase.endereco || '',
+          cidadeUf: cfgSupabase.cidadeUf || '',
+          responsavel: cfgSupabase.responsavel || '',
+          logoUrl: cfgSupabase.logoUrl || '/logo-connect.png',
+          corPrimaria: cfgSupabase.corPrimaria || '#16a34a',
+          corSecundaria: cfgSupabase.corSecundaria || '#dcfce7',
+          corTabela: '#f3f4f6',
+          tituloPdf: cfgSupabase.tituloPdf || 'Orçamento Comercial',
+          rodapePdf: cfgSupabase.rodapePdf || 'Obrigado pela preferência.',
+          validadePadrao: cfgSupabase.validadePadrao || '7 dias',
+          prazoEntregaPadrao: cfgSupabase.prazoEntregaPadrao || '3 dias',
+          formaPagamentoPadrao: cfgSupabase.formaPagamentoPadrao || 'PIX',
+          mostrarQuantidade: cfgSupabase.mostrarQuantidade ?? true,
+        }
+        setConfig(mapeada)
+
+        // Sincronizar localStorage como cache
+        localStorage.setItem(CONFIG_KEY, JSON.stringify(mapeada))
+
+        // Carregar categorias e formas de pagamento do localStorage
+        const cats = localStorage.getItem(CATEGORIAS_KEY)
+        if (cats && ativo) {
+          const lista = JSON.parse(cats)
+          if (Array.isArray(lista)) setCategorias(normalizarLista(lista))
+        }
+
+        const formas = localStorage.getItem(FORMAS_KEY)
+        if (formas && ativo) {
+          const lista = JSON.parse(formas)
+          if (Array.isArray(lista)) setFormasPagamento(normalizarLista(lista))
+        }
+
+        return // Sucesso no Supabase — não precisa fallback
+      } catch (e) {
+        console.warn('[config] Erro ao carregar do Supabase:', e)
+      }
+
+      // 2. Fallback: localStorage + nuvem legada
       try {
         const raw = localStorage.getItem(CONFIG_KEY)
         if (raw && ativo) setConfig({ ...CONFIG_PADRAO, ...JSON.parse(raw) })
@@ -267,14 +324,14 @@ export default function ConfiguracoesPage() {
     const limpa = normalizarLista(lista)
     setCategorias(limpa)
     localStorage.setItem(CATEGORIAS_KEY, JSON.stringify(limpa))
-    window.dispatchEvent(new Event('storage'))
+    window.dispatchEvent(new Event('connect-data-change'))
   }
 
   function salvarListaFormas(lista: string[]) {
     const limpa = normalizarLista(lista)
     setFormasPagamento(limpa)
     localStorage.setItem(FORMAS_KEY, JSON.stringify(limpa))
-    window.dispatchEvent(new Event('storage'))
+    window.dispatchEvent(new Event('connect-data-change'))
   }
 
   function adicionarCategoria() {
@@ -315,13 +372,38 @@ export default function ConfiguracoesPage() {
     setMensagem('')
 
     try {
+      // 1. Salvar no Supabase (fonte de verdade)
+      const cfgParaApi: ConfiguracaoEmpresa = {
+        nomeEmpresa: config.nomeEmpresa,
+        telefone: config.telefone,
+        celularEmpresa: config.celularEmpresa,
+        whatsappEmpresa: '',
+        email: config.email,
+        endereco: config.endereco,
+        cidadeUf: config.cidadeUf,
+        responsavel: config.responsavel,
+        logoUrl: config.logoUrl,
+        corPrimaria: config.corPrimaria,
+        corSecundaria: config.corSecundaria,
+        tituloPdf: config.tituloPdf,
+        rodapePdf: config.rodapePdf,
+        validadePadrao: config.validadePadrao,
+        prazoEntregaPadrao: config.prazoEntregaPadrao,
+        formaPagamentoPadrao: config.formaPagamentoPadrao,
+        mostrarQuantidade: config.mostrarQuantidade,
+      }
+      await salvarConfigApi(cfgParaApi)
+
+      // 2. Salvar localStorage (cache temporário)
       localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
       localStorage.setItem(CATEGORIAS_KEY, JSON.stringify(categorias))
       localStorage.setItem(FORMAS_KEY, JSON.stringify(formasPagamento))
-      window.dispatchEvent(new Event('storage'))
+      window.dispatchEvent(new Event('connect-data-change'))
 
-      const salvouNuvem = await salvarConfigNaNuvem(config, categorias, formasPagamento)
-      setMensagem(salvouNuvem ? 'Configurações salvas e sincronizadas com sucesso.' : 'Configurações salvas neste navegador. Faça login novamente se não sincronizar em outro PC.')
+      // 3. Também salvar na nuvem legacy (compatibilidade)
+      await salvarConfigNaNuvem(config, categorias, formasPagamento)
+
+      setMensagem('Configurações salvas e sincronizadas com sucesso!')
     } catch {
       setMensagem('Não foi possível salvar as configurações.')
     }
@@ -514,7 +596,8 @@ export default function ConfiguracoesPage() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
                 <CampoTexto label="Nome da empresa" campo="nomeEmpresa" placeholder="Nome da empresa do cliente" autoComplete="organization" />
-                <CampoTexto label="Telefone" campo="telefone" placeholder="Telefone/WhatsApp" autoComplete="tel" />
+                <CampoTexto label="WhatsApp da empresa" campo="celularEmpresa" placeholder="Celular/WhatsApp para notificações" autoComplete="tel" />
+                <CampoTexto label="Telefone fixo" campo="telefone" placeholder="Telefone fixo (opcional)" autoComplete="tel" />
                 <CampoTexto label="E-mail" campo="email" placeholder="email@empresa.com" autoComplete="email" />
                 <CampoTexto label="Responsável" campo="responsavel" placeholder="Responsável" autoComplete="name" />
                 <CampoTexto label="Endereço" campo="endereco" placeholder="Endereço completo" autoComplete="street-address" />
@@ -629,9 +712,18 @@ export default function ConfiguracoesPage() {
           <section style={cardStyle}>
             <h2 style={{ margin: '0 0 14px', fontSize: 24 }}>Alterar senha</h2>
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: 14 }}>
-              <Campo label="Senha atual"><input type="password" style={inputStyle} value={senhaAtual} onChange={(e) => setSenhaAtual(e.target.value)} /></Campo>
-              <Campo label="Nova senha"><input type="password" style={inputStyle} value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} /></Campo>
-              <Campo label="Confirmar nova senha"><input type="password" style={inputStyle} value={confirmarSenha} onChange={(e) => setConfirmarSenha(e.target.value)} /></Campo>
+              <div>
+                <span style={labelStyle}>Senha atual</span>
+                <input type="password" style={inputStyle} value={senhaAtual} onChange={(e) => setSenhaAtual(e.target.value)} />
+              </div>
+              <div>
+                <span style={labelStyle}>Nova senha</span>
+                <input type="password" style={inputStyle} value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} />
+              </div>
+              <div>
+                <span style={labelStyle}>Confirmar nova senha</span>
+                <input type="password" style={inputStyle} value={confirmarSenha} onChange={(e) => setConfirmarSenha(e.target.value)} />
+              </div>
             </div>
             <button onClick={alterarSenha} disabled={salvandoSenha} style={{ ...buttonPrimary, marginTop: 16 }}>
               {salvandoSenha ? 'Alterando...' : 'Alterar senha'}

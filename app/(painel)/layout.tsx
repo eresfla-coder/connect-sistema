@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'
 import PainelShell from './components/painel/PainelShell'
-import { acessoBloqueado, avisoTrial, dataMaisDias, isAdminEmail, normalizarStatus } from '@/lib/access'
-import { isDemoMode, seedDemoData } from '@/lib/connect-demo'
+import { acessoBloqueado, avisoTrial, dataMaisDias, normalizarStatus } from '@/lib/access'
+import { installDemoGuard, isDemoMode, seedDemoData } from '@/lib/connect-demo'
 
 type PerfilPainel = {
   id: string
@@ -26,6 +26,10 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
     pathname?.startsWith('/impressao-orcamento') ||
     pathname?.startsWith('/impressao-ordem-servico') ||
     pathname?.startsWith('/recibo-avulso')
+
+  useEffect(() => {
+    installDemoGuard()
+  }, [])
 
   useEffect(() => {
     if (rotaPublicaImpressao) {
@@ -55,10 +59,8 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
       const user = session.user
       const emailNormalizado = String(user.email || '').trim().toLowerCase()
 
-      if (isAdminEmail(emailNormalizado)) {
-        router.replace('/admin')
-        return
-      }
+      // Administradores agora também podem navegar pelo painel normal.
+      // O acesso ao /admin continua protegido dentro da própria rota /admin.
 
       const { data: perfilExistente, error } = await supabase
         .from('perfis')

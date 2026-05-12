@@ -300,9 +300,22 @@ export default function ReciboAvulsoPage() {
     mensagem += `Referente a: ${dados?.referente || 'pagamento'}.\n`
     mensagem += `\n🔗 Acesse aqui:\n${link}`
 
-    const url = telefone
-      ? `https://api.whatsapp.com/send/?phone=${telefone}&text=${encodeURIComponent(mensagem)}&type=phone_number&app_absent=0`
-      : `https://api.whatsapp.com/send/?text=${encodeURIComponent(mensagem)}&app_absent=0`
+    const texto = encodeURIComponent(mensagem)
+
+    // Desktop: abre direto no WhatsApp Web, evitando erro de conexão no wa.me/api.whatsapp em alguns navegadores.
+    // Celular: usa o protocolo do app quando disponível.
+    const url = isMobile
+      ? telefone
+        ? `whatsapp://send?phone=${telefone}&text=${texto}`
+        : `whatsapp://send?text=${texto}`
+      : telefone
+        ? `https://web.whatsapp.com/send?phone=${telefone}&text=${texto}`
+        : `https://web.whatsapp.com/send?text=${texto}`
+
+    if (isMobile) {
+      window.location.href = url
+      return
+    }
 
     window.open(url, '_blank', 'noopener,noreferrer')
   }
@@ -359,8 +372,8 @@ export default function ReciboAvulsoPage() {
           .box { border: 1px solid #94a3b8; border-radius: 14px; padding: 10px; margin-bottom: 8px; }
           .box-titulo { font-weight: 900; margin-bottom: 5px; color: #6b7280; }
 
-          .assinatura { margin-top: 0; text-align: center; }
-          .assinatura .linha { width: 230px; max-width: 100%; margin: 0 auto; border-top: 2px solid #111827; padding-top: 3px; }
+          .assinatura { margin-top: 34px; text-align: center; }
+          .assinatura .linha { width: 230px; max-width: 100%; margin: 0 auto; border-top: 2px solid #111827; padding-top: 8px; }
           .assinatura .nome { font-size: 14px; font-weight: 900; color: #0f172a; text-transform: uppercase; }
           .assinatura .sub { margin-top: 1px; font-size: 10px; color: #64748b; font-weight: 700; letter-spacing: .3px; }
 
@@ -643,8 +656,8 @@ export default function ReciboAvulsoPage() {
             <Card emoji={emojiPagamento(formaPagamento)} titulo="Recebido em" valor={formaPagamento} />
           </div>
 
-          <div style={{ marginTop: 0, textAlign: 'center' }}>
-            <div style={{ width: 230, maxWidth: '100%', margin: '0 auto', borderTop: '2px solid #111827', paddingTop: 3 }}>
+          <div style={{ marginTop: 46, textAlign: 'center' }}>
+            <div style={{ width: 230, maxWidth: '100%', margin: '0 auto', borderTop: '2px solid #111827', paddingTop: 8 }}>
               <div style={{ fontSize: 14, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase' }}>{cfg.responsavel || 'ERES FAUSTINO'}</div>
               <div style={{ marginTop: 1, fontSize: 10, color: '#64748b', fontWeight: 700, letterSpacing: '.3px' }}>EMITENTE / ASSINATURA AUTOMÁTICA</div>
             </div>

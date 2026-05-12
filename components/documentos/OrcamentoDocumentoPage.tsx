@@ -24,6 +24,7 @@ type ItemOrcamento = {
   quantidade?: number
   valor?: number
   total?: number
+  mostrarCliente?: boolean
   tipoCadastro?: 'produto' | 'servico'
   tipoCalculo?: 'unidade' | 'm2' | 'peso'
   largura?: number
@@ -62,7 +63,13 @@ type Orcamento = {
 
 type Config = {
   nomeEmpresa?: string
+  nome?: string
   telefone?: string
+  telefoneEmpresa?: string
+  celularEmpresa?: string
+  celular?: string
+  whatsappEmpresa?: string
+  whatsapp?: string
   email?: string
   endereco?: string
   cidadeUf?: string
@@ -70,6 +77,7 @@ type Config = {
   tituloPdf?: string
   rodapePdf?: string
   logoUrl?: string
+  logo?: string
   corPrimaria?: string
   corSecundaria?: string
 }
@@ -220,7 +228,14 @@ function decodePayload(value: string | null) {
       config: compact.em
         ? {
             nomeEmpresa: compact.em.n || compact.em.nomeEmpresa,
-            telefone: compact.em.t || compact.em.telefone,
+            telefone:
+              compact.em.t ||
+              compact.em.celularEmpresa ||
+              compact.em.celular ||
+              compact.em.whatsappEmpresa ||
+              compact.em.whatsapp ||
+              compact.em.telefoneEmpresa ||
+              compact.em.telefone,
             email: compact.em.e || compact.em.email,
             endereco: compact.em.en || compact.em.endereco,
             cidadeUf: compact.em.c || compact.em.cidadeUf,
@@ -257,7 +272,7 @@ function toBase64UrlOrcamento(value: string) {
 
 function serializarOrcamentoPublico(dados: Orcamento, config: Config) {
   const itens = Array.isArray(dados?.itens)
-    ? dados.itens.map((item: any) => ({
+    ? dados.itens.filter((item: any) => item?.mostrarCliente !== false).map((item: any) => ({
         n: item?.nome || item?.descricao || '',
         q: Number(item?.quantidade || 0),
         v: Number(item?.valor || 0),
@@ -294,7 +309,15 @@ function serializarOrcamentoPublico(dados: Orcamento, config: Config) {
     ob: String(dados?.observacao || ''),
     em: {
       n: String(config?.nomeEmpresa || 'LOJA CONNECT'),
-      t: String(config?.telefone || ''),
+      t: String(
+        config?.celularEmpresa ||
+        config?.celular ||
+        config?.whatsappEmpresa ||
+        config?.whatsapp ||
+        config?.telefoneEmpresa ||
+        config?.telefone ||
+        ''
+      ),
       e: String(config?.email || ''),
       en: String(config?.endereco || ''),
       c: String(config?.cidadeUf || ''),
@@ -308,10 +331,10 @@ function serializarOrcamentoPublico(dados: Orcamento, config: Config) {
 function getConfig(): Config {
   const fallback: Config = {
     nomeEmpresa: 'LOJA CONNECT',
-    telefone: '84992181399',
-    email: 'lojaconnect@hotmail.com',
-    endereco: 'GILBERTO ROBERTO GOMES, 243',
-    cidadeUf: 'PARNAMIRIM-RN',
+    telefone: '',
+    email: '',
+    endereco: '',
+    cidadeUf: '',
     rodapePdf: 'Obrigado pela preferência.',
     logoUrl: '/logo-connect.png',
     corPrimaria: '#068b43',
@@ -373,6 +396,7 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         const payload = decodePayload(search.get('d'))
         const tokenPublico = search.get('p') || search.get('token')
         let docPublico: any = null
+        let documentoIdPublico = id
 
         if (!payload && tokenPublico) {
           try {
@@ -380,6 +404,7 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
             if (resp.ok) {
               const dados = await resp.json()
               docPublico = dados?.payload || null
+              documentoIdPublico = String(dados?.documento_id || docPublico?.id || id)
               if (docPublico && typeof window !== 'undefined') {
                 try { localStorage.setItem(`${STORAGE_KEY}_public_${docPublico.id || id}`, JSON.stringify(docPublico)) } catch {}
               }
@@ -407,11 +432,40 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         const lista = saved ? JSON.parse(saved) : []
         const fallbackPublico = typeof window !== 'undefined' ? localStorage.getItem(`${STORAGE_KEY}_public_${id}`) : null
         const encontrado = payload || docPublico || findOrcamento(Array.isArray(lista) ? lista : [], id) || (fallbackPublico ? JSON.parse(fallbackPublico) : null)
+        if (!payload && encontrado && documentoIdPublico) {
+          ;(encontrado as any).id = Number(documentoIdPublico) || (encontrado as any).id
+        }
         setOrc(encontrado || null)
 
         const cfgLocal = getConfig()
         const cfgPayload = (encontrado as any)?.config || {}
-        setConfig({ ...cfgLocal, ...cfgPayload })
+        // Resolver telefone de todos os campos possíveis
+        const resolverTelefone = (cfg: any) => {
+          return String(
+            cfg?.celularEmpresa || cfg?.celular || cfg?.whatsappEmpresa ||
+            cfg?.whatsapp || cfg?.telefoneEmpresa || cfg?.telefone || ''
+          )
+        }
+        const telefoneResolvido = resolverTelefone(cfgPayload) || resolverTelefone(cfgLocal)
+        setConfig({ ...cfgLocal, ...cfgPayload, telefone: telefoneResolvido })
+
+        // Se o dono da empresa está abrindo (tem config no localStorage), republicar com cfg atualizado
+        if (encontrado && telefoneResolvido && typeof window !== 'undefined') {
+          const tokenAtual = search.get('p') || search.get('token')
+          const cfgAtualizado = { ...cfgLocal, ...cfgPayload, telefone: telefoneResolvido }
+          try {
+            fetch('/api/public-docs', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                tipo: 'orcamento',
+                documentoId: String(documentoIdPublico || encontrado.id || id),
+                token: tokenAtual || undefined,
+                payload: { ...encontrado, config: cfgAtualizado },
+              }),
+            }).catch(() => {})
+          } catch {}
+        }
 
         const qs = new URLSearchParams(window.location.search)
         setIsPreview(forcePreview || qs.get('print') !== '1')
@@ -432,12 +486,22 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
     return () => window.clearTimeout(timer)
   }, [orc, isPreview])
 
-  const itens = Array.isArray(orc?.itens) ? orc!.itens! : []
-  const subtotalCalculado = useMemo(() => itens.reduce((acc, item) => acc + totalItem(item), 0), [itens])
-  const subtotal = Number(orc?.subtotal || subtotalCalculado || 0)
+  // Itens visíveis no PDF/link do cliente.
+  // Itens internos (mostrarCliente === false) continuam existindo no painel,
+  // mas não entram na lista nem no total apresentado ao cliente.
+  const itens = Array.isArray(orc?.itens)
+    ? orc!.itens!.filter((item) => item.mostrarCliente !== false)
+    : []
+
+  const subtotalCalculado = useMemo(
+    () => itens.reduce((acc, item) => acc + totalItem(item), 0),
+    [itens]
+  )
+
+  const subtotal = subtotalCalculado
   const frete = Number(orc?.entrega || 0)
   const desconto = Number(orc?.desconto || 0)
-  const total = Number(orc?.total || subtotal + frete - desconto)
+  const total = Math.max(subtotal + frete - desconto, 0)
 
   const linkCompartilhamento = useMemo(() => {
     if (!orc || typeof window === 'undefined') return ''
@@ -521,7 +585,7 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tipo: 'orcamento',
-          documentoId: String(dados.id),
+          documentoId: String((dados as any).id),
           token: tokenAtual || undefined,
           payload: { ...dados, config },
         }),
@@ -552,7 +616,6 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         ? baseLista.map((item: any) => String(item?.id) === String(orc.id) ? { ...item, ...atualizado } : item)
         : [atualizado, ...baseLista]
       localStorage.setItem(STORAGE_KEY, JSON.stringify(novaLista))
-      window.dispatchEvent(new Event('storage'))
       window.dispatchEvent(new Event('connect-data-change'))
     } catch {}
     setOrc(atualizado)
@@ -599,14 +662,26 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         origem: 'aprovação digital',
       }
       localStorage.setItem(OS_KEY, JSON.stringify([novaOS, ...baseOrdens]))
-      window.dispatchEvent(new Event('storage'))
+      window.dispatchEvent(new Event('connect-data-change'))
     } catch {}
   }
 
   function avisarEmpresaWhatsapp(tipo: 'aprovado' | 'recusado') {
-    const numeroEmpresa = String(config.telefone || '').replace(/\D/g, '')
-    if (!numeroEmpresa) return
-    const numeroFinal = numeroEmpresa.startsWith('55') ? numeroEmpresa : '55' + numeroEmpresa
+    let numeroEmpresa = String(
+      (config as any).celularEmpresa ||
+      (config as any).celular ||
+      (config as any).whatsappEmpresa ||
+      (config as any).whatsapp ||
+      (config as any).telefoneEmpresa ||
+      config.telefone ||
+      ''
+    ).replace(/\D/g, '')
+    while (numeroEmpresa.startsWith('00')) numeroEmpresa = numeroEmpresa.slice(2)
+    if (numeroEmpresa.startsWith('55')) numeroEmpresa = numeroEmpresa.slice(2)
+    numeroEmpresa = numeroEmpresa.replace(/^0+/, '')
+    if (numeroEmpresa.length > 11) numeroEmpresa = numeroEmpresa.slice(-11)
+    if (numeroEmpresa.length < 10) return
+    const numeroFinal = '55' + numeroEmpresa
     const textoMensagem = tipo === 'aprovado'
       ? '✅ Orçamento aprovado digitalmente!\n\nCliente: ' + cliente + '\nDocumento: ' + numeroDoc + '\nTotal: ' + moeda(total) + '\nAssinatura: ' + (assinaturaNome.trim() || cliente)
       : '⚠️ Orçamento recusado pelo cliente.\n\nCliente: ' + cliente + '\nDocumento: ' + numeroDoc + '\nTotal: ' + moeda(total)
@@ -638,7 +713,10 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
   if (!orc) return <div className="orc-loading">Orçamento não encontrado.</div>
 
   const empresa = texto(config.nomeEmpresa, 'LOJA CONNECT')
-  const telefone = texto(config.telefone, '84992181399')
+  const telefone = texto(
+    config.celularEmpresa || config.celular || config.whatsappEmpresa || config.whatsapp || config.telefoneEmpresa || config.telefone,
+    ''
+  )
   const email = texto(config.email, 'lojaconnect@hotmail.com')
   const endereco = texto(config.endereco, 'GILBERTO ROBERTO GOMES, 243')
   const cidade = texto(config.cidadeUf, 'PARNAMIRIM-RN')
@@ -906,8 +984,8 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         .orc-generated strong { color: var(--pdf-primary); }
         @media (max-width: 760px) {
           .orc-page { padding: calc(env(safe-area-inset-top, 0px) + 74px) 8px calc(env(safe-area-inset-bottom, 0px) + 18px) 8px; touch-action: pan-y; }
-          .orc-actions { position: fixed; left: 8px; right: 8px; top: calc(env(safe-area-inset-top, 0px) + 8px); margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-          .orc-actions button { width: 100%; padding: 0 10px; min-height: 44px; }
+          .orc-actions { position: fixed; left: 8px; right: 8px; top: calc(env(safe-area-inset-top, 0px) + 8px); margin: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; z-index: 100; }
+          .orc-actions button { width: 100%; padding: 0 10px; min-height: 44px; touch-action: manipulation; }
           .orc-sheet { margin-top: 0; }
           .orc-approval-status { flex-direction: column; align-items: flex-start; }
           .approval-card { padding: calc(env(safe-area-inset-top, 0px) + 18px) 18px 18px; border-radius: 18px; max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px); }

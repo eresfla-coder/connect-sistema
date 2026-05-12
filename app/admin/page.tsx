@@ -144,7 +144,7 @@ function normalizePhone(value?: string | null) {
 
 function whatsappDestino(value?: string | null) {
   const tel = normalizePhone(value)
-  if (!tel) return '5584992181399'
+  if (!tel) return ''
   if (tel.startsWith('55')) return tel
   return `55${tel}`
 }
@@ -272,16 +272,21 @@ export default function AdminSaasMasterPage() {
       return
     }
 
-    const { data, error } = await supabase
-      .from('perfis')
-      .select('*')
-      .order('data_criacao', { ascending: false })
+    const { data: { session } } = await supabase.auth.getSession()
 
-    if (error) {
-      console.error('ADMIN_PERFIS_ERROR', error)
+    const response = await fetch('/api/admin/clientes', {
+      headers: {
+        Authorization: `Bearer ${session?.access_token || ''}`,
+      },
+    })
+
+    const payload = await response.json()
+
+    if (!response.ok) {
+      console.error('ADMIN_PERFIS_ERROR', payload?.error)
       setClientes([])
     } else {
-      setClientes((data as PerfilAdmin[]) || [])
+      setClientes((payload?.clientes as PerfilAdmin[]) || [])
     }
 
     try {
@@ -309,35 +314,52 @@ export default function AdminSaasMasterPage() {
   }
 
   async function refreshClientes() {
-    const { data, error } = await supabase
-      .from('perfis')
-      .select('*')
-      .order('data_criacao', { ascending: false })
-    if (!error) setClientes((data as PerfilAdmin[]) || [])
+    const { data: { session } } = await supabase.auth.getSession()
+
+    const response = await fetch('/api/admin/clientes', {
+      headers: {
+        Authorization: `Bearer ${session?.access_token || ''}`,
+      },
+    })
+
+    const payload = await response.json()
+
+    if (response.ok) {
+      setClientes((payload?.clientes as PerfilAdmin[]) || [])
+    }
   }
 
   async function atualizarCliente(id: string, updates: Partial<PerfilAdmin>) {
     try {
       setAcaoProcessandoId(id)
-      const { error } = await supabase.from('perfis').update(updates).eq('id', id)
-      if (error) {
-        const msg = String(error.message || '').toLowerCase()
-        const optionalColumns = ['sistema_cliente', 'observacoes']
-        const hasOptional = optionalColumns.some((key) => Object.prototype.hasOwnProperty.call(updates, key))
-        if (hasOptional && (msg.includes('column') || msg.includes('schema cache') || msg.includes('could not find'))) {
-          const safeUpdates = { ...updates }
-          delete safeUpdates.sistema_cliente
-          delete safeUpdates.observacoes
-          const retry = await supabase.from('perfis').update(safeUpdates).eq('id', id)
-          if (retry.error) throw retry.error
-        } else {
-          throw error
-        }
+
+      const { data: { session } } = await supabase.auth.getSession()
+      const accessToken = session?.access_token
+      if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
+
+      const response = await fetch('/api/admin/clientes', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          id,
+          updates,
+          admin_email: session?.user?.email || '',
+        }),
+      })
+
+      const payload = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Não foi possível concluir a ação.')
       }
+
       await refreshClientes()
-    } catch (error) {
+    } catch (error: any) {
       console.error(error)
-      alert('Não foi possível concluir a ação.')
+      alert(error?.message || 'Não foi possível concluir a ação.')
     } finally {
       setAcaoProcessandoId(null)
     }
@@ -373,6 +395,50 @@ export default function AdminSaasMasterPage() {
       ativo: false,
       status_pagamento: 'bloqueado',
     })
+  }
+
+  async function excluirCliente(cliente: PerfilAdmin) {
+    const nome = cliente.nome_empresa || cliente.email || 'este cliente'
+    const confirmar = confirm(`Excluir definitivamente ${nome}?\n\nEssa ação remove o cliente do painel admin e também tenta remover o acesso de login.`)
+
+    if (!confirmar) return
+
+    try {
+      setAcaoProcessandoId(cliente.id)
+      setAcaoId(null)
+
+      const { data: { session } } = await supabase.auth.getSession()
+      const accessToken = session?.access_token
+
+      if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
+
+      const response = await fetch(`/api/admin/clientes?id=${encodeURIComponent(cliente.id)}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      })
+
+      const payload = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Não foi possível excluir o cliente.')
+      }
+
+      const meta = readMeta()
+      delete meta[cliente.id]
+      writeMeta(meta)
+      setMetaLocal(meta)
+
+      setClientes((lista) => lista.filter((item) => item.id !== cliente.id))
+      await refreshClientes()
+      alert('Cliente excluído com sucesso.')
+    } catch (error: any) {
+      console.error(error)
+      alert(error?.message || 'Não foi possível excluir o cliente.')
+    } finally {
+      setAcaoProcessandoId(null)
+    }
   }
 
   function cobrarWhatsapp(cliente: PerfilAdmin) {
@@ -565,6 +631,7 @@ export default function AdminSaasMasterPage() {
       setInviteText('')
       setInvitePhone(novoCliente.telefone)
 
+      const telefoneDigitado = novoCliente.telefone
       const { data: { session } } = await supabase.auth.getSession()
       const accessToken = session?.access_token
       if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
@@ -595,13 +662,25 @@ export default function AdminSaasMasterPage() {
         setMetaLocal(meta)
       }
 
-      setInviteLink(payload.accessLink || '')
-      setInviteText(payload.inviteText || '')
-      setInvitePhone(novoCliente.telefone)
+      const linkFinal = String(payload?.accessLink || LOGIN_URL)
+      const textoFinal = String(payload?.inviteText || [
+        `Olá, ${novoCliente.nome_empresa || novoCliente.email}!`,
+        '',
+        `Seu acesso ao ${novoCliente.sistema_cliente || 'Connect Pro'} foi criado com sucesso.`,
+        '',
+        `Login: ${novoCliente.email.trim().toLowerCase()}`,
+        payload?.temporaryPassword ? `Senha provisória: ${payload.temporaryPassword}` : '',
+        '',
+        `Acesse: ${linkFinal}`,
+      ].filter(Boolean).join('\n'))
 
-      if (payload.accessLink) {
-        try { await navigator.clipboard.writeText(payload.accessLink) } catch {}
-      }
+      setInviteLink(linkFinal)
+      setInviteText(textoFinal)
+      setInvitePhone(telefoneDigitado)
+
+      try { await navigator.clipboard.writeText(textoFinal) } catch {}
+
+      await carregarTudo()
 
       setNovoCliente({
         email: '',
@@ -614,9 +693,13 @@ export default function AdminSaasMasterPage() {
         criar_acesso: true,
       })
 
-      await carregarTudo()
-      setModalOpen(false)
-      alert('Cliente criado com sucesso. O acesso foi gerado e o cadastro voltou para a lista.')
+      setModalOpen(true)
+
+      if (payload?.whatsappUrl) {
+        window.open(String(payload.whatsappUrl), '_blank')
+      }
+
+      alert('Cliente criado com sucesso. A senha e a mensagem ficaram no cadastro para copiar/enviar.')
     } catch (error: any) {
       console.error(error)
       alert(error?.message || 'Não foi possível criar o cliente.')
@@ -855,6 +938,7 @@ export default function AdminSaasMasterPage() {
                             <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => marcarPago(cliente.id)}>Marcar pago</button>
                             <button style={styles.menuItem} onClick={() => mensagemUpgrade(cliente)}>Oferta upgrade</button>
                             <button style={styles.menuDanger} disabled={loadingAction || isPermanent(cliente)} onClick={() => { if (confirm('Bloquear este cliente?')) void bloquear(cliente.id) }}>Bloquear</button>
+                            <button style={styles.menuDelete} disabled={loadingAction} onClick={() => void excluirCliente(cliente)}>Excluir cliente</button>
                           </div>
                         ) : null}
                       </div>
@@ -1131,7 +1215,7 @@ const styles: Record<string, CSSProperties> = {
   riskTitle: { fontWeight: 950, marginBottom: 10, color: '#fef3c7' },
   riskList: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 },
   riskItem: { minHeight: 54, borderRadius: 15, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(15,23,42,0.36)', color: '#fff', display: 'grid', textAlign: 'left', padding: '8px 10px', cursor: 'pointer' },
-  clientList: { display: 'grid', gap: 11, overflowX: 'auto', paddingBottom: 4 },
+  clientList: { display: 'grid', gap: 11, overflow: 'visible', paddingBottom: 4 },
   clientRow: { minWidth: 1250, display: 'grid', gridTemplateColumns: 'minmax(240px,1.4fr) 105px 105px 105px 120px 130px 105px 110px 195px', gap: 9, alignItems: 'center', borderRadius: 20, padding: 13, background: 'linear-gradient(135deg, rgba(248,250,252,0.075), rgba(15,23,42,0.42))', border: '1px solid rgba(255,255,255,0.13)', boxShadow: '0 12px 28px rgba(15,23,42,0.16), inset 0 1px 0 rgba(255,255,255,0.04)' },
   clientIdentity: { minWidth: 0 },
   clientName: { fontSize: 18, fontWeight: 950, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#ffffff' },
@@ -1146,11 +1230,12 @@ const styles: Record<string, CSSProperties> = {
   primarySmall: { height: 38, borderRadius: 999, border: 'none', padding: '0 14px', color: '#fff', background: 'linear-gradient(135deg,#25d366,#16a34a)', fontWeight: 950, cursor: 'pointer', boxShadow: '0 10px 22px rgba(34,197,94,0.22)' },
   menuWrap: { position: 'relative' },
   actionSummary: { height: 38, borderRadius: 999, padding: '0 15px', background: 'rgba(59,130,246,0.18)', border: '1px solid rgba(147,197,253,0.28)', color: '#dbeafe', fontWeight: 950, cursor: 'pointer' },
-  actionMenu: { position: 'absolute', right: 0, top: 44, zIndex: 20, width: 225, borderRadius: 18, padding: 9, background: 'linear-gradient(135deg, rgba(38,50,68,0.98), rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.16)', boxShadow: '0 22px 58px rgba(15,23,42,0.52)', display: 'grid', gap: 6 },
+  actionMenu: { position: 'absolute', right: 0, top: 44, zIndex: 9999, width: 245, borderRadius: 18, padding: 9, background: 'linear-gradient(135deg, rgba(38,50,68,0.98), rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.16)', boxShadow: '0 22px 58px rgba(15,23,42,0.52)', display: 'grid', gap: 6 },
   menuHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 4px 6px 8px', color: '#bfdbfe', fontSize: 11, fontWeight: 950, textTransform: 'uppercase', letterSpacing: 1 },
   menuClose: { width: 27, height: 27, borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.09)', color: '#fff', fontWeight: 900, cursor: 'pointer' },
   menuItem: { minHeight: 37, borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontWeight: 850, textAlign: 'left', padding: '0 11px', cursor: 'pointer' },
   menuDanger: { minHeight: 37, borderRadius: 12, border: '1px solid rgba(248,113,113,0.16)', background: 'rgba(239,68,68,0.20)', color: '#fecaca', fontWeight: 900, textAlign: 'left', padding: '0 11px', cursor: 'pointer' },
+  menuDelete: { minHeight: 37, borderRadius: 12, border: '1px solid rgba(248,113,113,0.34)', background: 'linear-gradient(135deg,rgba(127,29,29,0.78),rgba(239,68,68,0.28))', color: '#fff', fontWeight: 950, textAlign: 'left', padding: '0 11px', cursor: 'pointer' },
   empty: { padding: 24, borderRadius: 20, textAlign: 'center', color: '#cbd5e1', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.13)' },
   sessionGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12 },
   sessionCard: { display: 'grid', gap: 7, borderRadius: 20, padding: 16, background: 'rgba(15,23,42,0.36)', border: '1px solid rgba(255,255,255,0.13)' },

@@ -240,7 +240,7 @@ function telefoneClienteOS(item: any) {
 
 function montarWhatsappOS(item: OrdemServico) {
   const telefone = telefoneClienteOS(item)
-  const link = montarLinkOSWhatsAppGlobal(item)
+  const link = `${baseUrlAtual()}/impressao-ordem-servico/${Number(item.id)}?preview=1`
 
   let mensagem = `Olá ${item.cliente || 'cliente'}!\n\n`
   mensagem += `Segue sua ordem de serviço *${item.numero}*.\n`
@@ -260,67 +260,6 @@ function montarWhatsappOS(item: OrdemServico) {
   const texto = encodeURIComponent(mensagem)
 
   return telefone ? `https://wa.me/${telefone}?text=${texto}` : `https://wa.me/?text=${texto}`
-}
-
-function montarLinkOSWhatsAppGlobal(item: OrdemServico) {
-  const id = Number(item.id)
-  const baseUrl = baseUrlAtual()
-  const base = `${baseUrl}/impressao-ordem-servico/${id}?preview=1`
-
-  try {
-    if (typeof window !== 'undefined' && id) {
-      localStorage.setItem(`${PUBLIC_OS_PREFIX}${id}`, JSON.stringify(item))
-    }
-  } catch {}
-
-  return base
-}
-
-function configPublicaOSGlobal() {
-  if (typeof window === 'undefined') {
-    return {
-      nomeEmpresa: 'LOJA CONNECT',
-      telefone: '',
-      email: 'lojaconnect@hotmail.com',
-      endereco: '',
-      cidadeUf: '',
-    }
-  }
-
-  try {
-    const raw = localStorage.getItem('connect_configuracoes')
-    const cfg = raw ? JSON.parse(raw) : {}
-
-    return {
-      nomeEmpresa: cfg?.nomeEmpresa || 'LOJA CONNECT',
-      telefone: cfg?.telefone || '',
-      email: cfg?.email || 'lojaconnect@hotmail.com',
-      endereco: cfg?.endereco || '',
-      cidadeUf: cfg?.cidadeUf || '',
-    }
-  } catch {
-    return {
-      nomeEmpresa: 'LOJA CONNECT',
-      telefone: '',
-      email: 'lojaconnect@hotmail.com',
-      endereco: '',
-      cidadeUf: '',
-    }
-  }
-}
-
-function montarLinkOSGlobal(item: OrdemServico) {
-  const id = Number(item.id)
-  const baseUrl = baseUrlAtual()
-  const base = `${baseUrl}/impressao-ordem-servico/${id}?preview=1`
-
-  try {
-    if (typeof window !== 'undefined' && id) {
-      localStorage.setItem(`${PUBLIC_OS_PREFIX}${id}`, JSON.stringify(item))
-    }
-  } catch {}
-
-  return base
 }
 
 export default function OrdemServicoPage() {
@@ -409,7 +348,10 @@ export default function OrdemServicoPage() {
 
       return {
         nomeEmpresa: cfg?.nomeEmpresa || config.nomeEmpresa || 'LOJA CONNECT',
-        telefone: cfg?.telefone || '',
+        telefone: cfg?.celularEmpresa || cfg?.celular || cfg?.whatsappEmpresa || cfg?.whatsapp || cfg?.telefoneEmpresa || cfg?.telefone || '',
+        whatsapp: cfg?.whatsappEmpresa || cfg?.whatsapp || cfg?.celularEmpresa || cfg?.celular || cfg?.telefoneEmpresa || cfg?.telefone || '',
+        celularEmpresa: cfg?.celularEmpresa || cfg?.celular || cfg?.whatsappEmpresa || cfg?.whatsapp || cfg?.telefoneEmpresa || cfg?.telefone || '',
+        telefoneEmpresa: cfg?.telefoneEmpresa || cfg?.telefone || cfg?.celularEmpresa || cfg?.celular || cfg?.whatsappEmpresa || cfg?.whatsapp || '',
         email: cfg?.email || 'lojaconnect@hotmail.com',
         endereco: cfg?.endereco || '',
         cidadeUf: cfg?.cidadeUf || '',
@@ -419,6 +361,9 @@ export default function OrdemServicoPage() {
       return {
         nomeEmpresa: config.nomeEmpresa || 'LOJA CONNECT',
         telefone: '',
+        whatsapp: '',
+        celularEmpresa: '',
+        telefoneEmpresa: '',
         email: 'lojaconnect@hotmail.com',
         endereco: '',
         cidadeUf: '',
@@ -468,12 +413,7 @@ export default function OrdemServicoPage() {
 
   function montarLinkOS(item: OrdemServico) {
     const id = Number(item.id)
-
-    try {
-      localStorage.setItem(`${PUBLIC_OS_PREFIX}${id}`, JSON.stringify(item))
-    } catch {}
-
-    return montarLinkOSGlobal(item)
+    return `${baseUrlAtual()}/impressao-ordem-servico/${id}?preview=1`
   }
 
   function normalizarItem(item: any): OrdemServico {
@@ -508,7 +448,7 @@ export default function OrdemServicoPage() {
     if (syncOsPublicaRodandoRef.current) return
 
     const agora = Date.now()
-    if (!forcar && agora - ultimaSyncOsPublicaRef.current < 120000) return
+    if (!forcar && agora - ultimaSyncOsPublicaRef.current < 10000) return
     if (!lista.length) return
 
     syncOsPublicaRodandoRef.current = true
@@ -557,8 +497,8 @@ export default function OrdemServicoPage() {
             alterou = true
 
             return {
-              ...item,
               ...publico,
+              id: item.id,
               status: statusFinal,
               aprovacaoDigital: aprovacao || publico?.aprovacaoDigital,
               ultimaAtualizacao: publico?.ultimaAtualizacao || hojeBR(),
@@ -588,16 +528,31 @@ export default function OrdemServicoPage() {
       const resp = await fetch('/api/public-docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo: 'os', documentoId: String(id), payload }),
+        body: JSON.stringify({
+          tipo: 'os',
+          documentoId: String(id),
+          payload,
+        }),
       })
 
-      if (resp.ok) {
-        const json = await resp.json()
-        if (json?.token) return `${base}/impressao-ordem-servico/${id}?preview=1&p=${json.token}`
+      if (!resp.ok) {
+        const erro = await resp.json().catch(() => null)
+        throw new Error(erro?.error || 'Falha ao publicar OS.')
       }
-    } catch {}
 
-    return montarLinkOS(item)
+      const json = await resp.json().catch(() => null)
+      const token = String(json?.token || '').trim()
+
+      if (!token) {
+        throw new Error('Token da OS não retornado pela API.')
+      }
+
+      return `${base}/impressao-ordem-servico/${id}?preview=1&p=${encodeURIComponent(token)}`
+    } catch (error) {
+      console.error('[PUBLICAR_OS]', error)
+      alert(error instanceof Error ? error.message : 'Erro ao publicar OS.')
+      throw error
+    }
   }
 
   function linkValido(item: OrdemServico) {
@@ -712,6 +667,28 @@ export default function OrdemServicoPage() {
     const timer = window.setTimeout(() => sincronizarAprovacoesOSPublicas(true), 1400)
     return () => window.clearTimeout(timer)
   }, [lista.length])
+
+  useEffect(() => {
+    if (!lista.length) return
+
+    const rodarSync = () => sincronizarAprovacoesOSPublicas(true)
+    const aoVoltarParaAba = () => {
+      if (document.visibilityState === 'visible') rodarSync()
+    }
+
+    window.addEventListener('focus', rodarSync)
+    document.addEventListener('visibilitychange', aoVoltarParaAba)
+
+    const interval = window.setInterval(() => {
+      sincronizarAprovacoesOSPublicas(false)
+    }, 20000)
+
+    return () => {
+      window.removeEventListener('focus', rodarSync)
+      document.removeEventListener('visibilitychange', aoVoltarParaAba)
+      window.clearInterval(interval)
+    }
+  }, [lista])
 
   useEffect(() => {
     setForm((anterior) => ({

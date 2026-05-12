@@ -1,11 +1,9 @@
 import './globals.css'
-import PWAClient from './components/PWAClient'
-import CloudSyncClient from './components/CloudSyncClient'
 
 export const metadata = {
   title: 'Connect Sistema',
   description: 'Sistema premium para orçamento, OS, financeiro, CRM e automações por WhatsApp.',
-  manifest: '/manifest.json?v=89',
+  manifest: '/manifest.json',
   icons: {
     icon: [
       { url: '/favicon.ico?v=89' },
@@ -38,8 +36,6 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body>
-        <PWAClient />
-        <CloudSyncClient />
         {children}
       </body>
     </html>

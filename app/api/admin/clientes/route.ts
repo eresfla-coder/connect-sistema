@@ -19,6 +19,12 @@ type BodyPayload = {
   criar_acesso?: boolean
 }
 
+type PatchPayload = {
+  id?: string
+  updates?: Record<string, any>
+  admin_email?: string
+}
+
 function normalizarTelefone(value?: string) {
   return String(value || '').replace(/\D/g, '')
 }
@@ -37,8 +43,13 @@ function senhaTemporaria() {
 function getBearerToken(req: Request) {
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization')
   if (!authHeader) return ''
+
   const [type, token] = authHeader.split(' ')
-  if (String(type || '').toLowerCase() !== 'bearer' || !token) return ''
+
+  if (String(type || '').toLowerCase() !== 'bearer' || !token) {
+    return ''
+  }
+
   return token.trim()
 }
 
@@ -50,57 +61,266 @@ function isAdminEmail(email?: string | null) {
   return ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase())
 }
 
-async function identificarAdmin(req: Request, body: BodyPayload) {
+async function identificarAdmin(req: Request, body?: BodyPayload | PatchPayload) {
   const token = getBearerToken(req)
 
   if (token) {
     const authUserResult = await supabaseAdmin.auth.getUser(token)
-    const emailToken = authUserResult.data.user?.email?.trim().toLowerCase() || ''
+
+    const emailToken =
+      authUserResult.data.user?.email?.trim().toLowerCase() || ''
 
     if (!authUserResult.error && isAdminEmail(emailToken)) {
-      return { ok: true as const, email: emailToken, origem: 'token' }
+      return {
+        ok: true as const,
+        email: emailToken,
+      }
     }
-
-    console.log('[ADMIN CLIENTES] token recusado pelo Supabase:', {
-      email: emailToken || null,
-      error: authUserResult.error?.message || null,
-    })
   }
 
-  const emailFallback = String(body.admin_email || '').trim().toLowerCase()
+  const emailFallback = String(body?.admin_email || '')
+    .trim()
+    .toLowerCase()
 
   if (isAdminEmail(emailFallback)) {
-    console.log('[ADMIN CLIENTES] usando fallback admin_email:', emailFallback)
-    return { ok: true as const, email: emailFallback, origem: 'fallback' }
+    return {
+      ok: true as const,
+      email: emailFallback,
+    }
   }
 
   return {
     ok: false as const,
-    email: emailFallback || null,
-    origem: 'negado',
+    email: null,
   }
 }
 
-export async function POST(req: Request) {
+/* =========================
+   GET CLIENTES ADMIN
+========================= */
+
+export async function GET(req: Request) {
   try {
-    const body = (await req.json()) as BodyPayload
+    const admin = await identificarAdmin(req)
+
+    if (!admin.ok) {
+      return NextResponse.json(
+        { error: 'Acesso negado.' },
+        { status: 403 }
+      )
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('perfis')
+      .select('*')
+      .order('data_criacao', { ascending: false })
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
+    }
+
+    return NextResponse.json({
+      ok: true,
+      clientes: data || [],
+    })
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        error: error?.message || 'Erro ao carregar clientes.',
+      },
+      { status: 500 }
+    )
+  }
+}
+
+
+
+
+/* =========================
+   PATCH CLIENTE ADMIN
+========================= */
+
+export async function PATCH(req: Request) {
+  try {
+    const body = (await req.json()) as PatchPayload
     const admin = await identificarAdmin(req, body)
 
     if (!admin.ok) {
       return NextResponse.json(
-        { error: `Acesso restrito ao administrador: ${admin.email || 'sessão inválida'}` },
+        { error: 'Acesso negado.' },
+        { status: 403 }
+      )
+    }
+
+    const id = String(body.id || '').trim()
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'ID do cliente não informado.' },
+        { status: 400 }
+      )
+    }
+
+    const updates = body.updates || {}
+
+    const allowedKeys = [
+      'email',
+      'nome_empresa',
+      'telefone',
+      'valor_plano',
+      'status',
+      'ativo',
+      'vencimento',
+      'status_pagamento',
+      'ultimo_pagamento',
+      'sistema_cliente',
+      'observacoes',
+    ]
+
+    const safeUpdates: Record<string, any> = {}
+
+    for (const key of allowedKeys) {
+      if (Object.prototype.hasOwnProperty.call(updates, key)) {
+        safeUpdates[key] = updates[key]
+      }
+    }
+
+    if (Object.keys(safeUpdates).length === 0) {
+      return NextResponse.json(
+        { error: 'Nenhum dado válido para atualizar.' },
+        { status: 400 }
+      )
+    }
+
+    const updateCompleto = await supabaseAdmin
+      .from('perfis')
+      .update(safeUpdates)
+      .eq('id', id)
+      .select('*')
+      .maybeSingle()
+
+    if (updateCompleto.error) {
+      const msg = String(updateCompleto.error.message || '').toLowerCase()
+      const erroColunaOpcional =
+        msg.includes('sistema_cliente') ||
+        msg.includes('observacoes') ||
+        msg.includes('schema cache') ||
+        msg.includes('column')
+
+      if (erroColunaOpcional) {
+        const fallbackUpdates = { ...safeUpdates }
+        delete fallbackUpdates.sistema_cliente
+        delete fallbackUpdates.observacoes
+
+        const retry = await supabaseAdmin
+          .from('perfis')
+          .update(fallbackUpdates)
+          .eq('id', id)
+          .select('*')
+          .maybeSingle()
+
+        if (retry.error) {
+          return NextResponse.json(
+            { error: retry.error.message },
+            { status: 400 }
+          )
+        }
+
+        return NextResponse.json({ ok: true, cliente: retry.data })
+      }
+
+      return NextResponse.json(
+        { error: updateCompleto.error.message },
+        { status: 400 }
+      )
+    }
+
+    return NextResponse.json({ ok: true, cliente: updateCompleto.data })
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        error: error?.message || 'Erro ao atualizar cliente.',
+      },
+      { status: 500 }
+    )
+  }
+}
+
+/* =========================
+   DELETE CLIENTE ADMIN
+========================= */
+
+export async function DELETE(req: Request) {
+  try {
+    const admin = await identificarAdmin(req)
+
+    if (!admin.ok) {
+      return NextResponse.json(
+        { error: 'Acesso negado.' },
+        { status: 403 }
+      )
+    }
+
+    const url = new URL(req.url)
+    const id = String(url.searchParams.get('id') || '').trim()
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'ID do cliente não informado.' },
+        { status: 400 }
+      )
+    }
+
+    const { error: perfilError } = await supabaseAdmin
+      .from('perfis')
+      .delete()
+      .eq('id', id)
+
+    if (perfilError) {
+      return NextResponse.json(
+        { error: perfilError.message },
+        { status: 400 }
+      )
+    }
+
+    try {
+      await supabaseAdmin.auth.admin.deleteUser(id)
+    } catch (authError) {
+      console.warn('[ADMIN CLIENTES] perfil removido, mas auth não foi removido:', authError)
+    }
+
+    return NextResponse.json({ ok: true })
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        error: error?.message || 'Erro ao excluir cliente.',
+      },
+      { status: 500 }
+    )
+  }
+}
+
+/* =========================
+   POST CLIENTE
+========================= */
+
+export async function POST(req: Request) {
+  try {
+    const body = (await req.json()) as BodyPayload
+
+    const admin = await identificarAdmin(req, body)
+
+    if (!admin.ok) {
+      return NextResponse.json(
+        { error: 'Acesso restrito ao administrador.' },
         { status: 403 }
       )
     }
 
     const email = String(body.email || '').trim().toLowerCase()
-    const nomeEmpresa = String(body.nome_empresa || '').trim()
-    const telefone = normalizarTelefone(body.telefone)
-    const tipo = body.tipo === 'ativo' ? 'ativo' : 'trial'
-    const valorPlano = parseValorPlano(body.valor_plano)
-    const sistemaCliente = String(body.sistema_cliente || 'Connect Pro').trim() || 'Connect Pro'
-    const observacoes = String(body.observacoes || '').trim()
-    const criarAcesso = body.criar_acesso !== false
 
     if (!email) {
       return NextResponse.json(
@@ -109,133 +329,92 @@ export async function POST(req: Request) {
       )
     }
 
+    const nomeEmpresa = String(body.nome_empresa || '').trim()
+
+    const telefone = normalizarTelefone(body.telefone)
+
+    const tipo = body.tipo === 'ativo' ? 'ativo' : 'trial'
+
+    const valorPlano = parseValorPlano(body.valor_plano)
+
+    const sistemaCliente =
+      String(body.sistema_cliente || 'Connect Pro').trim() ||
+      'Connect Pro'
+
+    const observacoes = String(body.observacoes || '').trim()
+
+    const criarAcesso = body.criar_acesso !== false
+
     const dias = tipo === 'trial' ? 7 : 30
+
     const vencimento = dataMaisDias(dias)
-    const ultimoPagamento = tipo === 'ativo' ? dataMaisDias(0) : null
+
+    const ultimoPagamento =
+      tipo === 'ativo' ? dataMaisDias(0) : null
+
     const senhaInicial = senhaTemporaria()
 
     let userId: string | null = null
-    let mode: 'created' | 'existing' | 'external' = criarAcesso ? 'created' : 'external'
+
+    let mode: 'created' | 'existing' | 'external' =
+      criarAcesso ? 'created' : 'external'
 
     if (criarAcesso) {
-      const createResult = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: senhaInicial,
-        email_confirm: true,
-        user_metadata: {
-          nome_empresa: nomeEmpresa || null,
-          telefone: telefone || null,
-        },
-      })
+      const createResult =
+        await supabaseAdmin.auth.admin.createUser({
+          email,
+          password: senhaInicial,
+          email_confirm: true,
+        })
 
       if (createResult.error) {
-        const msg = String(createResult.error.message || '').toLowerCase()
-        const jaExiste =
-          msg.includes('already') ||
-          msg.includes('registered') ||
-          msg.includes('exists') ||
-          msg.includes('duplicate') ||
-          msg.includes('user already registered')
-
-        if (!jaExiste) {
-          return NextResponse.json(
-            {
-              error:
-                createResult.error.message ||
-                'Não foi possível criar o usuário no Auth. Confira a variável SUPABASE_SERVICE_ROLE_KEY na Vercel.',
-              debug: {
-                code: (createResult.error as any)?.code || null,
-                status: (createResult.error as any)?.status || null,
-                name: (createResult.error as any)?.name || null,
-              },
-            },
-            { status: 400 }
-          )
-        }
-
-        mode = 'existing'
-
-        const { data: perfilExistente, error: perfilError } = await supabaseAdmin
+        const { data: perfilExistente } = await supabaseAdmin
           .from('perfis')
           .select('id')
           .eq('email', email)
           .maybeSingle()
 
-        if (perfilError || !perfilExistente?.id) {
+        if (!perfilExistente?.id) {
           return NextResponse.json(
-            {
-              error:
-                'Esse e-mail já existe no Auth, mas não consegui localizar o perfil correspondente.',
-            },
-            { status: 409 }
-          )
-        }
-
-        userId = perfilExistente.id
-      } else {
-        userId = createResult.data.user?.id || null
-      }
-    } else {
-      // Cliente externo: a tabela perfis usa id vinculado ao Auth.
-      // Para não quebrar a chave estrangeira, criamos um usuário técnico no Auth,
-      // mas NÃO enviamos senha nem link de acesso ao cliente. Ele fica apenas para cobrança/financeiro.
-      const { data: perfilExistente, error: perfilBuscaError } = await supabaseAdmin
-        .from('perfis')
-        .select('id')
-        .eq('email', email)
-        .maybeSingle()
-
-      if (perfilBuscaError) {
-        return NextResponse.json({ error: perfilBuscaError.message }, { status: 400 })
-      }
-
-      if (perfilExistente?.id) {
-        userId = perfilExistente.id
-      } else {
-        const createExternalResult = await supabaseAdmin.auth.admin.createUser({
-          email,
-          password: senhaInicial,
-          email_confirm: true,
-          user_metadata: {
-            nome_empresa: nomeEmpresa || null,
-            telefone: telefone || null,
-            cliente_externo: true,
-            sistema_cliente: sistemaCliente,
-          },
-        })
-
-        if (createExternalResult.error) {
-          return NextResponse.json(
-            {
-              error:
-                createExternalResult.error.message ||
-                'Não foi possível criar o registro técnico do cliente externo no Auth.',
-              debug: {
-                code: (createExternalResult.error as any)?.code || null,
-                status: (createExternalResult.error as any)?.status || null,
-                name: (createExternalResult.error as any)?.name || null,
-              },
-            },
+            { error: createResult.error.message },
             { status: 400 }
           )
         }
 
-        userId = createExternalResult.data.user?.id || null
+        userId = perfilExistente.id
+
+        mode = 'existing'
+      } else {
+        userId = createResult.data.user?.id || null
       }
+    } else {
+      const createExternalResult =
+        await supabaseAdmin.auth.admin.createUser({
+          email,
+          password: senhaInicial,
+          email_confirm: true,
+        })
+
+      if (createExternalResult.error) {
+        return NextResponse.json(
+          { error: createExternalResult.error.message },
+          { status: 400 }
+        )
+      }
+
+      userId = createExternalResult.data.user?.id || null
 
       mode = 'external'
     }
 
-
-
     if (!userId) {
       return NextResponse.json(
-        { error: 'Não foi possível identificar o usuário do cliente.' },
+        { error: 'Não foi possível criar usuário.' },
         { status: 400 }
       )
     }
 
-    const perfilBase = {
+    const perfil = {
       id: userId,
       email,
       nome_empresa: nomeEmpresa || null,
@@ -244,34 +423,27 @@ export async function POST(req: Request) {
       status: tipo,
       ativo: true,
       vencimento,
-      status_pagamento: tipo === 'trial' ? 'trial' : 'em_dia',
+      status_pagamento:
+        tipo === 'trial' ? 'trial' : 'em_dia',
       ultimo_pagamento: ultimoPagamento,
-    }
-
-    const perfilCompleto = {
-      ...perfilBase,
       sistema_cliente: sistemaCliente,
       observacoes: observacoes || null,
     }
 
-    const upsertCompleto = await supabaseAdmin.from('perfis').upsert([perfilCompleto], { onConflict: 'id' })
+    const { error: upsertError } = await supabaseAdmin
+      .from('perfis')
+      .upsert([perfil], { onConflict: 'id' })
 
-    if (upsertCompleto.error) {
-      const msg = String(upsertCompleto.error.message || '').toLowerCase()
-      const erroColunaOpcional = msg.includes('sistema_cliente') || msg.includes('observacoes') || msg.includes('schema cache') || msg.includes('column')
-
-      if (erroColunaOpcional) {
-        const upsertBase = await supabaseAdmin.from('perfis').upsert([perfilBase], { onConflict: 'id' })
-        if (upsertBase.error) {
-          return NextResponse.json({ error: upsertBase.error.message }, { status: 400 })
-        }
-      } else {
-        return NextResponse.json({ error: upsertCompleto.error.message }, { status: 400 })
-      }
+    if (upsertError) {
+      return NextResponse.json(
+        { error: upsertError.message },
+        { status: 400 }
+      )
     }
 
-    const nomeSaudacao = nomeEmpresa || email
     const accessLink = `${siteUrl()}/login`
+    const nomeSaudacao = nomeEmpresa || email
+
     const inviteText =
       mode === 'external'
         ? [
@@ -284,7 +456,7 @@ export async function POST(req: Request) {
             '',
             'Esse canal será usado para avisos, suporte e cobrança da mensalidade.',
             '',
-            '— Connect Pro',
+            '— Connect Sistema',
           ].join('\n')
         : mode === 'created'
           ? [
@@ -298,6 +470,8 @@ export async function POST(req: Request) {
               `Acesse: ${accessLink}`,
               '',
               'Entre com esses dados e depois altere sua senha no painel.',
+              '',
+              '— Connect Sistema',
             ].join('\n')
           : [
               `Olá, ${nomeSaudacao}!`,
@@ -309,34 +483,28 @@ export async function POST(req: Request) {
               `Acesse: ${accessLink}`,
               '',
               'Se você não lembrar a senha, use a opção "Esqueci minha senha" na tela de login.',
+              '',
+              '— Connect Sistema',
             ].join('\n')
+
+    const whatsappUrl = telefone
+      ? `https://wa.me/55${telefone.replace(/^55/, '')}?text=${encodeURIComponent(inviteText)}`
+      : ''
 
     return NextResponse.json({
       ok: true,
       mode,
       accessLink: mode === 'external' ? '' : accessLink,
-      temporaryPassword: mode === 'created' ? senhaInicial : null,
+      temporaryPassword:
+        mode === 'created' ? senhaInicial : null,
       inviteText,
-      cliente: {
-        id: userId,
-        email,
-        nome_empresa: nomeEmpresa || null,
-        telefone: telefone || null,
-        valor_plano: valorPlano,
-        sistema_cliente: sistemaCliente,
-        observacoes: observacoes || null,
-        status: tipo,
-        ativo: true,
-        vencimento,
-        status_pagamento: tipo === 'trial' ? 'trial' : 'em_dia',
-        ultimo_pagamento: ultimoPagamento,
-      },
+      whatsappUrl,
+      cliente: perfil,
     })
   } catch (error: any) {
-    console.error('[ADMIN CLIENTES] erro fatal:', error)
     return NextResponse.json(
       {
-        error: error?.message || 'Erro inesperado ao criar cliente.',
+        error: error?.message || 'Erro inesperado.',
       },
       { status: 500 }
     )

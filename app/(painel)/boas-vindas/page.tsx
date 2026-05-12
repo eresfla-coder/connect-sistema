@@ -25,7 +25,7 @@ export default function BoasVindasPage() {
           <div style={{ position: 'relative', zIndex: 2 }}>
             <div style={{ fontSize: 12, fontWeight: 950, letterSpacing: 2.8, textTransform: 'uppercase', opacity: .8 }}>Connect Sistema</div>
             <h1 style={{ margin: '12px 0 10px', fontSize: 46, lineHeight: .95, letterSpacing: -1.8 }}>Bem-vindo ao modo demonstração</h1>
-            <p style={{ margin: 0, maxWidth: 700, color: '#dbeafe', fontSize: 16, lineHeight: 1.55, fontWeight: 700 }}>Esta área usa dados fictícios para o cliente testar sem risco. Dá para navegar, gerar cobrança, ver clientes, orçamentos e financeiro com cara de sistema pronto para venda.</p>
+            <p style={{ margin: 0, maxWidth: 700, color: '#dbeafe', fontSize: 16, lineHeight: 1.55, fontWeight: 700 }}>Esta área usa dados fictícios para o cliente conhecer o sistema sem risco. Dá para navegar e visualizar exemplos, mas salvar, WhatsApp, links públicos, cobranças e ações reais ficam bloqueados até criar uma conta de teste grátis.</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 22 }}>
               <Link href="/dashboard" style={botaoPrimario}>Começar agora</Link>
               <button onClick={reiniciarDemo} style={botaoSecundario}>Reiniciar dados demo</button>

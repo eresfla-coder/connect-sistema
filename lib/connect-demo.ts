@@ -70,3 +70,128 @@ export function sairDemoMode() {
   window.localStorage.removeItem(DEMO_SEEDED_KEY)
   window.sessionStorage.removeItem('connect_trial_notice')
 }
+
+
+export const DEMO_BLOCKED_ACTION_MESSAGE =
+  'Modo demonstração: esta ação é bloqueada para segurança. Crie uma conta grátis de 7 dias para salvar, enviar WhatsApp e gerar links reais.'
+
+export function avisoDemoBloqueado() {
+  if (typeof window === 'undefined') return
+  window.alert(DEMO_BLOCKED_ACTION_MESSAGE)
+}
+
+function textoDoElemento(element: Element | null) {
+  if (!element) return ''
+  return String((element as HTMLElement).innerText || element.textContent || '').trim().toLowerCase()
+}
+
+function deveBloquearClique(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false
+  const acionador = target.closest('button, a, [role="button"], input[type="submit"]')
+  if (!acionador) return false
+
+  const texto = textoDoElemento(acionador)
+  const href = String((acionador as HTMLAnchorElement).href || '')
+
+  const termosBloqueados = [
+    'salvar',
+    'excluir',
+    'apagar',
+    'remover',
+    'enviar whatsapp',
+    'whatsapp',
+    'gerar link',
+    'copiar link',
+    'aprovar',
+    'recusar',
+    'marcar pago',
+    'bloquear',
+    'resetar senha',
+    'cobrar',
+    'assinar',
+    'criar orçamento',
+    'nova os',
+    'novo cliente',
+    'novo produto',
+    'novo lançamento',
+    'nova venda',
+  ]
+
+  if (href.includes('wa.me') || href.includes('whatsapp')) return true
+  return termosBloqueados.some((termo) => texto.includes(termo))
+}
+
+function deveBloquearFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const url = typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url
+
+  const method = String(init?.method || (input instanceof Request ? input.method : 'GET') || 'GET').toUpperCase()
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return false
+
+  const normalizado = String(url || '')
+
+  if (normalizado.includes('/rest/v1/')) return true
+  if (normalizado.includes('/auth/v1/admin')) return true
+  if (normalizado.includes('/api/public-docs')) return true
+  if (normalizado.includes('/api/admin')) return true
+  if (normalizado.includes('/api/')) return true
+
+  return false
+}
+
+let demoGuardInstalado = false
+
+export function installDemoGuard() {
+  if (typeof window === 'undefined') return
+  if (demoGuardInstalado) return
+
+  demoGuardInstalado = true
+
+  const originalFetch = window.fetch.bind(window)
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (isDemoMode() && deveBloquearFetch(input, init)) {
+      avisoDemoBloqueado()
+      return new Response(JSON.stringify({ error: DEMO_BLOCKED_ACTION_MESSAGE, demoBlocked: true }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return originalFetch(input, init)
+  }
+
+  const originalOpen = window.open.bind(window)
+  window.open = ((url?: string | URL, target?: string, features?: string) => {
+    const destino = String(url || '')
+    if (isDemoMode() && (destino.includes('wa.me') || destino.includes('whatsapp'))) {
+      avisoDemoBloqueado()
+      return null
+    }
+    return originalOpen(url as any, target, features)
+  }) as typeof window.open
+
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (!isDemoMode()) return
+      if (!deveBloquearClique(event.target)) return
+      event.preventDefault()
+      event.stopPropagation()
+      avisoDemoBloqueado()
+    },
+    true,
+  )
+
+  document.addEventListener(
+    'submit',
+    (event) => {
+      if (!isDemoMode()) return
+      event.preventDefault()
+      event.stopPropagation()
+      avisoDemoBloqueado()
+    },
+    true,
+  )
+}

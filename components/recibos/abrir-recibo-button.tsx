@@ -4,6 +4,11 @@ type ConfigRecibo = {
   nomeEmpresa?: string
   cidadeUf?: string
   telefone?: string
+  celularEmpresa?: string
+  celular?: string
+  whatsappEmpresa?: string
+  whatsapp?: string
+  telefoneEmpresa?: string
   responsavel?: string
   corPrimaria?: string
   logo?: string
@@ -60,7 +65,7 @@ export default function AbrirReciboButton({
       config: {
         nomeEmpresa: configuracoes?.nomeEmpresa || 'LOJA CONNECT',
         cidadeUf: configuracoes?.cidadeUf || 'PARNAMIRIM-RN',
-        telefone: configuracoes?.telefone || '84992181399',
+        telefone: configuracoes?.celularEmpresa || configuracoes?.celular || configuracoes?.whatsappEmpresa || configuracoes?.whatsapp || configuracoes?.telefoneEmpresa || configuracoes?.telefone || '',
         responsavel: configuracoes?.responsavel || 'ERES FAUSTINO',
         corPrimaria: configuracoes?.corPrimaria || '#22c55e',
         logo: configuracoes?.logo || '',

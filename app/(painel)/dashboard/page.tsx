@@ -158,6 +158,8 @@ function useLocalData<T>(key: string, fallback: T) {
   const [valor, setValor] = useState<T>(fallback)
 
   useEffect(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
     const carregar = () => {
       try {
         const raw = localStorage.getItem(key)
@@ -169,14 +171,20 @@ function useLocalData<T>(key: string, fallback: T) {
       }
     }
 
+    const carregarDebounced = () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(carregar, 80)
+    }
+
     carregar()
-    window.addEventListener('storage', carregar)
-    window.addEventListener('connect-data-change', carregar)
-    window.addEventListener('connect-cloud-updated', carregar as EventListener)
+    window.addEventListener('storage', carregarDebounced)
+    window.addEventListener('connect-data-change', carregarDebounced)
+    window.addEventListener('connect-cloud-updated', carregarDebounced as EventListener)
     return () => {
-      window.removeEventListener('storage', carregar)
-      window.removeEventListener('connect-data-change', carregar)
-      window.removeEventListener('connect-cloud-updated', carregar as EventListener)
+      if (debounceTimer) clearTimeout(debounceTimer)
+      window.removeEventListener('storage', carregarDebounced)
+      window.removeEventListener('connect-data-change', carregarDebounced)
+      window.removeEventListener('connect-cloud-updated', carregarDebounced as EventListener)
     }
   }, [key])
 

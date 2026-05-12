@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
+import { isAdminEmail } from "@/lib/access";
 import { readLocalCloudPayload } from "@/lib/connect-cloud-storage";
-import { isDemoMode, sairDemoMode } from "@/lib/connect-demo";
+import { installDemoGuard, isDemoMode, sairDemoMode } from "@/lib/connect-demo";
 
 type MenuItem = {
   nome: string;
@@ -40,6 +41,51 @@ export default function PainelLayout({
   const [avisoTrial, setAvisoTrial] = useState("");
   const [temaVisual, setTemaVisual] = useState<"dark" | "light">("light");
   const [saindo, setSaindo] = useState(false);
+  const [adminLogado, setAdminLogado] = useState(false);
+  const [demoAtivo, setDemoAtivo] = useState(false);
+
+
+  useEffect(() => {
+    installDemoGuard();
+    const atualizarDemo = () => setDemoAtivo(isDemoMode());
+    atualizarDemo();
+    window.addEventListener("storage", atualizarDemo);
+    window.addEventListener("focus", atualizarDemo);
+    return () => {
+      window.removeEventListener("storage", atualizarDemo);
+      window.removeEventListener("focus", atualizarDemo);
+    };
+  }, []);
+
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarAdminLogado() {
+      try {
+        if (isDemoMode()) {
+          if (ativo) setAdminLogado(false);
+          return;
+        }
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!ativo) return;
+        setAdminLogado(isAdminEmail(user?.email));
+      } catch {
+        if (ativo) setAdminLogado(false);
+      }
+    }
+
+    carregarAdminLogado();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!ativo) return;
+      setAdminLogado(isDemoMode() ? false : isAdminEmail(session?.user?.email));
+    });
+
+    return () => {
+      ativo = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const verificarTela = () => {
@@ -110,8 +156,14 @@ export default function PainelLayout({
 
     atualizarBadges();
     window.addEventListener("storage", atualizarBadges);
+    window.addEventListener("connect-data-change", atualizarBadges);
+    window.addEventListener("connect-local-saved", atualizarBadges);
 
-    return () => window.removeEventListener("storage", atualizarBadges);
+    return () => {
+      window.removeEventListener("storage", atualizarBadges);
+      window.removeEventListener("connect-data-change", atualizarBadges);
+      window.removeEventListener("connect-local-saved", atualizarBadges);
+    };
   }, []);
 
   useEffect(() => {
@@ -171,6 +223,10 @@ export default function PainelLayout({
   }
 
   function abrirWhatsApp() {
+    if (isDemoMode()) {
+      alert("Modo demonstração: WhatsApp real bloqueado. Crie uma conta grátis de 7 dias para falar pelo sistema.");
+      return;
+    }
     try {
       const mensagem =
         "Olá! Gostaria de falar com o suporte da Connect Sistemas.";
@@ -183,6 +239,10 @@ export default function PainelLayout({
   }
 
   function exportarDados() {
+    if (isDemoMode()) {
+      alert("Modo demonstração: exportação de dados bloqueada. Crie uma conta grátis de 7 dias para usar backup real.");
+      return;
+    }
     try {
       const payload = readLocalCloudPayload();
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -236,13 +296,16 @@ export default function PainelLayout({
         badge: osBadge,
       },
       { nome: "Clientes", href: "/clientes", icone: "👥" },
+      { nome: "Contratos", href: "/contratos", icone: "📄" },
       { nome: "CRM", href: "/crm", icone: "🤖", badge: resumoCRMBadge },
       { nome: "Connect AI", href: "/connect-ai", icone: "✨", destaque: true },
       { nome: "Produtos", href: "/produtos", icone: "📦" },
       { nome: "Financeiro", href: "/financeiro", icone: "💸" },
+      { nome: "Planos", href: "/planos", icone: "👑", destaque: true },
       { nome: "Config", href: "/configuracoes", icone: "⚙️" },
+      ...(adminLogado ? [{ nome: "Admin SaaS", href: "/admin", icone: "🛡️", destaque: true } as MenuItem] : []),
     ],
-    [orcamentosBadge, osBadge, resumoCRMBadge],
+    [orcamentosBadge, osBadge, resumoCRMBadge, adminLogado],
   );
 
   function estiloMenuItem(item: MenuItem, ativo: boolean) {
@@ -287,6 +350,16 @@ export default function PainelLayout({
           bg: "linear-gradient(135deg,#84cc16 0%,#16a34a 52%,#065f46 100%)",
           shadow: "0 14px 30px rgba(34,197,94,.22)",
           border: "1px solid rgba(190,242,100,.35)",
+        },
+        Planos: {
+          bg: "linear-gradient(135deg,#f59e0b 0%,#2563eb 52%,#1e1b4b 100%)",
+          shadow: "0 14px 30px rgba(245,158,11,.22)",
+          border: "1px solid rgba(251,191,36,.38)",
+        },
+        "Admin SaaS": {
+          bg: "linear-gradient(135deg,#111827 0%,#7c3aed 52%,#0f172a 100%)",
+          shadow: "0 14px 30px rgba(124,58,237,.26)",
+          border: "1px solid rgba(196,181,253,.38)",
         },
         Config: {
           bg: "linear-gradient(135deg,#64748b 0%,#334155 52%,#0f172a 100%)",
@@ -815,6 +888,51 @@ export default function PainelLayout({
                   {dataAtual}
                 </div>
               </div>
+            </div>
+          )}
+
+          {demoAtivo && (
+            <div
+              style={{
+                marginBottom: 14,
+                padding: "14px 16px",
+                borderRadius: 18,
+                background: temaVisual === "light"
+                  ? "linear-gradient(135deg,#fff7ed,#fef3c7)"
+                  : "linear-gradient(135deg,rgba(245,158,11,.18),rgba(251,191,36,.12))",
+                border: "1px solid rgba(245,158,11,.38)",
+                color: temaVisual === "light" ? "#7c2d12" : "#fde68a",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                fontWeight: 900,
+                boxShadow: "0 14px 30px rgba(245,158,11,.14)",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 13, letterSpacing: 1.2, textTransform: "uppercase" }}>Modo demonstração protegido</div>
+                <div style={{ fontSize: 12, marginTop: 4, fontWeight: 750 }}>
+                  Dados fictícios. Salvar, WhatsApp, links públicos, cobranças e ações reais estão bloqueados.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => router.push("/login")}
+                style={{
+                  height: 38,
+                  borderRadius: 999,
+                  border: "none",
+                  padding: "0 14px",
+                  background: "linear-gradient(135deg,#2563eb,#1d4ed8)",
+                  color: "#fff",
+                  fontWeight: 950,
+                  cursor: "pointer",
+                }}
+              >
+                Criar teste grátis
+              </button>
             </div>
           )}
 

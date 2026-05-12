@@ -1,0 +1,25 @@
+CONNECT SISTEMA - V95 GERAL ESTABILIZACAO
+
+Correções aplicadas nesta versão:
+
+1) Travamento/cache/PWA
+- Atualizado PWAClient para limpeza controlada por nova chave v95.
+- Service worker ficou neutro/autodestrutivo, sem cache e sem reload forçado.
+- Manifest/layout atualizados para v95, forçando navegadores antigos a puxarem arquivos novos.
+
+2) Sincronização em nuvem mais leve
+- Auto-pull ficou mais espaçado e com trava de 45 segundos.
+- Removido reload automático depois do pull manual para evitar loop/travamento em navegador com cache antigo.
+
+3) Ordem de Serviço + WhatsApp
+- Envio para WhatsApp agora tenta resolver o telefone pela própria OS e também pelo cadastro de clientes vinculado por ID ou nome.
+- Copiar link/abrir link também publica a OS com contato resolvido.
+- Normalização da OS passou a aceitar cliente como objeto e preservar telefone/WhatsApp vindos do cadastro.
+
+4) Botões e layout
+- Coluna de ações da OS no desktop ficou fixa à direita para não sumir quando houver rolagem horizontal.
+- Modal de cadastro de cliente no celular ficou preso entre topo/rodapé seguro, com botões finais sempre visíveis.
+
+Após subir na Vercel:
+- Testar em aba anônima primeiro.
+- Se algum navegador antigo ainda travar, limpar dados do site painel.appconnectpro.com.br uma vez.

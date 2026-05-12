@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -40,6 +40,7 @@ type ItemOrcamento = {
   nome: string
   quantidade: number
   valor: number
+  mostrarCliente?: boolean
   tipoCalculo?: TipoCalculoItem
   largura?: number
   altura?: number
@@ -175,7 +176,7 @@ function baseUrlDocumentoPublico() {
 
 function serializarCompactoOrcamento(dados: any, config: any) {
   const itens = Array.isArray(dados?.itens)
-    ? dados.itens.map((item: any) => ({
+    ? dados.itens.filter((item: any) => item?.mostrarCliente !== false).map((item: any) => ({
         n: item?.nome || '',
         q: Number(item?.quantidade || 0),
         v: Number(item?.valor || 0),
@@ -638,6 +639,7 @@ export default function OrcamentoPage() {
 
   const metragemAtual = useMemo(() => calcularMetragem(larguraItem, alturaItem), [larguraItem, alturaItem])
   const subtotal = useMemo(() => itens.reduce((acc, item) => acc + calcularTotalItem(item), 0), [itens])
+  const itensCliente = useMemo(() => itens.filter((item) => item.mostrarCliente !== false), [itens])
   const valorDesconto = useMemo(() => {
     const numero = textoDecimalLivreParaNumero(descontoInput)
     if (descontoTipo === 'percentual') return Math.max(0, Math.min(100, numero)) * subtotal / 100
@@ -693,11 +695,26 @@ export default function OrcamentoPage() {
     setToast({ texto, tipo })
   }
 
+  function prepararOrcamentoCliente(dados: OrcamentoSalvo): OrcamentoSalvo {
+    const itensVisiveis = (dados.itens || []).filter((item) => item.mostrarCliente !== false)
+    const subtotalVisivel = itensVisiveis.reduce((acc, item) => acc + calcularTotalItem(item), 0)
+    const descontoVisivel = subtotal > 0 ? Number(((valorDesconto * subtotalVisivel) / subtotal).toFixed(2)) : 0
+    const totalVisivel = Math.max(0, subtotalVisivel + Number(dados.entrega || 0) - descontoVisivel)
+
+    return {
+      ...dados,
+      itens: itensVisiveis,
+      subtotal: subtotalVisivel,
+      desconto: descontoVisivel,
+      total: totalVisivel,
+    }
+  }
+
 
   async function sincronizarAprovacoesPublicas(forcar = false) {
     if (syncAprovacaoPublicaRodandoRef.current) return
     const agora = Date.now()
-    if (!forcar && agora - ultimaSyncAprovacaoPublicaRef.current < 120000) return
+    if (!forcar && agora - ultimaSyncAprovacaoPublicaRef.current < 10000) return
     if (!orcamentosSalvos.length) return
 
     syncAprovacaoPublicaRodandoRef.current = true
@@ -730,8 +747,8 @@ export default function OrcamentoPage() {
 
             alterou = true
             return {
-              ...orcamento,
               ...publico,
+              id: orcamento.id,
               status: statusFinal,
               aprovacaoDigital: aprovacaoPublica || (publico as any)?.aprovacaoDigital,
               atualizadoEm: Number((publico as any)?.atualizadoEm || Date.now()),
@@ -758,6 +775,28 @@ export default function OrcamentoPage() {
     const timer = window.setTimeout(() => sincronizarAprovacoesPublicas(true), 1200)
     return () => window.clearTimeout(timer)
   }, [orcamentosSalvos.length])
+
+  useEffect(() => {
+    if (!orcamentosSalvos.length) return
+
+    const rodarSync = () => sincronizarAprovacoesPublicas(true)
+    const aoVoltarParaAba = () => {
+      if (document.visibilityState === 'visible') rodarSync()
+    }
+
+    window.addEventListener('focus', rodarSync)
+    document.addEventListener('visibilitychange', aoVoltarParaAba)
+
+    const interval = window.setInterval(() => {
+      sincronizarAprovacoesPublicas(false)
+    }, 20000)
+
+    return () => {
+      window.removeEventListener('focus', rodarSync)
+      document.removeEventListener('visibilitychange', aoVoltarParaAba)
+      window.clearInterval(interval)
+    }
+  }, [orcamentosSalvos])
 
   function tocarSomBalcao(tipo: 'ok' | 'erro' = 'ok') {
     try {
@@ -926,7 +965,7 @@ export default function OrcamentoPage() {
       const resp = await fetch('/api/public-docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo: 'orcamento', documentoId: String(id), payload: { ...dados, config } }),
+        body: JSON.stringify({ tipo: 'orcamento', documentoId: String(id), payload: { ...prepararOrcamentoCliente(dados), config } }),
       })
       if (resp.ok) {
         const json = await resp.json()
@@ -1075,6 +1114,7 @@ export default function OrcamentoPage() {
         nome: produto.nome,
         quantidade: 1,
         valor: produto.valor,
+        mostrarCliente: true,
         tipoCalculo: 'unidade',
         tipoCadastro: produto.tipoCadastro === 'servico' ? 'servico' : 'produto',
         unidadeLabel: 'un',
@@ -1124,9 +1164,10 @@ export default function OrcamentoPage() {
                   ...item,
                   nome: produto.nome,
                   quantidade: quantidadeFinal,
-                  valor: produto.valor,
+                  valor: Number(item.valor || produto.valor),
                   tipoCalculo: tipoCalculoProduto,
                   tipoCadastro: tipoCadastroProduto,
+                  mostrarCliente: item.mostrarCliente !== false,
                   unidadeLabel: tipoCalculoProduto === 'peso' ? 'kg' : tipoCadastroProduto === 'servico' ? 'serviço' : 'un',
                   largura: 0,
                   altura: 0,
@@ -1143,6 +1184,7 @@ export default function OrcamentoPage() {
           nome: produto.nome,
           quantidade: quantidadeFinal,
           valor: produto.valor,
+          mostrarCliente: true,
           tipoCalculo: tipoCalculoProduto,
           tipoCadastro: tipoCadastroProduto,
           unidadeLabel: tipoCalculoProduto === 'peso' ? 'kg' : tipoCadastroProduto === 'servico' ? 'serviço' : 'un',
@@ -1180,14 +1222,15 @@ export default function OrcamentoPage() {
                 ...item,
                 nome: produto.nome,
                 quantidade: 1,
-                valor: produto.valor,
+                valor: Number(item.valorM2 ?? item.valor ?? produto.valor),
                 tipoCalculo: 'm2',
                 tipoCadastro: tipoCadastroProduto,
+                mostrarCliente: item.mostrarCliente !== false,
                 unidadeLabel: 'm²',
                 largura: larguraItem,
                 altura: alturaItem,
                 metragem,
-                valorM2: produto.valor,
+                valorM2: Number(item.valorM2 ?? item.valor ?? produto.valor),
               }
             : item
         )
@@ -1199,6 +1242,7 @@ export default function OrcamentoPage() {
         nome: produto.nome,
         quantidade: 1,
         valor: produto.valor,
+        mostrarCliente: true,
         tipoCalculo: 'm2',
         tipoCadastro: tipoCadastroProduto,
         unidadeLabel: 'm²',
@@ -1258,6 +1302,28 @@ export default function OrcamentoPage() {
     )
   }
 
+  function alterarVisibilidadeItemCliente(id: number) {
+    setItens((atual) => atual.map((item) => (item.id === id ? { ...item, mostrarCliente: item.mostrarCliente === false } : item)))
+  }
+
+  function ajustarQuantidadeItem(id: number, direcao: 1 | -1) {
+    setItens((atual) =>
+      atual.map((item) => {
+        if (item.id !== id) return item
+        if (item.tipoCalculo === 'm2') {
+          const larguraAtual = Number(item.largura || 0)
+          const alturaAtual = Number(item.altura || 0)
+          const novaLargura = Math.max(0.01, Number((larguraAtual + direcao * 0.01).toFixed(2)))
+          return { ...item, largura: novaLargura, metragem: calcularMetragem(novaLargura, alturaAtual) }
+        }
+        const passo = item.tipoCalculo === 'peso' ? 0.001 : 1
+        const minimo = item.tipoCalculo === 'peso' ? 0.001 : 1
+        const novaQuantidade = Math.max(minimo, Number((Number(item.quantidade || 0) + direcao * passo).toFixed(3)))
+        return { ...item, quantidade: novaQuantidade }
+      })
+    )
+  }
+
   function alterarLarguraItemLista(id: number, novaLargura: number) {
     if (novaLargura <= 0) return
     setItens((atual) =>
@@ -1311,7 +1377,7 @@ export default function OrcamentoPage() {
 
       const atualizado: OrcamentoSalvo = {
         ...atualizadoBase,
-        link: gerarLinkDocumento(editandoOrcamentoId, atualizadoBase),
+        link: gerarLinkDocumento(editandoOrcamentoId, prepararOrcamentoCliente(atualizadoBase)),
       }
 
       const listaAtualizada = orcamentosSalvos.map((item) =>
@@ -1348,7 +1414,7 @@ export default function OrcamentoPage() {
 
     const novo: OrcamentoSalvo = {
       ...novoBase,
-      link: gerarLinkDocumento(id, novoBase),
+        link: gerarLinkDocumento(id, prepararOrcamentoCliente(novoBase)),
     }
 
     salvarListaOrcamentos([novo, ...orcamentosSalvos])
@@ -1665,7 +1731,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
       const atualizado: OrcamentoSalvo = {
         ...atualizadoBase,
-        link: gerarLinkDocumento(editandoOrcamentoId, atualizadoBase),
+        link: gerarLinkDocumento(editandoOrcamentoId, prepararOrcamentoCliente(atualizadoBase)),
       }
 
       dadosParaAbrir = atualizado
@@ -1697,7 +1763,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
       const novo: OrcamentoSalvo = {
         ...novoBase,
-        link: gerarLinkDocumento(idParaAbrir, novoBase),
+        link: gerarLinkDocumento(idParaAbrir, prepararOrcamentoCliente(novoBase)),
       }
 
       dadosParaAbrir = novo
@@ -2745,6 +2811,11 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                             <div style={{ fontSize: 16, fontWeight: 900, color: colors.text, lineHeight: 1.2, wordBreak: 'break-word', marginBottom: 4 }}>
                               {item.nome}
                             </div>
+                            {item.mostrarCliente === false && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 999, padding: '4px 8px', background: darkMode ? '#451a03' : '#ffedd5', color: darkMode ? '#fed7aa' : '#9a3412', fontSize: 11, fontWeight: 950, marginBottom: 5 }}>
+                                Interno/Oculto do cliente
+                              </span>
+                            )}
                             {item.tipoCalculo === 'm2' && (
                               <div style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>
                                 Área calculada: {Number(item.metragem || 0).toFixed(2)} m²
@@ -2836,12 +2907,9 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                             Total do item: <span style={{ color: '#22c55e' }}>{moeda(calcularTotalItem(item))}</span>
                           </div>
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            {modoBalcaoTurbo && item.tipoCalculo !== 'm2' && item.tipoCalculo !== 'peso' ? (
-                              <button onClick={() => alterarQuantidadeItem(item.id, Math.max(1, Number(item.quantidade || 0) + 1))} style={{ ...buttonBase, background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(34,197,94,0.22)' }}>+1</button>
-                            ) : null}
-                            {modoBalcaoTurbo && item.tipoCalculo !== 'm2' && item.tipoCalculo !== 'peso' ? (
-                              <button onClick={() => alterarQuantidadeItem(item.id, Math.max(1, Number(item.quantidade || 1) - 1))} style={{ ...buttonBase, background: darkMode ? '#334155' : '#e2e8f0', color: darkMode ? '#fff' : '#111827', padding: '10px 14px' }}>-1</button>
-                            ) : null}
+                            <button onClick={() => ajustarQuantidadeItem(item.id, 1)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(34,197,94,0.22)' }}>+</button>
+                            <button onClick={() => ajustarQuantidadeItem(item.id, -1)} style={{ ...buttonBase, background: darkMode ? '#334155' : '#e2e8f0', color: darkMode ? '#fff' : '#111827', padding: '10px 14px' }}>-</button>
+                            <button onClick={() => alterarVisibilidadeItemCliente(item.id)} style={{ ...buttonBase, background: item.mostrarCliente === false ? 'linear-gradient(135deg,#f97316,#ea580c)' : darkMode ? '#334155' : '#e2e8f0', color: item.mostrarCliente === false ? '#fff' : darkMode ? '#fff' : '#111827', padding: '10px 14px' }}>{item.mostrarCliente === false ? 'Mostrar ao cliente' : 'Ocultar do cliente'}</button>
                             <button onClick={() => editarItem(item)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(37,99,235,0.25)' }}>Editar</button>
                             <button onClick={() => removerItem(item.id)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(239,68,68,0.22)' }}>Remover</button>
                           </div>
