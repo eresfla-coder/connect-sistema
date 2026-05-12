@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
 
 const OS_KEY = 'connect_ordens_servico_salvas'
 const CONFIG_KEY = 'connect_configuracoes'
@@ -162,7 +163,10 @@ export default function ImpressaoOrdemServicoPage() {
   const cidadeUf = config.cidadeUf || config.cidade || 'PARNAMIRIM-RN'
   const telefoneEmpresa = config.telefone || ''
   const responsavel = config.responsavel || 'ERES FAUSTINO'
-  const logoUrl = config.logoUrl || config.logo || '/logo-connect.png'
+  const logoUrl =
+    config.logoUrl === '/logo-connect.png'
+      ? DEFAULT_LOGO_PATH
+      : config.logoUrl || config.logo || DEFAULT_LOGO_PATH
   const corPrimaria = config.corPrimaria || '#22c55e'
   const corSecundaria = config.corSecundaria || '#e5e7eb'
 
@@ -395,7 +399,7 @@ export default function ImpressaoOrdemServicoPage() {
                 alt="Logo"
                 onError={(e) => {
                   const img = e.currentTarget as HTMLImageElement
-                  if (!img.src.endsWith('/logo-connect.jpeg')) img.src = '/logo-connect.jpeg'
+                  if (!img.src.endsWith(DEFAULT_LOGO_PATH)) img.src = DEFAULT_LOGO_PATH
                 }}
                 style={{ width: 82, height: 82, objectFit: 'contain', borderRadius: 12 }}
               />

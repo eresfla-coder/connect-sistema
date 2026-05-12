@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
 
 export default function DashboardPage() {
   const [isMobile, setIsMobile] = useState(false)
@@ -84,7 +85,7 @@ export default function DashboardPage() {
             }}
           >
             <img
-              src="/logo-connect.png"
+              src={DEFAULT_LOGO_PATH}
               alt="Connect Sistema"
               style={{
                 width: isMobile ? 80 : 100,

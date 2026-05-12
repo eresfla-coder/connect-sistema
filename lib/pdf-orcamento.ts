@@ -31,17 +31,20 @@ type OrcamentoPdf = {
 export async function gerarPdfOrcamento(orcamento: OrcamentoPdf) {
   const doc = new jsPDF()
   const empresa = orcamento.empresa || {}
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const margem = 12
 
   doc.setFillColor(15, 23, 42)
-  doc.rect(0, 0, 210, 34, 'F')
+  doc.rect(0, 0, pageWidth, 30, 'F')
 
   doc.setTextColor(255, 255, 255)
-  doc.setFontSize(20)
-  doc.text(empresa.nome_empresa || 'ORÇAMENTO', 14, 16)
+  doc.setFontSize(18)
+  doc.text(empresa.nome_empresa || 'ORÇAMENTO', margem, 14)
 
   doc.setFontSize(9)
-  doc.text(empresa.cnpj_cpf || '', 14, 23)
-  doc.text(empresa.telefone || '', 14, 28)
+  doc.text(empresa.cnpj_cpf || '', margem, 21)
+  doc.text(empresa.telefone || '', margem, 26)
 
   if (empresa.logo_url) {
     try {
@@ -55,21 +58,21 @@ export async function gerarPdfOrcamento(orcamento: OrcamentoPdf) {
         reader.readAsDataURL(blob)
       })
 
-      doc.addImage(base64, 'PNG', 165, 6, 28, 20)
+      doc.addImage(base64, 'PNG', 168, 5, 26, 20)
     } catch {
       // segue sem logo
     }
   }
 
   doc.setTextColor(30, 41, 59)
-  doc.setFontSize(12)
-  doc.text(`Cliente: ${orcamento.cliente_nome || '-'}`, 14, 46)
-  doc.text(`Telefone: ${orcamento.telefone || '-'}`, 14, 53)
-  doc.text(`Pagamento: ${orcamento.forma_pagamento_nome || '-'}`, 14, 60)
-  doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 14, 67)
+  doc.setFontSize(10)
+  doc.text(`Cliente: ${orcamento.cliente_nome || '-'}`, margem, 42)
+  doc.text(`Telefone: ${orcamento.telefone || '-'}`, margem, 48)
+  doc.text(`Pagamento: ${orcamento.forma_pagamento_nome || '-'}`, 112, 42)
+  doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 112, 48)
 
   autoTable(doc, {
-    startY: 77,
+    startY: 58,
     head: [['Item', 'Qtd', 'Preço', 'Total']],
     body: orcamento.itens.map((item) => [
       item.nome,
@@ -78,39 +81,57 @@ export async function gerarPdfOrcamento(orcamento: OrcamentoPdf) {
       `R$ ${item.total.toFixed(2)}`,
     ]),
     styles: {
-      fontSize: 10,
-      cellPadding: 3,
+      fontSize: 9,
+      cellPadding: 2.2,
+      overflow: 'linebreak',
+      valign: 'middle',
     },
     headStyles: {
       fillColor: [34, 197, 94],
       textColor: [255, 255, 255],
+      fontSize: 9,
     },
     alternateRowStyles: {
       fillColor: [248, 250, 252],
     },
+    columnStyles: {
+      0: { cellWidth: 95 },
+      1: { halign: 'center', cellWidth: 18 },
+      2: { halign: 'right', cellWidth: 32 },
+      3: { halign: 'right', cellWidth: 32 },
+    },
+    margin: { left: margem, right: margem, bottom: 18 },
+    pageBreak: 'auto',
+    rowPageBreak: 'avoid',
   })
 
   const finalY = (doc as any).lastAutoTable?.finalY || 120
+  let resumoY = finalY + 10
 
-  doc.setFontSize(12)
+  if (resumoY > pageHeight - 42) {
+    doc.addPage()
+    resumoY = margem
+  }
+
+  doc.setFontSize(10)
   doc.setTextColor(30, 41, 59)
-  doc.text(`Subtotal: R$ ${orcamento.subtotal.toFixed(2)}`, 140, finalY + 12)
-  doc.text(`Desconto: R$ ${orcamento.desconto.toFixed(2)}`, 140, finalY + 20)
+  doc.text(`Subtotal: R$ ${orcamento.subtotal.toFixed(2)}`, 138, resumoY)
+  doc.text(`Desconto: R$ ${orcamento.desconto.toFixed(2)}`, 138, resumoY + 7)
 
-  doc.setFontSize(14)
+  doc.setFontSize(13)
   doc.setTextColor(22, 163, 74)
-  doc.text(`Total: R$ ${orcamento.total.toFixed(2)}`, 140, finalY + 32)
+  doc.text(`Total: R$ ${orcamento.total.toFixed(2)}`, 138, resumoY + 18)
 
   doc.setTextColor(71, 85, 105)
   doc.setFontSize(9)
 
-  let rodapeY = finalY + 48
+  let rodapeY = resumoY + 30
   if (empresa.endereco) {
-    doc.text(`Endereço: ${empresa.endereco}`, 14, rodapeY)
+    doc.text(`Endereço: ${empresa.endereco}`, margem, rodapeY)
     rodapeY += 5
   }
   if (empresa.email) {
-    doc.text(`E-mail: ${empresa.email}`, 14, rodapeY)
+    doc.text(`E-mail: ${empresa.email}`, margem, rodapeY)
   }
 
   const nomeArquivo = (orcamento.cliente_nome || 'cliente')

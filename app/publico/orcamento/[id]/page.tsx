@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
+import { DEFAULT_LOGO_PATH, normalizeBrazilWhatsAppNumber } from '@/lib/connect-public'
 
 const STORAGE_KEY = 'connect_orcamentos_salvos'
 const CONFIG_KEY = 'connect_configuracoes'
@@ -195,7 +196,7 @@ export default function OrcamentoPublicoPage() {
       orcamento.telefone ||
       ''
 
-    const numero = String(numeroBruto).replace(/\D/g, '')
+    const numero = normalizeBrazilWhatsAppNumber(String(numeroBruto))
     const texto = `Olá! Tenho uma dúvida sobre o orçamento #${orcamento.numero || ''}.`
 
     if (!numero) {
@@ -269,7 +270,9 @@ export default function OrcamentoPublicoPage() {
     config?.nomeSistema || config?.nomeEmpresa || 'Connect Sistema'
 
   const logo =
-    config?.logoUrl || config?.logo || '/logo-connect.png'
+    config?.logoUrl === '/logo-connect.png'
+      ? DEFAULT_LOGO_PATH
+      : config?.logoUrl || config?.logo || DEFAULT_LOGO_PATH
 
   return (
     <div

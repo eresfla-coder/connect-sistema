@@ -1,3 +1,5 @@
+import { normalizeBrazilWhatsAppNumber } from './connect-public'
+
 type Item = {
   nome: string
   quantidade: number
@@ -38,9 +40,11 @@ export function enviarWhatsapp(orcamento: OrcamentoWhatsapp) {
     mensagem += `\n\nContato da empresa: ${orcamento.empresa.telefone}`
   }
 
-  const numero = (orcamento.telefone || '').replace(/\D/g, '')
+  const numero = normalizeBrazilWhatsAppNumber(orcamento.telefone || '')
 
-  const url = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`
+  const url = numero
+    ? `https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`
+    : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
 
   window.open(url, '_blank')
 }

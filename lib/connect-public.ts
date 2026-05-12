@@ -41,6 +41,7 @@ export type ConnectOrcamento = {
 
 export const STORAGE_ORCAMENTOS = 'connect_orcamentos_salvos'
 export const STORAGE_CONFIG = 'connect_configuracoes'
+export const DEFAULT_LOGO_PATH = '/logo-connect.svg'
 
 export function getPublicOrigin() {
   if (typeof window !== 'undefined') {
@@ -53,6 +54,15 @@ export function onlyNumbers(value?: string) {
   return (value || '').replace(/\D/g, '')
 }
 
+export function normalizeBrazilWhatsAppNumber(value?: string) {
+  let number = onlyNumbers(value)
+
+  if (!number) return ''
+  if (!number.startsWith('55')) number = `55${number}`
+
+  return number
+}
+
 export function getWhatsAppNumber(config?: ConnectConfiguracoes) {
   const raw =
     config?.whatsapp ||
@@ -60,15 +70,20 @@ export function getWhatsAppNumber(config?: ConnectConfiguracoes) {
     config?.telefone ||
     ''
 
-  let number = onlyNumbers(raw)
+  return normalizeBrazilWhatsAppNumber(raw)
+}
 
-  if (!number) return ''
+export function buildPublicOrcamentoPath(id: string | number) {
+  return `/publico/orcamento/${encodeURIComponent(String(id))}`
+}
 
-  if (!number.startsWith('55')) {
-    number = `55${number}`
-  }
+export function buildPrintOrcamentoPath(id: string | number) {
+  return `/impressao-orcamento/${encodeURIComponent(String(id))}`
+}
 
-  return number
+export function buildAbsoluteUrl(path: string, origin = getPublicOrigin()) {
+  if (!origin) return path
+  return `${origin}${path.startsWith('/') ? path : `/${path}`}`
 }
 
 export function money(value?: number) {
@@ -113,7 +128,7 @@ export function buildWhatsAppMessage(
 ) {
   const numero = orcamento.numero || orcamento.id
   const cliente = orcamento.nomeCliente || 'cliente'
-  const link = origin ? `${origin}/orcamentos/${orcamento.id}` : ''
+  const link = buildAbsoluteUrl(buildPublicOrcamentoPath(orcamento.id), origin)
 
   return `Olá, tenho interesse no orçamento ${numero} (${cliente}). ${link}`
 }

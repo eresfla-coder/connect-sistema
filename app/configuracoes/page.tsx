@@ -1,6 +1,7 @@
 'use client'
 
 import { ChangeEvent, useEffect, useMemo, useState } from 'react'
+import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
 import { supabase } from '@/lib/supabase'
 
 type ConfiguracaoSistema = {
@@ -33,7 +34,7 @@ export default function ConfiguracoesPage() {
     endereco: 'GILBERTO ROBERTO GOMES, 243',
     cidadeUf: 'PARNAMIRIM-RN',
     responsavel: 'ERES FAUSTINO',
-    logoUrl: '/logo-connect.png',
+    logoUrl: DEFAULT_LOGO_PATH,
     corPrimaria: '#f97316',
     corSecundaria: '#e5e7eb',
   })
@@ -59,14 +60,14 @@ export default function ConfiguracoesPage() {
         endereco: dados.endereco || anterior.endereco,
         cidadeUf: dados.cidadeUf || anterior.cidadeUf,
         responsavel: dados.responsavel || anterior.responsavel,
-        logoUrl: dados.logoUrl || anterior.logoUrl,
+        logoUrl: dados.logoUrl === '/logo-connect.png' ? DEFAULT_LOGO_PATH : dados.logoUrl || anterior.logoUrl,
         corPrimaria: dados.corPrimaria || anterior.corPrimaria,
         corSecundaria: dados.corSecundaria || anterior.corSecundaria,
       }))
     } catch {}
   }, [])
 
-  const previewLogo = useMemo(() => config.logoUrl || '/logo-connect.png', [config.logoUrl])
+  const previewLogo = useMemo(() => config.logoUrl || DEFAULT_LOGO_PATH, [config.logoUrl])
 
   function atualizarCampo<K extends keyof ConfiguracaoSistema>(
     campo: K,
@@ -370,7 +371,7 @@ export default function ConfiguracoesPage() {
                   alt="Logo"
                   onError={(e) => {
                     const img = e.currentTarget as HTMLImageElement
-                    img.src = '/logo-connect.png'
+                    img.src = DEFAULT_LOGO_PATH
                   }}
                   style={{
                     maxWidth: '100%',
