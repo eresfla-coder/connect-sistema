@@ -6,10 +6,10 @@ export const dynamic = 'force-dynamic'
 
 type PublicDocumentRow = Record<string, unknown>
 
-const VALID_TYPES = new Set<PublicDocumentType>(['quotation', 'ordem_servico'])
+const VALID_TYPES = new Set<PublicDocumentType>(['orcamento', 'ordem_servico'])
 
 function normalizeDocumentType(value?: string | null): PublicDocumentType | null {
-  if (value === 'quotation') return 'quotation'
+  if (value === 'orcamento' || value === 'quotation') return 'orcamento'
   if (value === 'ordem_servico' || value === 'service_order') return 'ordem_servico'
   return null
 }
@@ -64,8 +64,10 @@ function extractPayload(row: PublicDocumentRow): PublicDocumentSnapshot | null {
   }
 
   return {
-    documentType: documentType as PublicDocumentType,
+    documentType: normalizeDocumentType(documentType) || (documentType as PublicDocumentType),
+    document_type: normalizeDocumentType(documentType) || (documentType as PublicDocumentType),
     documentId,
+    document_id: documentId,
     document: row,
     createdAt: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
   }
@@ -77,16 +79,21 @@ function payloadMatches(
   documentId: string
 ) {
   const payloadDocument = payload.document as { id?: string | number; numero?: string | number } | undefined
-  const payloadType = normalizeDocumentType(payload.documentType)
-  const payloadId = payload.documentId || payloadDocument?.id || payloadDocument?.numero
+  const payloadType = normalizeDocumentType(payload.document_type || payload.documentType)
+  const payloadId = payload.document_id || payload.documentId || payloadDocument?.id || payloadDocument?.numero
 
   return payloadType === documentType && String(payloadId) === documentId
 }
 
 export async function POST(request: NextRequest) {
   let body: {
+    document_type?: string
     documentType?: PublicDocumentType
+    type?: string
+    tipo?: string
+    document_id?: string | number
     documentId?: string | number
+    token?: string
     payload?: PublicDocumentSnapshot
   }
 
@@ -96,8 +103,10 @@ export async function POST(request: NextRequest) {
     return jsonError('JSON invalido.', 400)
   }
 
-  const documentType = normalizeDocumentType(body.documentType)
-  const documentId = String(body.documentId || '')
+  const documentType = normalizeDocumentType(
+    body.document_type || body.documentType || body.type || body.tipo
+  )
+  const documentId = String(body.document_id || body.documentId || '')
   const payload = body.payload
 
   if (!documentType || !VALID_TYPES.has(documentType)) {
@@ -112,11 +121,13 @@ export async function POST(request: NextRequest) {
     return jsonError('Snapshot publico invalido.', 400)
   }
 
-  const token = generateToken()
+  const token = body.token || generateToken()
   const snapshot: PublicDocumentSnapshot = {
     ...payload,
     documentType,
+    document_type: documentType,
     documentId,
+    document_id: documentId,
     createdAt: payload.createdAt || new Date().toISOString(),
   }
 
@@ -157,7 +168,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         token,
         documentType,
+        document_type: documentType,
         documentId,
+        document_id: documentId,
         payload: snapshot,
       })
     }
@@ -175,15 +188,19 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     token,
     documentType,
+    document_type: documentType,
     documentId,
+    document_id: documentId,
     payload: snapshot,
   })
 }
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
-  const documentType = normalizeDocumentType(searchParams.get('type'))
-  const documentId = searchParams.get('id') || ''
+  const documentType = normalizeDocumentType(
+    searchParams.get('document_type') || searchParams.get('type') || searchParams.get('tipo')
+  )
+  const documentId = searchParams.get('document_id') || searchParams.get('id') || ''
   const token = searchParams.get('token') || ''
 
   if (!documentType || !VALID_TYPES.has(documentType)) {
@@ -226,7 +243,9 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     token,
     documentType,
+    document_type: documentType,
     documentId,
+    document_id: documentId,
     payload,
   })
 }

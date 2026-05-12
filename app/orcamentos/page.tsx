@@ -878,14 +878,14 @@ export default function OrcamentoPage() {
   async function publicarOrcamento(orc: OrcamentoSalvo) {
     try {
       const publicado = await savePublicDocument({
-        documentType: 'quotation',
+        documentType: 'orcamento',
         documentId: orc.id,
         document: orc,
         config,
       })
 
       return buildAbsoluteUrl(
-        buildPublicDocumentPath('quotation', orc.id, publicado.token),
+        buildPublicDocumentPath('orcamento', orc.id, publicado.token),
         window.location.origin
       )
     } catch (error) {

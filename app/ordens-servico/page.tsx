@@ -254,7 +254,6 @@ export default function OrdemServicoPage() {
       )
     } catch (error) {
       console.error('Erro ao publicar OS:', error)
-      alert('Não foi possível publicar online agora. Usando link local.')
       return linkValido(item)
     }
   }

@@ -39,11 +39,13 @@ export type ConnectOrcamento = {
   itens?: ConnectItem[]
 }
 
-export type PublicDocumentType = 'quotation' | 'ordem_servico'
+export type PublicDocumentType = 'orcamento' | 'ordem_servico'
 
 export type PublicDocumentSnapshot<TDocument = unknown, TConfig = unknown> = {
   documentType: PublicDocumentType
+  document_type: PublicDocumentType
   documentId: string
+  document_id: string
   document: TDocument
   config?: TConfig
   createdAt: string
@@ -59,7 +61,9 @@ export type SavePublicDocumentInput<TDocument = unknown, TConfig = unknown> = {
 export type SavePublicDocumentResult<TDocument = unknown, TConfig = unknown> = {
   token: string
   documentType: PublicDocumentType
+  document_type: PublicDocumentType
   documentId: string
+  document_id: string
   payload: PublicDocumentSnapshot<TDocument, TConfig>
 }
 
@@ -126,7 +130,7 @@ export function buildPublicDocumentPath(
   token?: string
 ) {
   const base =
-    documentType === 'quotation'
+    documentType === 'orcamento'
       ? buildPublicOrcamentoPath(id)
       : buildPublicServiceOrderPath(id)
 
@@ -139,7 +143,7 @@ export function buildPublicPrintDocumentPath(
   token?: string
 ) {
   const base =
-    documentType === 'quotation'
+    documentType === 'orcamento'
       ? buildPrintOrcamentoPath(id)
       : buildPublicServiceOrderPath(id)
 
@@ -152,22 +156,34 @@ export async function savePublicDocument<TDocument, TConfig = unknown>({
   document,
   config,
 }: SavePublicDocumentInput<TDocument, TConfig>) {
+  const normalizedDocumentId = String(documentId)
+  const token = generatePublicDocumentToken()
+  const payload: PublicDocumentSnapshot<TDocument, TConfig> = {
+    documentType,
+    document_type: documentType,
+    documentId: normalizedDocumentId,
+    document_id: normalizedDocumentId,
+    document,
+    config,
+    createdAt: new Date().toISOString(),
+  }
+  const requestBody = {
+    document_type: documentType,
+    document_id: normalizedDocumentId,
+    token,
+    payload,
+  }
+
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Public document POST payload:', requestBody)
+  }
+
   const response = await fetch('/api/public-docs', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      documentType,
-      documentId: String(documentId),
-      payload: {
-        documentType,
-        documentId: String(documentId),
-        document,
-        config,
-        createdAt: new Date().toISOString(),
-      },
-    }),
+    body: JSON.stringify(requestBody),
   })
 
   if (!response.ok) {
@@ -175,6 +191,16 @@ export async function savePublicDocument<TDocument, TConfig = unknown>({
   }
 
   return response.json() as Promise<SavePublicDocumentResult<TDocument, TConfig>>
+}
+
+function generatePublicDocumentToken() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID().replaceAll('-', '')
+  }
+
+  const bytes = new Uint8Array(24)
+  globalThis.crypto?.getRandomValues(bytes)
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 export async function loadPublicDocument<TDocument = unknown, TConfig = unknown>(
@@ -185,8 +211,8 @@ export async function loadPublicDocument<TDocument = unknown, TConfig = unknown>
   if (!token) return null
 
   const params = new URLSearchParams({
-    type: documentType,
-    id: String(documentId),
+    document_type: documentType,
+    document_id: String(documentId),
     token,
   })
 

@@ -167,7 +167,7 @@ export default function ImpressaoOrcamentoPage() {
       if (token) {
         try {
           const publico = await loadPublicDocument<Orcamento, Configuracao>(
-            'quotation',
+            'orcamento',
             id,
             token
           )
