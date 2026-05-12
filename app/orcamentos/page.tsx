@@ -1,6 +1,15 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import {
+  DEFAULT_LOGO_PATH,
+  buildAbsoluteUrl,
+  buildPublicDocumentPath,
+  buildPrintOrcamentoPath,
+  buildPublicOrcamentoPath,
+  normalizeBrazilWhatsAppNumber,
+  savePublicDocument,
+} from '@/lib/connect-public'
 
 type TipoPessoaCliente = 'PF' | 'PJ'
 
@@ -186,7 +195,7 @@ export default function OrcamentoPage() {
     corSecundaria: '#1d4ed8',
     corTabela: '#f3f4f6',
     mostrarQuantidade: true,
-    logoUrl: '/logo-connect.png',
+    logoUrl: DEFAULT_LOGO_PATH,
   })
 
   const [formasPagamento, setFormasPagamento] = useState<string[]>(['PIX', 'DINHEIRO', 'CARTAO 1X'])
@@ -248,7 +257,11 @@ export default function OrcamentoPage() {
     if (salvoConfig) {
       try {
         const dados = JSON.parse(salvoConfig)
-        setConfig((anterior) => ({ ...anterior, ...dados }))
+        setConfig((anterior) => ({
+          ...anterior,
+          ...dados,
+          logoUrl: dados.logoUrl === '/logo-connect.png' ? DEFAULT_LOGO_PATH : dados.logoUrl || anterior.logoUrl,
+        }))
         setTituloPdf(dados.tituloPdf || 'Orçamento Comercial')
         setObservacao(dados.rodapePdf || 'Obrigado pela preferência.')
         setFormaPagamento(dados.formaPagamentoPadrao || 'PIX')
@@ -285,7 +298,11 @@ export default function OrcamentoPage() {
         const lista = JSON.parse(salvos)
         if (Array.isArray(lista)) {
           setOrcamentosSalvos(
-            lista.map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+            lista.map((item) => ({
+              ...item,
+              status: normalizarStatus(item.status),
+              link: gerarLinkDocumento(Number(item.id)),
+            }))
           )
         }
       } catch {}
@@ -487,7 +504,7 @@ export default function OrcamentoPage() {
   }
 
   function gerarLinkDocumento(id: number) {
-    return `${window.location.origin}/impressao-orcamento/${id}`
+    return buildAbsoluteUrl(buildPublicOrcamentoPath(id), window.location.origin)
   }
 
   function limparCamposItem() {
@@ -818,7 +835,7 @@ export default function OrcamentoPage() {
       previsao: '',
       data: new Date().toLocaleDateString('pt-BR'),
       ultimaAtualizacao: new Date().toLocaleDateString('pt-BR'),
-      link: `${window.location.origin}/impressao-ordem-servico/${novoId}`,
+      link: buildAbsoluteUrl(buildPublicDocumentPath('ordem_servico', novoId), window.location.origin),
       orcamentoId: orc.id,
     }
     localStorage.setItem(OS_KEY, JSON.stringify([novaOS, ...ordens]))
@@ -858,14 +875,35 @@ export default function OrcamentoPage() {
     window.open(link, '_blank')
   }
 
-  function compartilharLinkOrcamento(orc: OrcamentoSalvo) {
-    const telefone = String(orc.cliente?.telefone || '').replace(/\D/g, '')
+  async function publicarOrcamento(orc: OrcamentoSalvo) {
+    try {
+      const publicado = await savePublicDocument({
+        document_type: 'orcamento',
+        document_id: orc.id,
+        document: orc,
+        config,
+      })
+
+      return buildAbsoluteUrl(
+        buildPublicDocumentPath('orcamento', orc.id, publicado.token),
+        window.location.origin
+      )
+    } catch (error) {
+      console.error('Erro ao publicar orçamento:', error)
+      notificar('Não foi possível publicar online. Usando link local.', 'info')
+      return gerarLinkDocumento(orc.id)
+    }
+  }
+
+  async function compartilharLinkOrcamento(orc: OrcamentoSalvo) {
+    const telefone = normalizeBrazilWhatsAppNumber(orc.cliente?.telefone || '')
+    const link = await publicarOrcamento(orc)
     let mensagem = `Olá ${orc.cliente?.nome || ''}!\n\n`
     mensagem += `Segue seu orçamento *${orc.numero}* no valor de *${moeda(orc.total)}*.\n`
     if (orc.validade) mensagem += `Validade: ${orc.validade}.\n`
-    mensagem += `\nAcesse aqui: ${orc.link}`
+    mensagem += `\nAcesse aqui: ${link}`
     if (telefone) {
-      window.open(`https://wa.me/55${telefone}?text=${encodeURIComponent(mensagem)}`, '_blank')
+      window.open(`https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`, '_blank')
       return
     }
     window.open(`https://wa.me/?text=${encodeURIComponent(mensagem)}`, '_blank')
@@ -881,7 +919,7 @@ export default function OrcamentoPage() {
       return
     }
 
-    const numero = clienteSelecionado.telefone.replace(/\D/g, '')
+    const numero = normalizeBrazilWhatsAppNumber(clienteSelecionado.telefone)
     let mensagem = `📄 *${tituloPdf}*\n\n`
     mensagem += `👤 *Cliente:* ${clienteSelecionado.nome}\n`
     mensagem += `💳 *Pagamento:* ${formaPagamento}\n`
@@ -907,7 +945,12 @@ export default function OrcamentoPage() {
     mensagem += `\n💰 *Total:* ${moeda(total)}`
     mensagem += `\n\n${observacao}`
     mensagem += `\n\nSe aprovar, me responda e já deixo tudo encaminhado ✅`
-    window.open(`https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`, '_blank')
+    window.open(
+      numero
+        ? `https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`
+        : `https://wa.me/?text=${encodeURIComponent(mensagem)}`,
+      '_blank'
+    )
   }
 
   function gerarPDF() {
@@ -1732,7 +1775,7 @@ export default function OrcamentoPage() {
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0,1fr))' : 'repeat(8, auto)', gap: 8, justifyContent: isMobile ? 'stretch' : 'end' }}>
-                      <button onClick={() => (window.location.href = `/impressao-orcamento/${orc.id}`)} style={{ ...buttonBase, background: '#f97316', color: '#fff', height: 36, padding: '0 14px', fontSize: 13 }}>Visualizar</button>
+                      <button onClick={() => (window.location.href = buildPrintOrcamentoPath(orc.id))} style={{ ...buttonBase, background: '#f97316', color: '#fff', height: 36, padding: '0 14px', fontSize: 13 }}>Visualizar</button>
                       <button onClick={() => compartilharLinkOrcamento(orc)} style={{ ...buttonBase, background: '#16a34a', color: '#fff', height: 36, padding: '0 14px', fontSize: 13 }}>Compartilhar</button>
                       <button onClick={() => editarOrcamento(orc)} style={{ ...buttonBase, background: '#2563eb', color: '#fff', height: 36, padding: '0 14px', fontSize: 13 }}>Editar</button>
                       <button onClick={() => alterarStatusOrcamento(orc.id, 'Aprovado', 'Orçamento aprovado!')} style={{ ...buttonBase, background: '#22c55e', color: '#052e16', height: 36, padding: '0 14px', fontSize: 13 }}>Aprovar</button>

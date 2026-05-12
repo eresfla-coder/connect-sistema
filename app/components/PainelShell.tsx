@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
 import { supabase } from '@/lib/supabase'
 
 type MenuItem = {
@@ -37,6 +38,16 @@ export default function PainelShell({
 }) {
   const pathname = usePathname()
   const router = useRouter()
+  const rotaSemShell = useMemo(() => {
+    const path = pathname || ''
+    return (
+      path === '/login' ||
+      path === '/bloqueado' ||
+      path.startsWith('/publico') ||
+      path.startsWith('/view') ||
+      path.startsWith('/impressao-orcamento')
+    )
+  }, [pathname])
 
   const [menuAberto, setMenuAberto] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
@@ -61,6 +72,8 @@ export default function PainelShell({
   }, [isMobile, menuAberto])
 
   useEffect(() => {
+    if (rotaSemShell) return
+
     function atualizarBadges() {
       try {
         const salvosOrc = localStorage.getItem('connect_orcamentos_salvos')
@@ -82,9 +95,14 @@ export default function PainelShell({
     atualizarBadges()
     window.addEventListener('storage', atualizarBadges)
     return () => window.removeEventListener('storage', atualizarBadges)
-  }, [])
+  }, [rotaSemShell])
 
   useEffect(() => {
+    if (rotaSemShell) {
+      setCarregandoAcesso(false)
+      return
+    }
+
     let componenteAtivo = true
 
     async function verificarAcesso() {
@@ -154,7 +172,7 @@ export default function PainelShell({
       componenteAtivo = false
       subscription.unsubscribe()
     }
-  }, [router])
+  }, [rotaSemShell, router])
 
   function abrirWhatsApp() {
     try {
@@ -189,6 +207,7 @@ export default function PainelShell({
 
   async function handleLogout() {
     await supabase.auth.signOut()
+    document.cookie = 'connect_auth=; path=/; max-age=0; samesite=lax'
     router.push('/login')
   }
 
@@ -218,6 +237,8 @@ export default function PainelShell({
     if (item.destaque) return '0 8px 20px rgba(34,197,94,0.28)'
     return 'none'
   }
+
+  if (rotaSemShell) return <>{children}</>
 
   if (carregandoAcesso) {
     return (
@@ -336,7 +357,7 @@ export default function PainelShell({
         >
           <div>
             <div style={{ textAlign: 'center', marginBottom: 20 }}>
-              <img src="/logo-connect.png" style={{ width: 100 }} alt="Logo Connect" />
+              <img src={DEFAULT_LOGO_PATH} style={{ width: 100 }} alt="Logo Connect" />
               <div style={{ color: '#fff', fontWeight: 800 }}>CONNECT SISTEMA</div>
 
               {perfil?.email ? (
@@ -492,7 +513,7 @@ export default function PainelShell({
               }}
             >
               <img
-                src="/logo-connect.png"
+                src={DEFAULT_LOGO_PATH}
                 alt="Connect Sistema"
                 style={{
                   width: 54,

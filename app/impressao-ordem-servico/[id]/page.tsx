@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { DEFAULT_LOGO_PATH, loadPublicDocument } from '@/lib/connect-public'
 
 const OS_KEY = 'connect_ordens_servico_salvas'
 const CONFIG_KEY = 'connect_configuracoes'
@@ -142,17 +143,54 @@ function buscarOS(lista: OrdemServico[], id: string): OrdemServico | null {
 export default function ImpressaoOrdemServicoPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const id = String(params?.id ?? '')
+  const token = searchParams.get('token')
 
   const [os, setOs] = useState<OrdemServico | null>(null)
   const [config, setConfig] = useState<ConfiguracaoSistema>({})
   const [carregado, setCarregado] = useState(false)
 
   useEffect(() => {
-    setOs(buscarOS(getOrdens(), id))
-    setConfig(getConfig())
-    setCarregado(true)
-  }, [id])
+    let ativo = true
+
+    async function carregarDocumento() {
+      const local = buscarOS(getOrdens(), id)
+      const configLocal = getConfig()
+
+      if (token) {
+        try {
+          const publico = await loadPublicDocument<OrdemServico, ConfiguracaoSistema>(
+            'ordem_servico',
+            id,
+            token
+          )
+
+          if (!ativo) return
+
+          if (publico) {
+            setOs(publico.document || local)
+            setConfig(publico.config || configLocal)
+            setCarregado(true)
+            return
+          }
+        } catch (error) {
+          console.error('Erro ao carregar OS pública do Supabase:', error)
+        }
+      }
+
+      if (!ativo) return
+      setOs(local)
+      setConfig(configLocal)
+      setCarregado(true)
+    }
+
+    carregarDocumento()
+
+    return () => {
+      ativo = false
+    }
+  }, [id, token])
 
   const valorNumero = useMemo(() => normalizarNumero(os?.valor ?? 0), [os])
   const entradaNumero = useMemo(() => normalizarNumero(os?.entrada ?? 0), [os])
@@ -162,7 +200,10 @@ export default function ImpressaoOrdemServicoPage() {
   const cidadeUf = config.cidadeUf || config.cidade || 'PARNAMIRIM-RN'
   const telefoneEmpresa = config.telefone || ''
   const responsavel = config.responsavel || 'ERES FAUSTINO'
-  const logoUrl = config.logoUrl || config.logo || '/logo-connect.png'
+  const logoUrl =
+    config.logoUrl === '/logo-connect.png'
+      ? DEFAULT_LOGO_PATH
+      : config.logoUrl || config.logo || DEFAULT_LOGO_PATH
   const corPrimaria = config.corPrimaria || '#22c55e'
   const corSecundaria = config.corSecundaria || '#e5e7eb'
 
@@ -357,6 +398,7 @@ export default function ImpressaoOrdemServicoPage() {
       <div style={{ position: 'fixed', inset: 0, background: '#0b2d63', zIndex: 9999, overflow: 'auto', padding: 20 }}>
         <div style={{ maxWidth: 900, margin: '0 auto', background: '#fff', borderRadius: 18, padding: 20, border: '1px solid #e5e7eb' }}>
           <h1 style={{ marginTop: 0 }}>OS não encontrada</h1>
+          <p>Esse documento não foi localizado ou o link público expirou.</p>
           <button
             onClick={() => router.push('/ordens-servico')}
             style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 10, padding: '10px 16px', fontWeight: 800, cursor: 'pointer' }}
@@ -369,8 +411,66 @@ export default function ImpressaoOrdemServicoPage() {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#0b2d63', zIndex: 9999, overflow: 'auto', padding: 20 }}>
-      <div style={{ maxWidth: 980, margin: '0 auto 14px', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+    <div className="os-public-shell" style={{ position: 'fixed', inset: 0, background: '#0b2d63', zIndex: 9999, overflow: 'auto', padding: 20 }}>
+      <style jsx>{`
+        .os-print-actions {
+          max-width: 980px;
+          margin: 0 auto 18px;
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+          padding: 10px;
+          border-radius: 16px;
+          background: rgba(11, 45, 99, 0.92);
+          backdrop-filter: blur(8px);
+        }
+
+        .os-print-document {
+          margin-top: 6px;
+        }
+
+        @media (max-width: 640px) {
+          .os-public-shell {
+            padding: calc(env(safe-area-inset-top, 0px) + 14px) 12px 20px !important;
+          }
+
+          .os-print-actions {
+            position: static;
+            z-index: auto;
+            margin-bottom: 28px;
+          }
+
+          .os-print-actions button {
+            min-height: 46px;
+            flex: 1 1 140px;
+          }
+
+          .os-print-document {
+            margin-top: 10px;
+          }
+        }
+
+        @media print {
+          .os-print-actions {
+            display: none !important;
+          }
+
+          .os-public-shell {
+            position: static !important;
+            inset: auto !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            background: #ffffff !important;
+          }
+
+          .os-print-document {
+            margin-top: 0 !important;
+          }
+        }
+      `}</style>
+
+      <div className="os-print-actions">
         <button
           onClick={() => router.push('/ordens-servico')}
           style={{ background: '#e5e7eb', color: '#111827', border: 'none', borderRadius: 12, padding: '11px 18px', fontWeight: 800, cursor: 'pointer', boxShadow: '0 10px 20px rgba(0,0,0,0.12)' }}
@@ -386,7 +486,7 @@ export default function ImpressaoOrdemServicoPage() {
         </button>
       </div>
 
-      <div style={{ maxWidth: 980, margin: '0 auto', background: '#f7f3ea', borderRadius: 24, padding: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.08)', border: `1px solid ${corSecundaria}` }}>
+      <div className="os-print-document" style={{ maxWidth: 980, margin: '6px auto 0', background: '#f7f3ea', borderRadius: 24, padding: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.08)', border: `1px solid ${corSecundaria}` }}>
         <div style={{ background: '#fff', borderRadius: 22, padding: 18, border: `1px solid ${corSecundaria}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', borderBottom: `3px solid ${corPrimaria}`, paddingBottom: 12, marginBottom: 14 }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -395,7 +495,7 @@ export default function ImpressaoOrdemServicoPage() {
                 alt="Logo"
                 onError={(e) => {
                   const img = e.currentTarget as HTMLImageElement
-                  if (!img.src.endsWith('/logo-connect.jpeg')) img.src = '/logo-connect.jpeg'
+                  if (!img.src.endsWith(DEFAULT_LOGO_PATH)) img.src = DEFAULT_LOGO_PATH
                 }}
                 style={{ width: 82, height: 82, objectFit: 'contain', borderRadius: 12 }}
               />

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import extenso from 'extenso'
+import { normalizeBrazilWhatsAppNumber } from '@/lib/connect-public'
 
 type DadosRecibo = {
   nomeCliente?: string
@@ -29,10 +30,6 @@ function moeda(valor?: number) {
     style: 'currency',
     currency: 'BRL',
   })
-}
-
-function somenteDigitos(valor?: string) {
-  return String(valor || '').replace(/\D/g, '')
 }
 
 function formatarDataBR(data?: string) {
@@ -101,10 +98,10 @@ export default function ReciboAvulsoPage() {
   const formaPagamento = dados?.formaPagamento || 'Pix'
 
   function enviarWhatsApp() {
-    const telefone = somenteDigitos(dados?.clienteTelefone)
+    const telefone = normalizeBrazilWhatsAppNumber(dados?.clienteTelefone)
     const mensagem = `Olá ${dados?.nomeCliente || ''}!\n\nSegue seu recibo:\nValor: ${moeda(valorNumerico)}\nReferente: ${dados?.referente || 'pagamento'}`
     const url = telefone
-      ? `https://wa.me/55${telefone}?text=${encodeURIComponent(mensagem)}`
+      ? `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`
       : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
     window.open(url, '_blank')
   }

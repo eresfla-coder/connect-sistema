@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Connect Sistema">
+  <defs>
+    <linearGradient id="bg" x1="70" y1="40" x2="450" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1f3554"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="150" y1="110" x2="380" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fb923c"/>
+      <stop offset="1" stop-color="#22c55e"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="118" fill="url(#bg)"/>
+  <path d="M147 262c0-75 48-128 120-128 47 0 84 22 105 58l-53 31c-10-20-28-32-52-32-38 0-63 29-63 71s25 71 63 71c24 0 43-12 53-32l53 31c-21 36-58 58-105 58-72 0-120-53-120-128Z" fill="#fff"/>
+  <path d="M317 132h52v248h-52V132Z" fill="url(#accent)" opacity=".95"/>
+  <circle cx="369" cy="132" r="26" fill="#fb923c"/>
+  <circle cx="369" cy="380" r="26" fill="#22c55e"/>
+</svg>

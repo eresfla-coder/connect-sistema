@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
 import { supabase } from '@/lib/supabase'
 
 function venceuPerfil(vencimento?: string | null) {
@@ -90,7 +91,8 @@ export default function LoginPage() {
 
       salvarCookieLogin()
       setMensagemSucesso('Acesso validado com sucesso.')
-      router.push('/dashboard')
+      const redirectTo = new URLSearchParams(window.location.search).get('redirect')
+      router.push(redirectTo?.startsWith('/') ? redirectTo : '/dashboard')
     } catch (err) {
       setMensagemErro('Ocorreu um erro ao validar seu acesso.')
       console.error(err)
@@ -137,6 +139,14 @@ export default function LoginPage() {
       }
 
       const userId = authData.user?.id || null
+
+      if (!userId) {
+        setMensagemSucesso('Conta criada. Confirme o e-mail antes de entrar.')
+        setModo('entrar')
+        setConfirmarSenha('')
+        setSenha('')
+        return
+      }
 
       const { error: perfilError } = await supabase
         .from('perfis')
@@ -287,7 +297,7 @@ export default function LoginPage() {
               }}
             >
               <img
-                src="/logo-connect.png"
+                src={DEFAULT_LOGO_PATH}
                 alt="Logo"
                 style={{ width: 56, height: 56, objectFit: 'contain' }}
                 onError={(e) => {
