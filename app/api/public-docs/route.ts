@@ -200,6 +200,10 @@ export async function POST(request: NextRequest) {
     payload: snapshot,
   }
 
+  if (!dbPayload.document_type || !dbPayload.document_id) {
+    return jsonError('Payload final do documento publico invalido.', 400)
+  }
+
   console.error('FINAL_DB_PAYLOAD', dbPayload)
 
   const { data: existing, error: selectError } = await supabase
