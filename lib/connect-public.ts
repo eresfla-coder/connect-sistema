@@ -39,6 +39,30 @@ export type ConnectOrcamento = {
   itens?: ConnectItem[]
 }
 
+export type PublicDocumentType = 'quotation' | 'service_order'
+
+export type PublicDocumentSnapshot<TDocument = unknown, TConfig = unknown> = {
+  documentType: PublicDocumentType
+  documentId: string
+  document: TDocument
+  config?: TConfig
+  createdAt: string
+}
+
+export type SavePublicDocumentInput<TDocument = unknown, TConfig = unknown> = {
+  documentType: PublicDocumentType
+  documentId: string | number
+  document: TDocument
+  config?: TConfig
+}
+
+export type SavePublicDocumentResult<TDocument = unknown, TConfig = unknown> = {
+  token: string
+  documentType: PublicDocumentType
+  documentId: string
+  payload: PublicDocumentSnapshot<TDocument, TConfig>
+}
+
 export const STORAGE_ORCAMENTOS = 'connect_orcamentos_salvos'
 export const STORAGE_CONFIG = 'connect_configuracoes'
 export const DEFAULT_LOGO_PATH = '/logo-connect.svg'
@@ -77,13 +101,105 @@ export function buildPublicOrcamentoPath(id: string | number) {
   return `/publico/orcamento/${encodeURIComponent(String(id))}`
 }
 
+export function buildPublicServiceOrderPath(id: string | number) {
+  return `/impressao-ordem-servico/${encodeURIComponent(String(id))}`
+}
+
 export function buildPrintOrcamentoPath(id: string | number) {
   return `/impressao-orcamento/${encodeURIComponent(String(id))}`
+}
+
+export function withPublicToken(path: string, token?: string) {
+  if (!token) return path
+  const separator = path.includes('?') ? '&' : '?'
+  return `${path}${separator}token=${encodeURIComponent(token)}`
 }
 
 export function buildAbsoluteUrl(path: string, origin = getPublicOrigin()) {
   if (!origin) return path
   return `${origin}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+export function buildPublicDocumentPath(
+  documentType: PublicDocumentType,
+  id: string | number,
+  token?: string
+) {
+  const base =
+    documentType === 'quotation'
+      ? buildPublicOrcamentoPath(id)
+      : buildPublicServiceOrderPath(id)
+
+  return withPublicToken(base, token)
+}
+
+export function buildPublicPrintDocumentPath(
+  documentType: PublicDocumentType,
+  id: string | number,
+  token?: string
+) {
+  const base =
+    documentType === 'quotation'
+      ? buildPrintOrcamentoPath(id)
+      : buildPublicServiceOrderPath(id)
+
+  return withPublicToken(base, token)
+}
+
+export async function savePublicDocument<TDocument, TConfig = unknown>({
+  documentType,
+  documentId,
+  document,
+  config,
+}: SavePublicDocumentInput<TDocument, TConfig>) {
+  const response = await fetch('/api/public-docs', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      documentType,
+      documentId: String(documentId),
+      payload: {
+        documentType,
+        documentId: String(documentId),
+        document,
+        config,
+        createdAt: new Date().toISOString(),
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error('Nao foi possivel publicar o documento.')
+  }
+
+  return response.json() as Promise<SavePublicDocumentResult<TDocument, TConfig>>
+}
+
+export async function loadPublicDocument<TDocument = unknown, TConfig = unknown>(
+  documentType: PublicDocumentType,
+  documentId: string | number,
+  token?: string | null
+) {
+  if (!token) return null
+
+  const params = new URLSearchParams({
+    type: documentType,
+    id: String(documentId),
+    token,
+  })
+
+  const response = await fetch(`/api/public-docs?${params.toString()}`, {
+    cache: 'no-store',
+  })
+
+  if (!response.ok) {
+    throw new Error('Documento publico nao encontrado.')
+  }
+
+  const data = (await response.json()) as SavePublicDocumentResult<TDocument, TConfig>
+  return data.payload
 }
 
 export function money(value?: number) {

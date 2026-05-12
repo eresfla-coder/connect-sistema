@@ -1,8 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
-import { DEFAULT_LOGO_PATH, normalizeBrazilWhatsAppNumber } from '@/lib/connect-public'
+import { useParams, useSearchParams } from 'next/navigation'
+import {
+  DEFAULT_LOGO_PATH,
+  loadPublicDocument,
+  normalizeBrazilWhatsAppNumber,
+} from '@/lib/connect-public'
 
 const STORAGE_KEY = 'connect_orcamentos_salvos'
 const CONFIG_KEY = 'connect_configuracoes'
@@ -131,33 +135,68 @@ function normalizarItens(itens: unknown): ItemType[] {
 
 export default function OrcamentoPublicoPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const [orcamento, setOrcamento] = useState<OrcamentoType | null>(null)
   const [config, setConfig] = useState<ConfigType | null>(null)
   const [carregado, setCarregado] = useState(false)
 
   const idParam = useMemo(() => String(params?.id || ''), [params])
+  const token = searchParams.get('token')
 
   useEffect(() => {
-    try {
-      const salvos: OrcamentoType[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
-      const configuracoes: ConfigType = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}')
+    let ativo = true
 
-      const encontrado = salvos.find(
-        (item) =>
-          String(item.id || '') === idParam ||
-          String(item.numero || '') === idParam
-      )
+    async function carregarDocumento() {
+      try {
+        const salvos: OrcamentoType[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+        const configuracoes: ConfigType = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}')
 
-      setOrcamento(encontrado || null)
-      setConfig(configuracoes || null)
-    } catch (error) {
-      console.error('Erro ao carregar orçamento público:', error)
-      setOrcamento(null)
-      setConfig(null)
-    } finally {
-      setCarregado(true)
+        const encontrado = salvos.find(
+          (item) =>
+            String(item.id || '') === idParam ||
+            String(item.numero || '') === idParam
+        )
+
+        if (token) {
+          try {
+            const publico = await loadPublicDocument<OrcamentoType, ConfigType>(
+              'quotation',
+              idParam,
+              token
+            )
+
+            if (!ativo) return
+
+            if (publico) {
+              setOrcamento(publico.document || encontrado || null)
+              setConfig(publico.config || configuracoes || null)
+              setCarregado(true)
+              return
+            }
+          } catch (error) {
+            console.error('Erro ao carregar orçamento público do Supabase:', error)
+          }
+        }
+
+        if (!ativo) return
+        setOrcamento(encontrado || null)
+        setConfig(configuracoes || null)
+        setCarregado(true)
+      } catch (error) {
+        console.error('Erro ao carregar orçamento público:', error)
+        if (!ativo) return
+        setOrcamento(null)
+        setConfig(null)
+        setCarregado(true)
+      }
     }
-  }, [idParam])
+
+    carregarDocumento()
+
+    return () => {
+      ativo = false
+    }
+  }, [idParam, token])
 
   function atualizarStatus(novoStatus: string) {
     try {
@@ -251,7 +290,7 @@ export default function OrcamentoPublicoPage() {
         >
           <h1 style={{ marginTop: 0, color: '#0f172a' }}>Orçamento não encontrado</h1>
           <p style={{ color: '#475569', marginBottom: 0 }}>
-            Esse orçamento não foi localizado neste dispositivo.
+            Esse orçamento não foi localizado ou o link público expirou.
           </p>
         </div>
       </div>

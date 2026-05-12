@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { DEFAULT_LOGO_PATH, loadPublicDocument } from '@/lib/connect-public'
 
 const STORAGE_KEY = 'connect_orcamentos_salvos'
 const CONFIG_KEY = 'connect_configuracoes'
@@ -148,18 +148,55 @@ function totalItem(item: ItemOrcamento) {
 export default function ImpressaoOrcamentoPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const id = String(params?.id || '')
+  const token = searchParams.get('token')
 
   const [orcamento, setOrcamento] = useState<Orcamento | null>(null)
   const [config, setConfig] = useState<Configuracao>({})
   const [carregado, setCarregado] = useState(false)
 
   useEffect(() => {
-    const lista = carregarLista()
-    setOrcamento(buscarOrcamento(lista, id))
-    setConfig(carregarConfig())
-    setCarregado(true)
-  }, [id])
+    let ativo = true
+
+    async function carregarDocumento() {
+      const lista = carregarLista()
+      const local = buscarOrcamento(lista, id)
+      const configLocal = carregarConfig()
+
+      if (token) {
+        try {
+          const publico = await loadPublicDocument<Orcamento, Configuracao>(
+            'quotation',
+            id,
+            token
+          )
+
+          if (!ativo) return
+
+          if (publico) {
+            setOrcamento(publico.document || local)
+            setConfig(publico.config || configLocal)
+            setCarregado(true)
+            return
+          }
+        } catch (error) {
+          console.error('Erro ao carregar impressão pública do orçamento:', error)
+        }
+      }
+
+      if (!ativo) return
+      setOrcamento(local)
+      setConfig(configLocal)
+      setCarregado(true)
+    }
+
+    carregarDocumento()
+
+    return () => {
+      ativo = false
+    }
+  }, [id, token])
 
   const itens = useMemo(() => (Array.isArray(orcamento?.itens) ? orcamento?.itens || [] : []), [orcamento])
   const subtotal = useMemo(
@@ -183,7 +220,7 @@ export default function ImpressaoOrcamentoPage() {
       <div className="print-page-shell">
         <div className="not-found-card">
           <h1>Orçamento não encontrado</h1>
-          <p>Esse documento não foi localizado neste dispositivo.</p>
+          <p>Esse documento não foi localizado ou o link público expirou.</p>
           <button onClick={() => router.push('/orcamentos')}>Voltar</button>
         </div>
         <style jsx>{styles}</style>

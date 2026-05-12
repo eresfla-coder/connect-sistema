@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import BotaoReciboAvulso from '@/components/recibos/botao-recibo-avulso'
+import {
+  buildAbsoluteUrl,
+  buildPublicDocumentPath,
+  savePublicDocument,
+} from '@/lib/connect-public'
 
 type Cliente = {
   id?: string | number
@@ -66,6 +71,7 @@ type OrdemServico = {
 const STORAGE_KEY = 'connect_ordens_servico_salvas'
 const CLIENTES_KEY = 'connect_clientes'
 const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
+const CONFIG_KEY = 'connect_configuracoes'
 
 const STATUS_OPTIONS = [
   'Aberta',
@@ -222,6 +228,35 @@ export default function OrdemServicoPage() {
 
   function linkValido(item: OrdemServico) {
     return montarLinkOS(Number(item.id))
+  }
+
+  function carregarConfigPublica() {
+    try {
+      const salvo = localStorage.getItem(CONFIG_KEY)
+      return salvo ? JSON.parse(salvo) : {}
+    } catch {
+      return {}
+    }
+  }
+
+  async function publicarOS(item: OrdemServico) {
+    try {
+      const publicado = await savePublicDocument({
+        documentType: 'service_order',
+        documentId: item.id,
+        document: item,
+        config: carregarConfigPublica(),
+      })
+
+      return buildAbsoluteUrl(
+        buildPublicDocumentPath('service_order', item.id, publicado.token),
+        window.location.origin
+      )
+    } catch (error) {
+      console.error('Erro ao publicar OS:', error)
+      alert('Não foi possível publicar online agora. Usando link local.')
+      return linkValido(item)
+    }
   }
 
   useEffect(() => {
@@ -527,8 +562,8 @@ export default function OrdemServicoPage() {
     router.push(`/impressao-ordem-servico/${item.id}`)
   }
 
-  function copiarLink(item: OrdemServico) {
-    const link = linkValido(item)
+  async function copiarLink(item: OrdemServico) {
+    const link = await publicarOS(item)
     if (navigator?.clipboard?.writeText) {
       navigator.clipboard.writeText(link).then(() => {
         alert('Link copiado com sucesso.')
@@ -540,8 +575,8 @@ export default function OrdemServicoPage() {
     alert(link)
   }
 
-  function compartilharWhatsApp(item: OrdemServico) {
-    const link = linkValido(item)
+  async function compartilharWhatsApp(item: OrdemServico) {
+    const link = await publicarOS(item)
     window.open(`https://wa.me/?text=${encodeURIComponent(link)}`, '_blank')
   }
 

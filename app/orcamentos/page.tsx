@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   DEFAULT_LOGO_PATH,
   buildAbsoluteUrl,
+  buildPublicDocumentPath,
   buildPrintOrcamentoPath,
   buildPublicOrcamentoPath,
   normalizeBrazilWhatsAppNumber,
+  savePublicDocument,
 } from '@/lib/connect-public'
 
 type TipoPessoaCliente = 'PF' | 'PJ'
@@ -873,9 +875,29 @@ export default function OrcamentoPage() {
     window.open(link, '_blank')
   }
 
-  function compartilharLinkOrcamento(orc: OrcamentoSalvo) {
+  async function publicarOrcamento(orc: OrcamentoSalvo) {
+    try {
+      const publicado = await savePublicDocument({
+        documentType: 'quotation',
+        documentId: orc.id,
+        document: orc,
+        config,
+      })
+
+      return buildAbsoluteUrl(
+        buildPublicDocumentPath('quotation', orc.id, publicado.token),
+        window.location.origin
+      )
+    } catch (error) {
+      console.error('Erro ao publicar orçamento:', error)
+      notificar('Não foi possível publicar online. Usando link local.', 'info')
+      return gerarLinkDocumento(orc.id)
+    }
+  }
+
+  async function compartilharLinkOrcamento(orc: OrcamentoSalvo) {
     const telefone = normalizeBrazilWhatsAppNumber(orc.cliente?.telefone || '')
-    const link = gerarLinkDocumento(orc.id)
+    const link = await publicarOrcamento(orc)
     let mensagem = `Olá ${orc.cliente?.nome || ''}!\n\n`
     mensagem += `Segue seu orçamento *${orc.numero}* no valor de *${moeda(orc.total)}*.\n`
     if (orc.validade) mensagem += `Validade: ${orc.validade}.\n`

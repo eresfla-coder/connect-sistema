@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { DEFAULT_LOGO_PATH, loadPublicDocument } from '@/lib/connect-public'
 
 const OS_KEY = 'connect_ordens_servico_salvas'
 const CONFIG_KEY = 'connect_configuracoes'
@@ -143,17 +143,54 @@ function buscarOS(lista: OrdemServico[], id: string): OrdemServico | null {
 export default function ImpressaoOrdemServicoPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const id = String(params?.id ?? '')
+  const token = searchParams.get('token')
 
   const [os, setOs] = useState<OrdemServico | null>(null)
   const [config, setConfig] = useState<ConfiguracaoSistema>({})
   const [carregado, setCarregado] = useState(false)
 
   useEffect(() => {
-    setOs(buscarOS(getOrdens(), id))
-    setConfig(getConfig())
-    setCarregado(true)
-  }, [id])
+    let ativo = true
+
+    async function carregarDocumento() {
+      const local = buscarOS(getOrdens(), id)
+      const configLocal = getConfig()
+
+      if (token) {
+        try {
+          const publico = await loadPublicDocument<OrdemServico, ConfiguracaoSistema>(
+            'service_order',
+            id,
+            token
+          )
+
+          if (!ativo) return
+
+          if (publico) {
+            setOs(publico.document || local)
+            setConfig(publico.config || configLocal)
+            setCarregado(true)
+            return
+          }
+        } catch (error) {
+          console.error('Erro ao carregar OS pública do Supabase:', error)
+        }
+      }
+
+      if (!ativo) return
+      setOs(local)
+      setConfig(configLocal)
+      setCarregado(true)
+    }
+
+    carregarDocumento()
+
+    return () => {
+      ativo = false
+    }
+  }, [id, token])
 
   const valorNumero = useMemo(() => normalizarNumero(os?.valor ?? 0), [os])
   const entradaNumero = useMemo(() => normalizarNumero(os?.entrada ?? 0), [os])
@@ -361,6 +398,7 @@ export default function ImpressaoOrdemServicoPage() {
       <div style={{ position: 'fixed', inset: 0, background: '#0b2d63', zIndex: 9999, overflow: 'auto', padding: 20 }}>
         <div style={{ maxWidth: 900, margin: '0 auto', background: '#fff', borderRadius: 18, padding: 20, border: '1px solid #e5e7eb' }}>
           <h1 style={{ marginTop: 0 }}>OS não encontrada</h1>
+          <p>Esse documento não foi localizado ou o link público expirou.</p>
           <button
             onClick={() => router.push('/ordens-servico')}
             style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 10, padding: '10px 16px', fontWeight: 800, cursor: 'pointer' }}
