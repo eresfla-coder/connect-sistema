@@ -5,6 +5,12 @@ import type { PublicDocumentSnapshot, PublicDocumentType } from '@/lib/connect-p
 export const dynamic = 'force-dynamic'
 
 type PublicDocumentRow = Record<string, unknown>
+type PublicDocumentDbPayload = {
+  document_type: PublicDocumentType
+  document_id: string
+  token: string
+  payload: PublicDocumentSnapshot
+}
 
 const VALID_TYPES = new Set<PublicDocumentType>(['orcamento', 'ordem_servico'])
 
@@ -187,12 +193,14 @@ export async function POST(request: NextRequest) {
     return jsonError('Publicacao indisponivel sem service role configurada.', 503)
   }
 
-  const row: PublicDocumentRow = {
+  const dbPayload: PublicDocumentDbPayload = {
     document_type: documentType,
     document_id: documentId,
     token,
     payload: snapshot,
   }
+
+  console.error('FINAL_DB_PAYLOAD', dbPayload)
 
   const { data: existing, error: selectError } = await supabase
     .from('public_documents')
@@ -209,7 +217,7 @@ export async function POST(request: NextRequest) {
   if (!selectError && existing?.id) {
     const { error: updateError } = await supabase
       .from('public_documents')
-      .update(row)
+      .update(dbPayload)
       .eq('id', existing.id)
 
     if (!updateError) {
@@ -226,7 +234,7 @@ export async function POST(request: NextRequest) {
     console.error('Erro ao atualizar public_documents:', updateError)
   }
 
-  const { error: insertError } = await supabase.from('public_documents').insert(row)
+  const { error: insertError } = await supabase.from('public_documents').insert(dbPayload)
 
   if (insertError) {
     console.error('Erro ao salvar public_documents:', insertError)
