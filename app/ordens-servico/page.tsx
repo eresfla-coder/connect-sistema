@@ -242,14 +242,14 @@ export default function OrdemServicoPage() {
   async function publicarOS(item: OrdemServico) {
     try {
       const publicado = await savePublicDocument({
-        documentType: 'service_order',
+        documentType: 'ordem_servico',
         documentId: item.id,
         document: item,
         config: carregarConfigPublica(),
       })
 
       return buildAbsoluteUrl(
-        buildPublicDocumentPath('service_order', item.id, publicado.token),
+        buildPublicDocumentPath('ordem_servico', item.id, publicado.token),
         window.location.origin
       )
     } catch (error) {

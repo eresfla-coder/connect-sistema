@@ -44,6 +44,7 @@ export default function PainelShell({
       path === '/login' ||
       path === '/bloqueado' ||
       path.startsWith('/publico') ||
+      path.startsWith('/view') ||
       path.startsWith('/impressao-orcamento') ||
       path.startsWith('/impressao-ordem-servico')
     )

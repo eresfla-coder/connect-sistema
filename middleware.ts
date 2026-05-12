@@ -15,6 +15,7 @@ export function middleware(request: NextRequest) {
 
   const segmentosPublicos = [
     '/publico',
+    '/view',
     '/impressao-orcamento',
     '/impressao-ordem-servico',
     '/_next',

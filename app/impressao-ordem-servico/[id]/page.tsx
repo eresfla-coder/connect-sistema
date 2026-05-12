@@ -161,7 +161,7 @@ export default function ImpressaoOrdemServicoPage() {
       if (token) {
         try {
           const publico = await loadPublicDocument<OrdemServico, ConfiguracaoSistema>(
-            'service_order',
+            'ordem_servico',
             id,
             token
           )

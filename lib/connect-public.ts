@@ -39,7 +39,7 @@ export type ConnectOrcamento = {
   itens?: ConnectItem[]
 }
 
-export type PublicDocumentType = 'quotation' | 'service_order'
+export type PublicDocumentType = 'quotation' | 'ordem_servico'
 
 export type PublicDocumentSnapshot<TDocument = unknown, TConfig = unknown> = {
   documentType: PublicDocumentType
@@ -102,7 +102,7 @@ export function buildPublicOrcamentoPath(id: string | number) {
 }
 
 export function buildPublicServiceOrderPath(id: string | number) {
-  return `/impressao-ordem-servico/${encodeURIComponent(String(id))}`
+  return `/view/os/${encodeURIComponent(String(id))}`
 }
 
 export function buildPrintOrcamentoPath(id: string | number) {

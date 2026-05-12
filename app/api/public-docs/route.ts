@@ -6,7 +6,13 @@ export const dynamic = 'force-dynamic'
 
 type PublicDocumentRow = Record<string, unknown>
 
-const VALID_TYPES = new Set<PublicDocumentType>(['quotation', 'service_order'])
+const VALID_TYPES = new Set<PublicDocumentType>(['quotation', 'ordem_servico'])
+
+function normalizeDocumentType(value?: string | null): PublicDocumentType | null {
+  if (value === 'quotation') return 'quotation'
+  if (value === 'ordem_servico' || value === 'service_order') return 'ordem_servico'
+  return null
+}
 
 function generateToken() {
   if (globalThis.crypto?.randomUUID) {
@@ -71,7 +77,7 @@ function payloadMatches(
   documentId: string
 ) {
   const payloadDocument = payload.document as { id?: string | number; numero?: string | number } | undefined
-  const payloadType = payload.documentType
+  const payloadType = normalizeDocumentType(payload.documentType)
   const payloadId = payload.documentId || payloadDocument?.id || payloadDocument?.numero
 
   return payloadType === documentType && String(payloadId) === documentId
@@ -90,7 +96,7 @@ export async function POST(request: NextRequest) {
     return jsonError('JSON invalido.', 400)
   }
 
-  const documentType = body.documentType
+  const documentType = normalizeDocumentType(body.documentType)
   const documentId = String(body.documentId || '')
   const payload = body.payload
 
@@ -122,20 +128,32 @@ export async function POST(request: NextRequest) {
     return jsonError('Publicacao indisponivel sem service role configurada.', 503)
   }
 
-  const rows: PublicDocumentRow[] = [
-    { document_type: documentType, document_id: documentId, token, payload: snapshot },
-    { type: documentType, document_id: documentId, token, payload: snapshot },
-    { document_type: documentType, document_id: documentId, token, data: snapshot },
-    { type: documentType, document_id: documentId, token, data: snapshot },
-    { document_type: documentType, public_id: documentId, token, payload: snapshot },
-  ]
+  const row: PublicDocumentRow = {
+    document_type: documentType,
+    document_id: documentId,
+    token,
+    payload: snapshot,
+  }
 
-  const errors: string[] = []
+  const { data: existing, error: selectError } = await supabase
+    .from('public_documents')
+    .select('id')
+    .eq('document_type', documentType)
+    .eq('document_id', documentId)
+    .limit(1)
+    .maybeSingle()
 
-  for (const row of rows) {
-    const { error } = await supabase.from('public_documents').insert(row)
+  if (selectError) {
+    console.error('Erro ao consultar public_documents para atualização:', selectError)
+  }
 
-    if (!error) {
+  if (!selectError && existing?.id) {
+    const { error: updateError } = await supabase
+      .from('public_documents')
+      .update(row)
+      .eq('id', existing.id)
+
+    if (!updateError) {
       return NextResponse.json({
         token,
         documentType,
@@ -144,16 +162,27 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    errors.push(error.message)
+    console.error('Erro ao atualizar public_documents:', updateError)
   }
 
-  console.error('Erro ao salvar public_documents:', errors)
-  return jsonError('Nao foi possivel salvar o documento publico.', 500)
+  const { error: insertError } = await supabase.from('public_documents').insert(row)
+
+  if (insertError) {
+    console.error('Erro ao salvar public_documents:', insertError)
+    return jsonError('Nao foi possivel salvar o documento publico.', 500)
+  }
+
+  return NextResponse.json({
+    token,
+    documentType,
+    documentId,
+    payload: snapshot,
+  })
 }
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
-  const documentType = searchParams.get('type') as PublicDocumentType | null
+  const documentType = normalizeDocumentType(searchParams.get('type'))
   const documentId = searchParams.get('id') || ''
   const token = searchParams.get('token') || ''
 
