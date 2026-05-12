@@ -8,10 +8,55 @@ type PublicDocumentRow = Record<string, unknown>
 
 const VALID_TYPES = new Set<PublicDocumentType>(['orcamento', 'ordem_servico'])
 
-function normalizeDocumentType(value?: string | null): PublicDocumentType | null {
-  if (value === 'orcamento' || value === 'quotation') return 'orcamento'
-  if (value === 'ordem_servico' || value === 'service_order') return 'ordem_servico'
+function normalizeDocumentType(value?: unknown): PublicDocumentType | null {
+  if (typeof value !== 'string') return null
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '_')
+
+  if (['orcamento', 'quote', 'quotation', 'cotacao'].includes(normalized)) {
+    return 'orcamento'
+  }
+
+  if (
+    [
+      'os',
+      'service_order',
+      'ordem_servico',
+      'ordem-servico',
+      'ordem_de_servico',
+      'ordem-de-servico',
+    ].includes(normalized)
+  ) {
+    return 'ordem_servico'
+  }
+
   return null
+}
+
+function looksLikeServiceOrder(value: unknown) {
+  if (!value || typeof value !== 'object') return false
+
+  const candidate = value as Record<string, unknown>
+  const document =
+    candidate.document && typeof candidate.document === 'object'
+      ? (candidate.document as Record<string, unknown>)
+      : candidate
+
+  return Boolean(
+    document.equipamento ||
+      document.defeito ||
+      document.checklist ||
+      document.tecnico ||
+      document.prioridade ||
+      document.serial ||
+      document.entrada ||
+      document.saldo
+  )
 }
 
 function generateToken() {
@@ -103,11 +148,14 @@ export async function POST(request: NextRequest) {
     return jsonError('JSON invalido.', 400)
   }
 
-  const documentType = normalizeDocumentType(
-    body.document_type || body.documentType || body.type || body.tipo
-  )
-  const documentId = String(body.document_id || body.documentId || '')
   const payload = body.payload
+  const documentType =
+    normalizeDocumentType(body.document_type || body.documentType || body.type || body.tipo) ||
+    normalizeDocumentType(payload?.document_type || payload?.documentType) ||
+    normalizeDocumentType((payload as Record<string, unknown> | undefined)?.type) ||
+    normalizeDocumentType((payload as Record<string, unknown> | undefined)?.tipo) ||
+    (looksLikeServiceOrder(payload) ? 'ordem_servico' : null)
+  const documentId = String(body.document_id || body.documentId || '')
 
   if (!documentType || !VALID_TYPES.has(documentType)) {
     return jsonError('Tipo de documento publico invalido.', 400)
