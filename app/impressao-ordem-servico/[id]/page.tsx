@@ -411,8 +411,67 @@ export default function ImpressaoOrdemServicoPage() {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#0b2d63', zIndex: 9999, overflow: 'auto', padding: 20 }}>
-      <div style={{ maxWidth: 980, margin: '0 auto 14px', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+    <div className="os-public-shell" style={{ position: 'fixed', inset: 0, background: '#0b2d63', zIndex: 9999, overflow: 'auto', padding: 20 }}>
+      <style jsx>{`
+        .os-print-actions {
+          max-width: 980px;
+          margin: 0 auto 18px;
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+          padding: 10px;
+          border-radius: 16px;
+          background: rgba(11, 45, 99, 0.92);
+          backdrop-filter: blur(8px);
+        }
+
+        .os-print-document {
+          margin-top: 6px;
+        }
+
+        @media (max-width: 640px) {
+          .os-public-shell {
+            padding: calc(env(safe-area-inset-top, 0px) + 14px) 12px 20px !important;
+          }
+
+          .os-print-actions {
+            position: sticky;
+            top: calc(env(safe-area-inset-top, 0px) + 8px);
+            z-index: 30;
+            margin-bottom: 24px;
+          }
+
+          .os-print-actions button {
+            min-height: 46px;
+            flex: 1 1 140px;
+          }
+
+          .os-print-document {
+            margin-top: 10px;
+          }
+        }
+
+        @media print {
+          .os-print-actions {
+            display: none !important;
+          }
+
+          .os-public-shell {
+            position: static !important;
+            inset: auto !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            background: #ffffff !important;
+          }
+
+          .os-print-document {
+            margin-top: 0 !important;
+          }
+        }
+      `}</style>
+
+      <div className="os-print-actions">
         <button
           onClick={() => router.push('/ordens-servico')}
           style={{ background: '#e5e7eb', color: '#111827', border: 'none', borderRadius: 12, padding: '11px 18px', fontWeight: 800, cursor: 'pointer', boxShadow: '0 10px 20px rgba(0,0,0,0.12)' }}
@@ -428,7 +487,7 @@ export default function ImpressaoOrdemServicoPage() {
         </button>
       </div>
 
-      <div style={{ maxWidth: 980, margin: '0 auto', background: '#f7f3ea', borderRadius: 24, padding: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.08)', border: `1px solid ${corSecundaria}` }}>
+      <div className="os-print-document" style={{ maxWidth: 980, margin: '6px auto 0', background: '#f7f3ea', borderRadius: 24, padding: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.08)', border: `1px solid ${corSecundaria}` }}>
         <div style={{ background: '#fff', borderRadius: 22, padding: 18, border: `1px solid ${corSecundaria}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', borderBottom: `3px solid ${corPrimaria}`, paddingBottom: 12, marginBottom: 14 }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
