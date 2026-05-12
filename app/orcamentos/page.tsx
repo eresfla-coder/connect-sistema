@@ -835,7 +835,7 @@ export default function OrcamentoPage() {
       previsao: '',
       data: new Date().toLocaleDateString('pt-BR'),
       ultimaAtualizacao: new Date().toLocaleDateString('pt-BR'),
-      link: `${window.location.origin}/impressao-ordem-servico/${novoId}`,
+      link: buildAbsoluteUrl(buildPublicDocumentPath('ordem_servico', novoId), window.location.origin),
       orcamentoId: orc.id,
     }
     localStorage.setItem(OS_KEY, JSON.stringify([novaOS, ...ordens]))

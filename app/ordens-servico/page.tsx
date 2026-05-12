@@ -208,8 +208,9 @@ export default function OrdemServicoPage() {
   const [form, setForm] = useState<OrdemServico>(ordemVazia([]))
 
   function montarLinkOS(id: number) {
-    if (typeof window === 'undefined') return `/impressao-ordem-servico/${id}`
-    return `${window.location.origin}/impressao-ordem-servico/${id}`
+    const path = buildPublicDocumentPath('ordem_servico', id)
+    if (typeof window === 'undefined') return path
+    return buildAbsoluteUrl(path, window.location.origin)
   }
 
   function normalizarItem(item: OrdemServico): OrdemServico {
@@ -557,8 +558,9 @@ export default function OrdemServicoPage() {
     alert('OS duplicada com sucesso.')
   }
 
-  function abrir(item: OrdemServico) {
-    router.push(`/impressao-ordem-servico/${item.id}`)
+  async function abrir(item: OrdemServico) {
+    const link = await publicarOS(item)
+    window.open(link, '_blank')
   }
 
   async function copiarLink(item: OrdemServico) {

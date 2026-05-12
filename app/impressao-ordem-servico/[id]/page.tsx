@@ -436,10 +436,9 @@ export default function ImpressaoOrdemServicoPage() {
           }
 
           .os-print-actions {
-            position: sticky;
-            top: calc(env(safe-area-inset-top, 0px) + 8px);
-            z-index: 30;
-            margin-bottom: 24px;
+            position: static;
+            z-index: auto;
+            margin-bottom: 28px;
           }
 
           .os-print-actions button {
