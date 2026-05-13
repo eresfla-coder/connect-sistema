@@ -2,8 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { buildPublicReciboPath, savePublicDocument } from '@/lib/connect-public'
 
 type DadosRecibo = {
+  id?: string
+  numero?: string
+  criadoEm?: string
   nomeCliente?: string
   clienteTelefone?: string
   referente?: string
@@ -228,6 +232,7 @@ export default function BotaoReciboAvulso() {
   const [formasPagamento, setFormasPagamento] = useState<string[]>([])
   const [clientes, setClientes] = useState<ClienteSalvo[]>([])
   const [isMobile, setIsMobile] = useState(false)
+  const [salvando, setSalvando] = useState(false)
 
   const [clienteId, setClienteId] = useState('')
   const [nomeCliente, setNomeCliente] = useState('')
@@ -353,7 +358,9 @@ export default function BotaoReciboAvulso() {
     setObservacao(orc.observacao || 'Obrigado pela preferência.')
   }
 
-  function salvarEAbrir() {
+  async function salvarEAbrir() {
+    if (salvando) return
+
     const valor = normalizarNumero(valorNumero)
 
     if (!nomeCliente.trim()) {
@@ -372,8 +379,13 @@ export default function BotaoReciboAvulso() {
     }
 
     const cfg = lerConfig()
+    const fichaId = `recibo-${Date.now()}`
+    const criadoEm = new Date().toISOString()
 
     const dados: DadosRecibo = {
+      id: fichaId,
+      numero: fichaId.replace('recibo-', ''),
+      criadoEm,
       nomeCliente: nomeCliente.trim(),
       clienteTelefone: clienteTelefone.trim(),
       referente: referente.trim(),
@@ -395,7 +407,23 @@ export default function BotaoReciboAvulso() {
 
     localStorage.setItem(RECIBO_VIEW_KEY, JSON.stringify(dados))
     setAberto(false)
-    router.push('/recibo-avulso')
+
+    try {
+      setSalvando(true)
+      const publicDoc = await savePublicDocument({
+        document_type: 'recibo',
+        document_id: fichaId,
+        document: dados,
+        config: dados.config,
+      })
+
+      router.push(buildPublicReciboPath(publicDoc.document_id, publicDoc.token))
+    } catch (error) {
+      console.error('Erro ao publicar recibo:', error)
+      router.push('/recibo-avulso')
+    } finally {
+      setSalvando(false)
+    }
   }
 
   return (
@@ -693,6 +721,7 @@ export default function BotaoReciboAvulso() {
                   <button
                     type="button"
                     onClick={salvarEAbrir}
+                    disabled={salvando}
                     style={{
                       background: '#2563eb',
                       color: '#fff',
@@ -700,10 +729,11 @@ export default function BotaoReciboAvulso() {
                       borderRadius: 10,
                       padding: '11px 16px',
                       fontWeight: 800,
-                      cursor: 'pointer',
+                      cursor: salvando ? 'wait' : 'pointer',
+                      opacity: salvando ? 0.75 : 1,
                     }}
                   >
-                    Criar recibo
+                    {salvando ? 'Gerando ficha...' : 'Criar recibo'}
                   </button>
                 </div>
               </div>

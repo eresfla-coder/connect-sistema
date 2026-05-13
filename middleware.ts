@@ -3,11 +3,18 @@ import type { NextRequest } from 'next/server'
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const searchParams = request.nextUrl.searchParams
+  const reciboPublico =
+    pathname === '/recibo-avulso' &&
+    searchParams.get('preview') === '1' &&
+    Boolean(searchParams.get('id')) &&
+    Boolean(searchParams.get('token'))
 
   // ROTAS LIVRES (SEM LOGIN)
   const rotasPublicas =
     pathname === '/login' ||
     pathname === '/bloqueado' ||
+    reciboPublico ||
     pathname.startsWith('/publico') ||
     pathname.startsWith('/impressao-orcamento') ||
     pathname.startsWith('/impressao-ordem-servico') ||

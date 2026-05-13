@@ -3,8 +3,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import extenso from 'extenso'
+import { buildPublicReciboPath, loadPublicDocument, normalizeBrazilWhatsAppNumber } from '@/lib/connect-public'
 
 type DadosRecibo = {
+  id?: string
+  numero?: string
+  criadoEm?: string
   nomeCliente?: string
   clienteTelefone?: string
   referente?: string
@@ -29,10 +33,6 @@ function moeda(valor?: number) {
     style: 'currency',
     currency: 'BRL',
   })
-}
-
-function somenteDigitos(valor?: string) {
-  return String(valor || '').replace(/\D/g, '')
 }
 
 function formatarDataBR(data?: string) {
@@ -71,15 +71,51 @@ function emojiPagamento(forma?: string) {
 export default function ReciboAvulsoPage() {
   const router = useRouter()
   const [dados, setDados] = useState<DadosRecibo | null>(null)
+  const [publicLink, setPublicLink] = useState('')
 
   useEffect(() => {
-    const raw = localStorage.getItem('connect_recibo_visualizacao')
-    if (!raw) return
-    try {
-      setDados(JSON.parse(raw))
-    } catch {
-      setDados(null)
+    function carregarFallbackLocal() {
+      const raw = localStorage.getItem('connect_recibo_visualizacao')
+      if (!raw) return
+      try {
+        setDados(JSON.parse(raw))
+      } catch {
+        setDados(null)
+      }
     }
+
+    async function carregarRecibo() {
+      const params = new URLSearchParams(window.location.search)
+      const id = params.get('id')
+      const token = params.get('token')
+
+      if (!id || !token) {
+        carregarFallbackLocal()
+        return
+      }
+
+      try {
+        const payload = await loadPublicDocument<DadosRecibo>('recibo', id, token)
+        if (!payload?.document) {
+          carregarFallbackLocal()
+          return
+        }
+
+        const documento: DadosRecibo = {
+          ...payload.document,
+          config: payload.document.config || (payload.config as DadosRecibo['config']),
+        }
+
+        setDados(documento)
+        setPublicLink(buildPublicReciboPath(id, token))
+        localStorage.setItem('connect_recibo_visualizacao', JSON.stringify(documento))
+      } catch (error) {
+        console.error('Erro ao carregar recibo publico:', error)
+        carregarFallbackLocal()
+      }
+    }
+
+    carregarRecibo()
   }, [])
 
   const valorNumerico = useMemo(() => {
@@ -101,10 +137,11 @@ export default function ReciboAvulsoPage() {
   const formaPagamento = dados?.formaPagamento || 'Pix'
 
   function enviarWhatsApp() {
-    const telefone = somenteDigitos(dados?.clienteTelefone)
-    const mensagem = `Olá ${dados?.nomeCliente || ''}!\n\nSegue seu recibo:\nValor: ${moeda(valorNumerico)}\nReferente: ${dados?.referente || 'pagamento'}`
+    const telefone = normalizeBrazilWhatsAppNumber(dados?.clienteTelefone)
+    const link = publicLink ? `${window.location.origin}${publicLink}` : ''
+    const mensagem = `Olá ${dados?.nomeCliente || ''}!\n\nSegue seu recibo:\nValor: ${moeda(valorNumerico)}\nReferente: ${dados?.referente || 'pagamento'}${link ? `\n\nLink: ${link}` : ''}`
     const url = telefone
-      ? `https://wa.me/55${telefone}?text=${encodeURIComponent(mensagem)}`
+      ? `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`
       : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
     window.open(url, '_blank')
   }
