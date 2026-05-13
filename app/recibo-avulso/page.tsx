@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import extenso from 'extenso'
+import {
+  DEFAULT_LOGO_PATH,
+  gerarLinkPublicoRecibo,
+  normalizarTelefoneWhatsApp,
+} from '@/lib/recibo-publico'
 
 type DadosRecibo = {
   nomeCliente?: string
@@ -29,10 +34,6 @@ function moeda(valor?: number) {
     style: 'currency',
     currency: 'BRL',
   })
-}
-
-function somenteDigitos(valor?: string) {
-  return String(valor || '').replace(/\D/g, '')
 }
 
 function formatarDataBR(data?: string) {
@@ -97,14 +98,15 @@ export default function ReciboAvulsoPage() {
   const cfg = dados.config || {}
   const corPrimaria = cfg.corPrimaria || '#16a34a'
   const corSecundaria = cfg.corSecundaria || '#f5f1e8'
-  const logoUrl = cfg.logoUrl || ''
+  const logoUrl = cfg.logoUrl || DEFAULT_LOGO_PATH
   const formaPagamento = dados?.formaPagamento || 'Pix'
 
-  function enviarWhatsApp() {
-    const telefone = somenteDigitos(dados?.clienteTelefone)
-    const mensagem = `Olá ${dados?.nomeCliente || ''}!\n\nSegue seu recibo:\nValor: ${moeda(valorNumerico)}\nReferente: ${dados?.referente || 'pagamento'}`
+  async function enviarWhatsApp() {
+    const telefone = normalizarTelefoneWhatsApp(dados?.clienteTelefone)
+    const linkRecibo = await gerarLinkPublicoRecibo(dados, window.location.origin)
+    const mensagem = `Olá ${dados?.nomeCliente || ''}!\n\nSegue seu recibo:\nValor: ${moeda(valorNumerico)}\nReferente: ${dados?.referente || 'pagamento'}\n\n${linkRecibo}`
     const url = telefone
-      ? `https://wa.me/55${telefone}?text=${encodeURIComponent(mensagem)}`
+      ? `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`
       : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
     window.open(url, '_blank')
   }
@@ -284,6 +286,10 @@ export default function ReciboAvulsoPage() {
                 <img
                   src={logoUrl}
                   alt="Logo"
+                  onError={(e) => {
+                    const img = e.currentTarget as HTMLImageElement
+                    if (!img.src.endsWith(DEFAULT_LOGO_PATH)) img.src = DEFAULT_LOGO_PATH
+                  }}
                   style={{ width: 82, height: 82, objectFit: 'contain', borderRadius: 12 }}
                 />
               ) : null}
