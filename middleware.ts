@@ -9,6 +9,7 @@ export function middleware(request: NextRequest) {
     pathname === '/login' ||
     pathname === '/bloqueado' ||
     pathname.startsWith('/publico') ||
+    pathname.startsWith('/visualizar/recibo') ||
     pathname.startsWith('/impressao-orcamento') ||
     pathname.startsWith('/impressao-ordem-servico') ||
     pathname.startsWith('/_next') ||
