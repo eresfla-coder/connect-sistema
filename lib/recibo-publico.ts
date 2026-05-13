@@ -93,8 +93,20 @@ function montarUrlPublica(origin: string, id: string, token?: string) {
   return token ? `${base}?token=${encodeURIComponent(token)}` : base
 }
 
+function gerarIdReciboPublico(snapshot: DadosReciboPublico) {
+  const idExistente = snapshot.id || snapshot.numero || snapshot.numeroRecibo
+  if (idExistente) return String(idExistente)
+
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+
+  return `recibo-${Date.now()}`
+}
+
 export async function gerarLinkPublicoRecibo(dados: DadosReciboPublico, origin: string) {
   const snapshot = prepararSnapshotRecibo(dados)
+  const documentId = gerarIdReciboPublico(snapshot)
 
   try {
     const resposta = await fetch('/api/public-docs', {
@@ -104,6 +116,10 @@ export async function gerarLinkPublicoRecibo(dados: DadosReciboPublico, origin: 
       },
       body: JSON.stringify({
         document_type: RECIBO_DOCUMENT_TYPE,
+        documento_tipo: RECIBO_DOCUMENT_TYPE,
+        document_id: documentId,
+        ficha: snapshot,
+        payload: snapshot,
         snapshot,
       }),
     })
@@ -113,7 +129,7 @@ export async function gerarLinkPublicoRecibo(dados: DadosReciboPublico, origin: 
     }
 
     const documento = await resposta.json()
-    const id = String(documento?.id || '')
+    const id = String(documento?.id || documento?.document_id || documentId)
     const token = String(documento?.token || '')
 
     if (!id || !token) {
@@ -122,7 +138,6 @@ export async function gerarLinkPublicoRecibo(dados: DadosReciboPublico, origin: 
 
     return montarUrlPublica(origin, id, token)
   } catch {
-    const idFallback = String(snapshot.id || snapshot.numero || snapshot.numeroRecibo || 'recibo')
-    return `${montarUrlPublica(origin, idFallback)}?d=${encodeURIComponent(encodeReciboFallback(snapshot))}`
+    return `${montarUrlPublica(origin, documentId)}?d=${encodeURIComponent(encodeReciboFallback(snapshot))}`
   }
 }
