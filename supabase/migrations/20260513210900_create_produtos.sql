@@ -39,7 +39,7 @@ alter table public.produtos
   add column if not exists custo numeric(12, 2) default 0,
   add column if not exists estoque numeric(12, 3) default 0,
   add column if not exists descricao text,
-  add column if not exists ativo boolean default true,
+  add column if not exists ativo boolean not null default true,
   add column if not exists tipo_calculo text default 'unidade',
   add column if not exists created_at timestamptz default now(),
   add column if not exists updated_at timestamptz default now();
@@ -55,6 +55,10 @@ set
   tipo_calculo = coalesce(tipo_calculo, 'unidade'),
   created_at = coalesce(created_at, now()),
   updated_at = coalesce(updated_at, now());
+
+alter table public.produtos
+  alter column ativo set default true,
+  alter column ativo set not null;
 
 create index if not exists produtos_user_id_idx
   on public.produtos (user_id);
