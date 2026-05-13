@@ -1698,11 +1698,11 @@ export default function OrcamentoPage() {
                 <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} style={{ ...inputStyle, minHeight: 90, resize: 'vertical' }} />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, auto)', justifyContent: isMobile ? 'stretch' : 'flex-end', gap: 10 }}>
-                <button onClick={novoOrcamento} style={{ ...buttonBase, background: '#d1d5db', color: '#111827' }}>Limpar</button>
-                <button onClick={salvarOrcamento} style={{ ...buttonBase, background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#fff', boxShadow: '0 12px 20px rgba(249,115,22,0.22)' }}>{editandoOrcamentoId !== null ? 'Atualizar orçamento' : 'Salvar orçamento'}</button>
-                <button onClick={gerarPDF} style={{ ...buttonBase, background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', boxShadow: '0 12px 20px rgba(37,99,235,0.22)' }}>Gerar PDF</button>
-                <button onClick={enviarWhatsApp} style={{ ...buttonBase, background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#052e16', boxShadow: '0 12px 20px rgba(34,197,94,0.22)' }}>Enviar no WhatsApp</button>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(150px, 1fr))', justifyContent: 'stretch', gap: 10, width: '100%' }}>
+                <button onClick={novoOrcamento} style={{ ...buttonBase, width: '100%', minWidth: 0, background: '#d1d5db', color: '#111827' }}>Limpar</button>
+                <button onClick={salvarOrcamento} style={{ ...buttonBase, width: '100%', minWidth: 0, background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#fff', boxShadow: '0 12px 20px rgba(249,115,22,0.22)' }}>{editandoOrcamentoId !== null ? 'Atualizar orçamento' : 'Salvar orçamento'}</button>
+                <button onClick={gerarPDF} style={{ ...buttonBase, width: '100%', minWidth: 0, background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', boxShadow: '0 12px 20px rgba(37,99,235,0.22)' }}>Gerar PDF</button>
+                <button onClick={enviarWhatsApp} style={{ ...buttonBase, width: '100%', minWidth: 0, background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#052e16', boxShadow: '0 12px 20px rgba(34,197,94,0.22)' }}>Enviar no WhatsApp</button>
               </div>
             </div>
           </div>
