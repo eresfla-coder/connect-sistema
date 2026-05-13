@@ -26,17 +26,13 @@ type DadosRecibo = {
 
 const RECIBO_KEY = 'connect_recibo_visualizacao'
 const CONFIG_KEY = 'connect_configuracoes'
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://connect-sistema-teste.vercel.app').replace(/\/$/, '')
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://painel.appconnectpro.com.br').replace(/\/$/, '')
 
 function moeda(valor?: number) {
   return Number(valor || 0).toLocaleString('pt-BR', {
     style: 'currency',
     currency: 'BRL',
   })
-}
-
-function somenteDigitos(valor?: string) {
-  return String(valor || '').replace(/\D/g, '')
 }
 
 function normalizarTelefoneWhatsapp(valor?: string) {
@@ -63,6 +59,14 @@ function normalizarTelefoneWhatsapp(valor?: string) {
   return `55${telefone}`
 }
 
+function gerarToken() {
+  try {
+    return crypto.randomUUID().replace(/-/g, '')
+  } catch {
+    return `${Date.now()}${Math.random().toString(36).slice(2)}`
+  }
+}
+
 function toBase64Url(value: string) {
   const utf8 = encodeURIComponent(value).replace(/%([0-9A-F]{2})/g, (_, p1) =>
     String.fromCharCode(parseInt(p1, 16))
@@ -70,11 +74,37 @@ function toBase64Url(value: string) {
   return btoa(utf8).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
-function gerarLinkPublicoRecibo(dados: DadosRecibo) {
+async function gerarLinkPublicoRecibo(dados: DadosRecibo) {
+  const documentId = String(Date.now())
+  const token = gerarToken()
+
+  try {
+    const response = await fetch('/api/public-docs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        document_type: 'recibo',
+        document_id: documentId,
+        token,
+        payload: dados,
+        snapshot: dados,
+      }),
+    })
+
+    if (response.ok) {
+      return `${SITE_URL}/visualizar/recibo/${documentId}?token=${token}`
+    }
+
+    console.error('[RECIBO_PUBLICO] Falha ao salvar documento público:', await response.text())
+  } catch (error) {
+    console.error('[RECIBO_PUBLICO] Erro ao salvar documento público:', error)
+  }
+
   const payload = toBase64Url(JSON.stringify(dados))
   return `${SITE_URL}/recibo-avulso?preview=1&d=${payload}`
 }
-
 
 function hojeInput() {
   return new Date().toISOString().slice(0, 10)
@@ -134,7 +164,6 @@ const PALETAS_RECIBO = [
   { nome: 'Roxo', primaria: '#7c3aed', secundaria: '#f5f3ff' },
   { nome: 'Vermelho', primaria: '#dc2626', secundaria: '#fef2f2' },
 ]
-
 
 export default function ReciboAvulsoPage() {
   const router = useRouter()
@@ -221,7 +250,6 @@ export default function ReciboAvulsoPage() {
     }))
   }
 
-
   function gerarRecibo() {
     if (!String(form.nomeCliente || '').trim()) {
       alert('Informe o nome do cliente.')
@@ -289,34 +317,58 @@ export default function ReciboAvulsoPage() {
   const logoUrl = cfg.logoUrl || ''
   const formaPagamento = dados?.formaPagamento || form.formaPagamento || 'Pix'
 
-  function enviarWhatsApp() {
+  async function enviarWhatsApp() {
     if (!dados) return
 
     const telefone = normalizarTelefoneWhatsapp(dados?.clienteTelefone)
-    const link = gerarLinkPublicoRecibo(dados)
+    const link = await gerarLinkPublicoRecibo(dados)
 
     let mensagem = `Olá ${dados?.nomeCliente || 'cliente'}!\n\n`
-    mensagem += `Segue seu recibo no valor de *${moeda(valorNumerico)}*.\n`
+    mensagem += `Segue seu recibo.\n`
     mensagem += `Referente a: ${dados?.referente || 'pagamento'}.\n`
     mensagem += `\n🔗 Acesse aqui:\n${link}`
 
     const texto = encodeURIComponent(mensagem)
 
-    // Desktop: abre direto no WhatsApp Web, evitando erro de conexão no wa.me/api.whatsapp em alguns navegadores.
-    // Celular: usa o protocolo do app quando disponível.
     const url = isMobile
       ? telefone
         ? `whatsapp://send?phone=${telefone}&text=${texto}`
         : `whatsapp://send?text=${texto}`
       : telefone
-       ? `https://wa.me/${telefone}?text=${texto}`
-: `https://wa.me/?text=${texto}`
+        ? `https://wa.me/${telefone}?text=${texto}`
+        : `https://wa.me/?text=${texto}`
+
     if (isMobile) {
       window.location.href = url
       return
     }
 
     window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  function fecharRecibo() {
+    window.close()
+
+    setTimeout(() => {
+      document.body.innerHTML = `
+        <div style="
+          min-height:100vh;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          font-family:Arial, sans-serif;
+          background:#f8fafc;
+          color:#111827;
+          flex-direction:column;
+          gap:12px;
+          text-align:center;
+          padding:24px;
+        ">
+          <h2 style="margin:0;font-size:28px;">Recibo finalizado</h2>
+          <p style="margin:0;color:#475569;font-size:16px;">Você já pode fechar esta aba.</p>
+        </div>
+      `
+    }, 300)
   }
 
   function abrirVisualizacaoPDF() {
@@ -564,8 +616,8 @@ export default function ReciboAvulsoPage() {
     <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg,#f4f7fb 0%,#eaf1fb 100%)', overflowX: 'clip', overflowY: 'auto', padding: isMobile ? 'calc(env(safe-area-inset-top, 0px) + 12px) 10px 96px' : 20, boxSizing: 'border-box' }}>
       <div style={{ maxWidth: 980, width: '100%', margin: '0 auto 14px', display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
         <button
-          onClick={() => router.push('/dashboard')}
-          title="Fechar e voltar ao menu inicial"
+          onClick={fecharRecibo}
+          title="Fechar recibo"
           style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#ef4444,#991b1b)', color: '#fff', border: '1px solid rgba(239,68,68,.45)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(239,68,68,.22)' }}
         >
           ✕ Fechar
