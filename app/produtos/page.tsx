@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { supabase } from '@/lib/supabase'
 
 type Categoria = {
@@ -308,6 +308,7 @@ async function sincronizarExclusoesPendentes(userId: string) {
 }
 
 export default function ProdutosPage() {
+  const nomeInputRef = useRef<HTMLInputElement | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [produtos, setProdutos] = useState<Produto[]>([])
@@ -408,6 +409,7 @@ export default function ProdutosPage() {
     setDescricao('')
     setTipoCalculo('unidade')
     setEditandoId(null)
+    window.setTimeout(() => nomeInputRef.current?.focus(), 0)
   }
 
   function editarProduto(produto: Produto) {
@@ -423,8 +425,11 @@ export default function ProdutosPage() {
   }
 
   async function salvarProduto() {
+    if (salvando) return
+
     if (!nome.trim()) {
       alert('Digite o nome do produto')
+      nomeInputRef.current?.focus()
       return
     }
 
@@ -749,6 +754,7 @@ export default function ProdutosPage() {
                   📦 Nome do produto
                 </label>
                 <input
+                  ref={nomeInputRef}
                   placeholder="Ex: Cabo USB, Mouse, Fonte..."
                   value={nome}
                   onChange={(e) => setNome(e.target.value)}
@@ -901,6 +907,7 @@ export default function ProdutosPage() {
               >
                 <button
                   onClick={salvarProduto}
+                  disabled={salvando}
                   style={{
                     width: '100%',
                     padding: '15px 16px',
@@ -908,9 +915,10 @@ export default function ProdutosPage() {
                     color: 'white',
                     border: 'none',
                     borderRadius: 14,
-                    cursor: 'pointer',
+                    cursor: salvando ? 'wait' : 'pointer',
                     fontWeight: 900,
                     fontSize: 16,
+                    opacity: salvando ? 0.75 : 1,
                     boxShadow: '0 12px 28px rgba(34,197,94,0.22)',
                   }}
                 >
