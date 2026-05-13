@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { supabase } from '@/lib/supabase'
 
 type Categoria = {
   id: number
@@ -12,6 +13,7 @@ type TipoCalculoProduto = 'unidade' | 'm2'
 
 type Produto = {
   id: number
+  supabaseId?: string
   nome: string
   categoria: string
   preco: number
@@ -22,8 +24,22 @@ type Produto = {
   tipoCalculo?: TipoCalculoProduto
 }
 
+type ProdutoSupabase = {
+  id: string
+  local_id?: string | null
+  nome?: string | null
+  categoria?: string | null
+  preco?: number | string | null
+  custo?: number | string | null
+  estoque?: number | string | null
+  descricao?: string | null
+  ativo?: boolean | null
+  tipo_calculo?: string | null
+}
+
 const CATEGORIAS_KEY = 'connect_categorias'
 const PRODUTOS_KEY = 'connect_produtos'
+const PRODUTOS_EXCLUSOES_PENDENTES_KEY = 'connect_produtos_exclusoes_pendentes'
 
 const campo: CSSProperties = {
   width: '100%',
@@ -71,6 +87,224 @@ function moeda(valor: number) {
     style: 'currency',
     currency: 'BRL',
   })
+}
+
+function gerarIdNumerico(texto?: string | null) {
+  const valor = String(texto || '')
+  if (!valor) return Date.now()
+
+  let hash = 0
+  for (let i = 0; i < valor.length; i += 1) {
+    hash = (hash * 31 + valor.charCodeAt(i)) % 2147483647
+  }
+
+  return hash || Date.now()
+}
+
+function paraNumero(valor: unknown) {
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : 0
+  const numero = Number(String(valor || '').replace(',', '.'))
+  return Number.isFinite(numero) ? numero : 0
+}
+
+function normalizarTipoCalculo(valor?: string | null): TipoCalculoProduto {
+  return valor === 'm2' ? 'm2' : 'unidade'
+}
+
+function normalizarProdutoLocal(item: any, index: number): Produto {
+  const idNumerico = Number(item?.id)
+  const id = Number.isFinite(idNumerico) && idNumerico > 0
+    ? idNumerico
+    : gerarIdNumerico(item?.local_id || item?.supabaseId || item?.id || `${Date.now()}-${index}`)
+
+  return {
+    id,
+    supabaseId: item?.supabaseId ? String(item.supabaseId) : undefined,
+    nome: String(item?.nome || ''),
+    categoria: String(item?.categoria || ''),
+    preco: paraNumero(item?.preco ?? item?.valor),
+    custo: paraNumero(item?.custo),
+    estoque: paraNumero(item?.estoque),
+    descricao: String(item?.descricao || ''),
+    ativo: item?.ativo !== false,
+    tipoCalculo: normalizarTipoCalculo(item?.tipoCalculo || item?.tipo_calculo),
+  }
+}
+
+function normalizarProdutoSupabase(item: ProdutoSupabase): Produto {
+  const localId = item.local_id || ''
+  const idNumerico = Number(localId)
+
+  return {
+    id: Number.isFinite(idNumerico) && idNumerico > 0 ? idNumerico : gerarIdNumerico(item.id),
+    supabaseId: item.id,
+    nome: String(item.nome || ''),
+    categoria: String(item.categoria || ''),
+    preco: paraNumero(item.preco),
+    custo: paraNumero(item.custo),
+    estoque: paraNumero(item.estoque),
+    descricao: String(item.descricao || ''),
+    ativo: item.ativo !== false,
+    tipoCalculo: normalizarTipoCalculo(item.tipo_calculo),
+  }
+}
+
+function carregarCacheProdutos() {
+  try {
+    const salvo = localStorage.getItem(PRODUTOS_KEY)
+    const lista = salvo ? JSON.parse(salvo) : []
+    if (!Array.isArray(lista)) return []
+    return lista.map(normalizarProdutoLocal).filter((produto) => Boolean(produto.nome))
+  } catch {
+    return []
+  }
+}
+
+function salvarCacheProdutos(lista: Produto[]) {
+  localStorage.setItem(PRODUTOS_KEY, JSON.stringify(lista))
+}
+
+function carregarExclusoesPendentes(): Produto[] {
+  try {
+    const salvo = localStorage.getItem(PRODUTOS_EXCLUSOES_PENDENTES_KEY)
+    const lista = salvo ? JSON.parse(salvo) : []
+    if (!Array.isArray(lista)) return []
+    return lista.map(normalizarProdutoLocal)
+  } catch {
+    return []
+  }
+}
+
+function salvarExclusoesPendentes(lista: Produto[]) {
+  localStorage.setItem(PRODUTOS_EXCLUSOES_PENDENTES_KEY, JSON.stringify(lista))
+}
+
+function adicionarExclusaoPendente(produto: Produto) {
+  const pendentes = carregarExclusoesPendentes()
+  const jaExiste = pendentes.some(
+    (item) =>
+      item.supabaseId === produto.supabaseId ||
+      String(item.id) === String(produto.id)
+  )
+
+  if (!jaExiste) {
+    salvarExclusoesPendentes([produto, ...pendentes])
+  }
+}
+
+async function obterUsuarioId() {
+  const { data, error } = await supabase.auth.getUser()
+  if (error || !data.user?.id) {
+    throw new Error('Usuario Supabase nao identificado.')
+  }
+
+  return data.user.id
+}
+
+function produtoParaSupabase(produto: Produto, userId: string) {
+  return {
+    user_id: userId,
+    local_id: String(produto.id),
+    nome: produto.nome,
+    categoria: produto.categoria,
+    preco: produto.preco,
+    custo: produto.custo,
+    estoque: produto.estoque,
+    descricao: produto.descricao || null,
+    ativo: produto.ativo !== false,
+    tipo_calculo: produto.tipoCalculo === 'm2' ? 'm2' : 'unidade',
+  }
+}
+
+async function listarProdutosSupabase() {
+  const { data, error } = await supabase
+    .from('produtos')
+    .select('id, local_id, nome, categoria, preco, custo, estoque, descricao, ativo, tipo_calculo')
+    .eq('ativo', true)
+    .order('nome', { ascending: true })
+
+  if (error) throw error
+  return (data || []).map(normalizarProdutoSupabase)
+}
+
+async function salvarProdutoSupabase(produto: Produto, userId: string) {
+  const registro = produtoParaSupabase(produto, userId)
+
+  if (produto.supabaseId) {
+    const { data, error } = await supabase
+      .from('produtos')
+      .update(registro)
+      .eq('id', produto.supabaseId)
+      .select('id, local_id, nome, categoria, preco, custo, estoque, descricao, ativo, tipo_calculo')
+      .single()
+
+    if (error) throw error
+    return normalizarProdutoSupabase(data)
+  }
+
+  const { data: existente, error: buscarError } = await supabase
+    .from('produtos')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('local_id', String(produto.id))
+    .maybeSingle()
+
+  if (buscarError) throw buscarError
+
+  if (existente?.id) {
+    const { data, error } = await supabase
+      .from('produtos')
+      .update(registro)
+      .eq('id', existente.id)
+      .select('id, local_id, nome, categoria, preco, custo, estoque, descricao, ativo, tipo_calculo')
+      .single()
+
+    if (error) throw error
+    return normalizarProdutoSupabase(data)
+  }
+
+  const { data, error } = await supabase
+    .from('produtos')
+    .insert(registro)
+    .select('id, local_id, nome, categoria, preco, custo, estoque, descricao, ativo, tipo_calculo')
+    .single()
+
+  if (error) throw error
+  return normalizarProdutoSupabase(data)
+}
+
+async function sincronizarProdutosLocais(lista: Produto[], userId: string) {
+  const sincronizados: Produto[] = []
+
+  for (const produto of lista) {
+    if (!produto.nome.trim() || !produto.categoria.trim()) continue
+    sincronizados.push(await salvarProdutoSupabase(produto, userId))
+  }
+
+  return sincronizados
+}
+
+async function sincronizarExclusoesPendentes(userId: string) {
+  const pendentes = carregarExclusoesPendentes()
+  if (pendentes.length === 0) return
+
+  const aindaPendentes: Produto[] = []
+
+  for (const produto of pendentes) {
+    try {
+      const query = supabase.from('produtos').delete()
+
+      const { error } = produto.supabaseId
+        ? await query.eq('id', produto.supabaseId)
+        : await query.eq('user_id', userId).eq('local_id', String(produto.id))
+
+      if (error) throw error
+    } catch {
+      aindaPendentes.push(produto)
+    }
+  }
+
+  salvarExclusoesPendentes(aindaPendentes)
 }
 
 export default function ProdutosPage() {
@@ -141,43 +375,28 @@ export default function ProdutosPage() {
     }
   }
 
-  function carregarProdutos() {
-    const salvo = localStorage.getItem(PRODUTOS_KEY)
-
-    if (!salvo) {
-      setProdutos([])
-      return
-    }
-
+  async function carregarProdutos() {
+    const cache = carregarCacheProdutos()
     try {
-      const lista = JSON.parse(salvo)
+      const userId = await obterUsuarioId()
 
-      if (!Array.isArray(lista)) {
-        setProdutos([])
-        return
+      await sincronizarExclusoesPendentes(userId)
+
+      if (cache.length > 0) {
+        await sincronizarProdutosLocais(cache, userId)
       }
 
-      const normalizados: Produto[] = lista.map((item: any, index: number) => ({
-        id: Number(item.id ?? Date.now() + index),
-        nome: String(item.nome || ''),
-        categoria: String(item.categoria || ''),
-        preco: Number(item.preco || 0),
-        custo: Number(item.custo || 0),
-        estoque: Number(item.estoque || 0),
-        descricao: String(item.descricao || ''),
-        ativo: Boolean(item.ativo ?? true),
-        tipoCalculo: item.tipoCalculo === 'm2' ? 'm2' : 'unidade',
-      }))
-
-      setProdutos(normalizados)
-    } catch {
-      setProdutos([])
+      const remotos = await listarProdutosSupabase()
+      salvarListaProdutos(remotos)
+    } catch (error) {
+      console.error('Erro ao sincronizar produtos com Supabase:', error)
+      salvarListaProdutos(cache)
     }
   }
 
   function salvarListaProdutos(lista: Produto[]) {
     setProdutos(lista)
-    localStorage.setItem(PRODUTOS_KEY, JSON.stringify(lista))
+    salvarCacheProdutos(lista)
   }
 
   function limparFormulario() {
@@ -203,7 +422,7 @@ export default function ProdutosPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function salvarProduto() {
+  async function salvarProduto() {
     if (!nome.trim()) {
       alert('Digite o nome do produto')
       return
@@ -229,51 +448,103 @@ export default function ProdutosPage() {
 
     setSalvando(true)
 
-    if (editandoId !== null) {
-      const atualizada = produtos.map((item) =>
-        item.id === editandoId
-          ? {
-              ...item,
-              nome: nome.trim(),
-              categoria: categoria.trim(),
-              preco: precoNumero,
-              custo: custoNumero,
-              estoque: estoqueNumero,
-              descricao: descricao.trim(),
-              tipoCalculo,
-            }
-          : item,
-      )
+    try {
+      if (editandoId !== null) {
+        const atual = produtos.find((item) => item.id === editandoId)
+        if (!atual) return
 
-      salvarListaProdutos(atualizada)
-      alert('Produto atualizado com sucesso.')
-    } else {
-      const novo: Produto = {
-        id: Date.now(),
-        nome: nome.trim(),
-        categoria: categoria.trim(),
-        preco: precoNumero,
-        custo: custoNumero,
-        estoque: estoqueNumero,
-        descricao: descricao.trim(),
-        ativo: true,
-        tipoCalculo,
+        const produtoAtualizado: Produto = {
+          ...atual,
+          nome: nome.trim(),
+          categoria: categoria.trim(),
+          preco: precoNumero,
+          custo: custoNumero,
+          estoque: estoqueNumero,
+          descricao: descricao.trim(),
+          tipoCalculo,
+          ativo: true,
+        }
+
+        const atualizada = produtos.map((item) =>
+          item.id === editandoId ? produtoAtualizado : item,
+        )
+
+        try {
+          const userId = await obterUsuarioId()
+          const salvo = await salvarProdutoSupabase(produtoAtualizado, userId)
+          salvarListaProdutos(produtos.map((item) => (item.id === editandoId ? salvo : item)))
+          alert('Produto atualizado com sucesso.')
+        } catch (error) {
+          console.error('Erro ao atualizar produto no Supabase:', error)
+          salvarListaProdutos(atualizada)
+          alert('Produto atualizado no cache local. A sincronização será tentada novamente depois.')
+        }
+      } else {
+        const novo: Produto = {
+          id: Date.now(),
+          nome: nome.trim(),
+          categoria: categoria.trim(),
+          preco: precoNumero,
+          custo: custoNumero,
+          estoque: estoqueNumero,
+          descricao: descricao.trim(),
+          ativo: true,
+          tipoCalculo,
+        }
+
+        try {
+          const userId = await obterUsuarioId()
+          const salvo = await salvarProdutoSupabase(novo, userId)
+          salvarListaProdutos([salvo, ...produtos])
+          alert('Produto salvo com sucesso.')
+        } catch (error) {
+          console.error('Erro ao salvar produto no Supabase:', error)
+          salvarListaProdutos([novo, ...produtos])
+          alert('Produto salvo no cache local. A sincronização será tentada novamente depois.')
+        }
       }
 
-      salvarListaProdutos([novo, ...produtos])
-      alert('Produto salvo com sucesso.')
+      limparFormulario()
+    } finally {
+      setSalvando(false)
     }
-
-    setSalvando(false)
-    limparFormulario()
   }
 
-  function excluirProduto(id: number) {
+  async function excluirProduto(id: number) {
     const confirmar = window.confirm('Deseja excluir este produto?')
     if (!confirmar) return
 
+    const produtoExcluir = produtos.find((item) => item.id === id)
     const atualizada = produtos.filter((item) => item.id !== id)
-    salvarListaProdutos(atualizada)
+
+    try {
+      if (produtoExcluir?.supabaseId) {
+        const { error } = await supabase
+          .from('produtos')
+          .delete()
+          .eq('id', produtoExcluir.supabaseId)
+
+        if (error) throw error
+      } else if (produtoExcluir) {
+        const userId = await obterUsuarioId()
+        const { error } = await supabase
+          .from('produtos')
+          .delete()
+          .eq('user_id', userId)
+          .eq('local_id', String(produtoExcluir.id))
+
+        if (error) throw error
+      }
+
+      salvarListaProdutos(atualizada)
+    } catch (error) {
+      console.error('Erro ao excluir produto no Supabase:', error)
+      if (produtoExcluir) {
+        adicionarExclusaoPendente(produtoExcluir)
+      }
+      salvarListaProdutos(atualizada)
+      alert('Produto removido do cache local. A exclusão no Supabase será tentada novamente depois.')
+    }
 
     if (editandoId === id) {
       limparFormulario()
