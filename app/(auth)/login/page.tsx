@@ -6,11 +6,32 @@ import { supabase } from '@/lib/supabase'
 
 function venceuPerfil(vencimento?: string | null) {
   if (!vencimento) return false
-  const hoje = new Date()
-  hoje.setHours(0, 0, 0, 0)
-  const dataVencimento = new Date(vencimento)
-  dataVencimento.setHours(0, 0, 0, 0)
+
+  const hoje = inicioDiaLocal(new Date())
+  const dataVencimento = parseDataLocal(vencimento)
+  if (!dataVencimento) return false
+
   return dataVencimento < hoje
+}
+
+function inicioDiaLocal(data: Date) {
+  const normalizada = new Date(data)
+  normalizada.setHours(0, 0, 0, 0)
+  return normalizada
+}
+
+function parseDataLocal(valor: string) {
+  const texto = String(valor || '').trim()
+  const match = texto.match(/^(\d{4})-(\d{2})-(\d{2})/)
+
+  if (match) {
+    const [, ano, mes, dia] = match
+    return inicioDiaLocal(new Date(Number(ano), Number(mes) - 1, Number(dia)))
+  }
+
+  const data = new Date(texto)
+  if (Number.isNaN(data.getTime())) return null
+  return inicioDiaLocal(data)
 }
 
 export default function LoginPage() {
