@@ -28,8 +28,40 @@ create table if not exists public.produtos (
   constraint produtos_local_id_unique unique (user_id, local_id)
 );
 
+-- Se a tabela ja existir de uma tentativa anterior, o "create table if not exists"
+-- nao adiciona colunas ausentes. Este bloco deixa a migration segura para reexecucao.
+alter table public.produtos
+  add column if not exists user_id uuid default auth.uid() references auth.users(id) on delete cascade,
+  add column if not exists local_id text,
+  add column if not exists nome text,
+  add column if not exists categoria text,
+  add column if not exists preco numeric(12, 2) default 0,
+  add column if not exists custo numeric(12, 2) default 0,
+  add column if not exists estoque numeric(12, 3) default 0,
+  add column if not exists descricao text,
+  add column if not exists ativo boolean default true,
+  add column if not exists tipo_calculo text default 'unidade',
+  add column if not exists created_at timestamptz default now(),
+  add column if not exists updated_at timestamptz default now();
+
+update public.produtos
+set
+  nome = coalesce(nome, ''),
+  categoria = coalesce(categoria, ''),
+  preco = coalesce(preco, 0),
+  custo = coalesce(custo, 0),
+  estoque = coalesce(estoque, 0),
+  ativo = coalesce(ativo, true),
+  tipo_calculo = coalesce(tipo_calculo, 'unidade'),
+  created_at = coalesce(created_at, now()),
+  updated_at = coalesce(updated_at, now());
+
 create index if not exists produtos_user_id_idx
   on public.produtos (user_id);
+
+create unique index if not exists produtos_user_local_id_unique_idx
+  on public.produtos (user_id, local_id)
+  where local_id is not null;
 
 create index if not exists produtos_user_ativo_nome_idx
   on public.produtos (user_id, ativo, lower(nome));
