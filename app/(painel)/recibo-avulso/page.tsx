@@ -309,9 +309,8 @@ export default function ReciboAvulsoPage() {
         ? `whatsapp://send?phone=${telefone}&text=${texto}`
         : `whatsapp://send?text=${texto}`
       : telefone
-        ? `https://web.whatsapp.com/send?phone=${telefone}&text=${texto}`
-        : `https://web.whatsapp.com/send?text=${texto}`
-
+       ? `https://wa.me/${telefone}?text=${texto}`
+: `https://wa.me/?text=${texto}`
     if (isMobile) {
       window.location.href = url
       return
