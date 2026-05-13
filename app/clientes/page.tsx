@@ -1,19 +1,41 @@
 'use client'
 
 import { useMemo, useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
 
 type Cliente = {
   id: number
+  supabaseId?: string
   nome: string
   telefone: string
+  whatsapp?: string
   cpfCnpj: string
+  cpf?: string
+  cnpj?: string
   endereco: string
   cep: string
   email: string
+  tipoPessoa?: 'PF' | 'PJ'
   ativo?: boolean
 }
 
+type ClienteSupabase = {
+  id: string
+  local_id?: string | null
+  nome?: string | null
+  telefone?: string | null
+  whatsapp?: string | null
+  email?: string | null
+  cpf_cnpj?: string | null
+  cpf?: string | null
+  cnpj?: string | null
+  endereco?: string | null
+  cep?: string | null
+  ativo?: boolean | null
+}
+
 const CLIENTES_KEY = 'connect_clientes'
+const CLIENTES_EXCLUSOES_PENDENTES_KEY = 'connect_clientes_exclusoes_pendentes'
 
 const CLIENTES_INICIAIS: Cliente[] = [
   {
@@ -38,6 +60,220 @@ const CLIENTES_INICIAIS: Cliente[] = [
   },
 ]
 
+function gerarIdNumerico(texto?: string | null) {
+  const valor = String(texto || '')
+  if (!valor) return Date.now()
+
+  let hash = 0
+  for (let i = 0; i < valor.length; i += 1) {
+    hash = (hash * 31 + valor.charCodeAt(i)) % 2147483647
+  }
+
+  return hash || Date.now()
+}
+
+function normalizarClienteLocal(item: any, index: number): Cliente {
+  const cpfCnpj = String(item?.cpfCnpj || item?.cpf_cnpj || item?.documento || item?.cpf || item?.cnpj || '')
+  const idNumerico = Number(item?.id)
+  const id = Number.isFinite(idNumerico) && idNumerico > 0
+    ? idNumerico
+    : gerarIdNumerico(item?.local_id || item?.supabaseId || item?.id || `${Date.now()}-${index}`)
+
+  return {
+    id,
+    supabaseId: item?.supabaseId ? String(item.supabaseId) : undefined,
+    nome: String(item?.nome || ''),
+    telefone: String(item?.telefone || item?.whatsapp || ''),
+    whatsapp: String(item?.whatsapp || item?.telefone || ''),
+    cpfCnpj,
+    cpf: String(item?.cpf || ''),
+    cnpj: String(item?.cnpj || ''),
+    endereco: String(item?.endereco || ''),
+    cep: String(item?.cep || ''),
+    email: String(item?.email || ''),
+    tipoPessoa: item?.tipoPessoa === 'PJ' ? 'PJ' : 'PF',
+    ativo: item?.ativo !== false,
+  }
+}
+
+function normalizarClienteSupabase(item: ClienteSupabase): Cliente {
+  const localId = item.local_id || ''
+  const idNumerico = Number(localId)
+  const cpfCnpj = String(item.cpf_cnpj || item.cpf || item.cnpj || '')
+
+  return {
+    id: Number.isFinite(idNumerico) && idNumerico > 0 ? idNumerico : gerarIdNumerico(item.id),
+    supabaseId: item.id,
+    nome: String(item.nome || ''),
+    telefone: String(item.telefone || item.whatsapp || ''),
+    whatsapp: String(item.whatsapp || item.telefone || ''),
+    cpfCnpj,
+    cpf: String(item.cpf || ''),
+    cnpj: String(item.cnpj || ''),
+    endereco: String(item.endereco || ''),
+    cep: String(item.cep || ''),
+    email: String(item.email || ''),
+    tipoPessoa: item.cnpj ? 'PJ' : 'PF',
+    ativo: item.ativo !== false,
+  }
+}
+
+function carregarCacheClientes() {
+  try {
+    const salvo = localStorage.getItem(CLIENTES_KEY)
+    const lista = salvo ? JSON.parse(salvo) : []
+    if (!Array.isArray(lista)) return []
+    return lista.map(normalizarClienteLocal).filter((cliente) => Boolean(cliente.nome))
+  } catch {
+    return []
+  }
+}
+
+function salvarCacheClientes(lista: Cliente[]) {
+  localStorage.setItem(CLIENTES_KEY, JSON.stringify(lista))
+}
+
+function carregarExclusoesPendentes(): Cliente[] {
+  try {
+    const salvo = localStorage.getItem(CLIENTES_EXCLUSOES_PENDENTES_KEY)
+    const lista = salvo ? JSON.parse(salvo) : []
+    if (!Array.isArray(lista)) return []
+    return lista.map(normalizarClienteLocal)
+  } catch {
+    return []
+  }
+}
+
+function salvarExclusoesPendentes(lista: Cliente[]) {
+  localStorage.setItem(CLIENTES_EXCLUSOES_PENDENTES_KEY, JSON.stringify(lista))
+}
+
+function adicionarExclusaoPendente(cliente: Cliente) {
+  const pendentes = carregarExclusoesPendentes()
+  const jaExiste = pendentes.some(
+    (item) =>
+      item.supabaseId === cliente.supabaseId ||
+      String(item.id) === String(cliente.id)
+  )
+
+  if (!jaExiste) {
+    salvarExclusoesPendentes([cliente, ...pendentes])
+  }
+}
+
+async function obterUsuarioId() {
+  const { data, error } = await supabase.auth.getUser()
+  if (error || !data.user?.id) {
+    throw new Error('Usuário Supabase não identificado.')
+  }
+
+  return data.user.id
+}
+
+function clienteParaSupabase(cliente: Cliente, userId: string) {
+  return {
+    id: cliente.supabaseId,
+    user_id: userId,
+    local_id: String(cliente.id),
+    nome: cliente.nome,
+    telefone: cliente.telefone,
+    whatsapp: cliente.whatsapp || cliente.telefone,
+    email: cliente.email || null,
+    cpf_cnpj: cliente.cpfCnpj || cliente.cpf || cliente.cnpj || null,
+    cpf: cliente.cpf || null,
+    cnpj: cliente.cnpj || null,
+    endereco: cliente.endereco || null,
+    cep: cliente.cep || null,
+    ativo: cliente.ativo !== false,
+  }
+}
+
+async function listarClientesSupabase() {
+  const { data, error } = await supabase
+    .from('clientes')
+    .select('id, local_id, nome, telefone, whatsapp, email, cpf_cnpj, cpf, cnpj, endereco, cep, ativo')
+    .eq('ativo', true)
+    .order('nome', { ascending: true })
+
+  if (error) throw error
+  return (data || []).map(normalizarClienteSupabase)
+}
+
+async function migrarClientesLocais(lista: Cliente[], userId: string) {
+  const registros = lista
+    .filter((cliente) => cliente.nome.trim() && cliente.telefone.trim())
+    .map((cliente) => clienteParaSupabase(cliente, userId))
+
+  if (registros.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('clientes')
+    .upsert(registros, { onConflict: 'user_id,local_id' })
+    .select('id, local_id, nome, telefone, whatsapp, email, cpf_cnpj, cpf, cnpj, endereco, cep, ativo')
+
+  if (error) throw error
+  return (data || []).map(normalizarClienteSupabase)
+}
+
+async function sincronizarExclusoesPendentes(userId: string) {
+  const pendentes = carregarExclusoesPendentes()
+  if (pendentes.length === 0) return
+
+  const aindaPendentes: Cliente[] = []
+
+  for (const cliente of pendentes) {
+    try {
+      const query = supabase.from('clientes').delete()
+
+      const { error } = cliente.supabaseId
+        ? await query.eq('id', cliente.supabaseId)
+        : await query.eq('user_id', userId).eq('local_id', String(cliente.id))
+
+      if (error) throw error
+    } catch {
+      aindaPendentes.push(cliente)
+    }
+  }
+
+  salvarExclusoesPendentes(aindaPendentes)
+}
+
+async function salvarClienteSupabase(cliente: Cliente, userId: string) {
+  const registro = clienteParaSupabase(cliente, userId)
+
+  if (cliente.supabaseId) {
+    const { data, error } = await supabase
+      .from('clientes')
+      .update({
+        nome: registro.nome,
+        telefone: registro.telefone,
+        whatsapp: registro.whatsapp,
+        email: registro.email,
+        cpf_cnpj: registro.cpf_cnpj,
+        cpf: registro.cpf,
+        cnpj: registro.cnpj,
+        endereco: registro.endereco,
+        cep: registro.cep,
+        ativo: registro.ativo,
+      })
+      .eq('id', cliente.supabaseId)
+      .select('id, local_id, nome, telefone, whatsapp, email, cpf_cnpj, cpf, cnpj, endereco, cep, ativo')
+      .single()
+
+    if (error) throw error
+    return normalizarClienteSupabase(data)
+  }
+
+  const { data, error } = await supabase
+    .from('clientes')
+    .insert(registro)
+    .select('id, local_id, nome, telefone, whatsapp, email, cpf_cnpj, cpf, cnpj, endereco, cep, ativo')
+    .single()
+
+  if (error) throw error
+  return normalizarClienteSupabase(data)
+}
+
 export default function ClientesPage() {
   const [isMobile, setIsMobile] = useState(false)
   const [busca, setBusca] = useState('')
@@ -59,36 +295,49 @@ export default function ClientesPage() {
   }, [])
 
   useEffect(() => {
-    const salvo = localStorage.getItem(CLIENTES_KEY)
+    let cancelado = false
 
-    if (salvo) {
+    async function carregarClientes() {
+      const cache = carregarCacheClientes()
+      if (cache.length > 0) {
+        setClientes(cache)
+      }
+
       try {
-        const lista = JSON.parse(salvo)
+        const userId = await obterUsuarioId()
 
-        if (Array.isArray(lista) && lista.length > 0) {
-          const normalizados = lista.map((item: any, index: number) => ({
-            id: Number(item.id ?? Date.now() + index),
-            nome: String(item.nome || ''),
-            telefone: String(item.telefone || ''),
-            cpfCnpj: String(item.cpfCnpj || ''),
-            endereco: String(item.endereco || ''),
-            cep: String(item.cep || ''),
-            email: String(item.email || ''),
-            ativo: item.ativo !== false,
-          }))
-          setClientes(normalizados)
-          return
+        await sincronizarExclusoesPendentes(userId)
+
+        if (cache.length > 0) {
+          await migrarClientesLocais(cache, userId)
         }
-      } catch {}
+
+        const remotos = await listarClientesSupabase()
+        if (cancelado) return
+
+        salvarLista(remotos)
+      } catch (error) {
+        console.error('Erro ao sincronizar clientes com Supabase:', error)
+        if (cancelado) return
+
+        if (cache.length > 0) {
+          salvarLista(cache)
+        } else {
+          salvarLista(CLIENTES_INICIAIS)
+        }
+      }
     }
 
-    setClientes(CLIENTES_INICIAIS)
-    localStorage.setItem(CLIENTES_KEY, JSON.stringify(CLIENTES_INICIAIS))
+    carregarClientes()
+
+    return () => {
+      cancelado = true
+    }
   }, [])
 
   function salvarLista(lista: Cliente[]) {
     setClientes(lista)
-    localStorage.setItem(CLIENTES_KEY, JSON.stringify(lista))
+    salvarCacheClientes(lista)
   }
 
   function limparFormulario() {
@@ -101,9 +350,13 @@ export default function ClientesPage() {
     setEditandoId(null)
   }
 
-  function salvarCliente() {
+  async function salvarCliente() {
     const nomeTratado = nome.trim()
     const telefoneTratado = telefone.trim()
+    const cpfCnpjTratado = cpfCnpj.trim()
+    const documentoNumeros = cpfCnpjTratado.replace(/\D/g, '')
+    const cpf = documentoNumeros.length <= 11 ? cpfCnpjTratado : ''
+    const cnpj = documentoNumeros.length > 11 ? cpfCnpjTratado : ''
 
     if (!nomeTratado) {
       alert('Digite o nome do cliente.')
@@ -128,37 +381,64 @@ export default function ClientesPage() {
     }
 
     if (editandoId !== null) {
+      const atual = clientes.find((cliente) => cliente.id === editandoId)
+      if (!atual) return
+
+      const clienteAtualizado: Cliente = {
+        ...atual,
+        nome: nomeTratado,
+        telefone: telefoneTratado,
+        whatsapp: telefoneTratado,
+        cpfCnpj: cpfCnpjTratado,
+        cpf,
+        cnpj,
+        endereco: endereco.trim(),
+        cep: cep.trim(),
+        email: email.trim(),
+        tipoPessoa: cnpj ? 'PJ' : 'PF',
+        ativo: true,
+      }
+
       const atualizada = clientes.map((cliente) =>
-        cliente.id === editandoId
-          ? {
-              ...cliente,
-              nome: nomeTratado,
-              telefone: telefoneTratado,
-              cpfCnpj: cpfCnpj.trim(),
-              endereco: endereco.trim(),
-              cep: cep.trim(),
-              email: email.trim(),
-              ativo: true,
-            }
-          : cliente,
+        cliente.id === editandoId ? clienteAtualizado : cliente,
       )
 
-      salvarLista(atualizada)
-      alert('Cliente atualizado com sucesso.')
+      try {
+        const userId = await obterUsuarioId()
+        const salvo = await salvarClienteSupabase(clienteAtualizado, userId)
+        salvarLista(clientes.map((cliente) => (cliente.id === editandoId ? salvo : cliente)))
+        alert('Cliente atualizado com sucesso.')
+      } catch (error) {
+        console.error('Erro ao atualizar cliente no Supabase:', error)
+        salvarLista(atualizada)
+        alert('Cliente atualizado no cache local. A sincronização será tentada novamente depois.')
+      }
     } else {
       const novo: Cliente = {
         id: Date.now(),
         nome: nomeTratado,
         telefone: telefoneTratado,
-        cpfCnpj: cpfCnpj.trim(),
+        whatsapp: telefoneTratado,
+        cpfCnpj: cpfCnpjTratado,
+        cpf,
+        cnpj,
         endereco: endereco.trim(),
         cep: cep.trim(),
         email: email.trim(),
+        tipoPessoa: cnpj ? 'PJ' : 'PF',
         ativo: true,
       }
 
-      salvarLista([novo, ...clientes])
-      alert('Cliente salvo com sucesso.')
+      try {
+        const userId = await obterUsuarioId()
+        const salvo = await salvarClienteSupabase(novo, userId)
+        salvarLista([salvo, ...clientes])
+        alert('Cliente salvo com sucesso.')
+      } catch (error) {
+        console.error('Erro ao salvar cliente no Supabase:', error)
+        salvarLista([novo, ...clientes])
+        alert('Cliente salvo no cache local. A sincronização será tentada novamente depois.')
+      }
     }
 
     limparFormulario()
@@ -175,12 +455,41 @@ export default function ClientesPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function excluirCliente(id: number) {
+  async function excluirCliente(id: number) {
     const confirmar = window.confirm('Deseja excluir este cliente?')
     if (!confirmar) return
 
+    const clienteExcluir = clientes.find((cliente) => cliente.id === id)
     const atualizada = clientes.filter((cliente) => cliente.id !== id)
-    salvarLista(atualizada)
+
+    try {
+      if (clienteExcluir?.supabaseId) {
+        const { error } = await supabase
+          .from('clientes')
+          .delete()
+          .eq('id', clienteExcluir.supabaseId)
+
+        if (error) throw error
+      } else if (clienteExcluir) {
+        const userId = await obterUsuarioId()
+        const { error } = await supabase
+          .from('clientes')
+          .delete()
+          .eq('user_id', userId)
+          .eq('local_id', String(clienteExcluir.id))
+
+        if (error) throw error
+      }
+
+      salvarLista(atualizada)
+    } catch (error) {
+      console.error('Erro ao excluir cliente no Supabase:', error)
+      if (clienteExcluir) {
+        adicionarExclusaoPendente(clienteExcluir)
+      }
+      salvarLista(atualizada)
+      alert('Cliente removido do cache local. A exclusão no Supabase será tentada novamente depois.')
+    }
 
     if (editandoId === id) {
       limparFormulario()
