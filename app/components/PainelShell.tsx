@@ -23,11 +23,60 @@ type PerfilAcesso = {
 
 function venceuPerfil(vencimento?: string | null) {
   if (!vencimento) return false
-  const hoje = new Date()
-  hoje.setHours(0, 0, 0, 0)
-  const dataVencimento = new Date(vencimento)
-  dataVencimento.setHours(0, 0, 0, 0)
-  return dataVencimento < hoje
+
+  const statusVencimento = calcularStatusVencimento(vencimento)
+  if (!statusVencimento) return false
+
+  return statusVencimento.dias < 0
+}
+
+function inicioDiaLocal(data: Date) {
+  const normalizada = new Date(data)
+  normalizada.setHours(0, 0, 0, 0)
+  return normalizada
+}
+
+function parseDataLocal(valor: string) {
+  const texto = String(valor || '').trim()
+  const match = texto.match(/^(\d{4})-(\d{2})-(\d{2})/)
+
+  if (match) {
+    const [, ano, mes, dia] = match
+    return inicioDiaLocal(new Date(Number(ano), Number(mes) - 1, Number(dia)))
+  }
+
+  const data = new Date(texto)
+  if (Number.isNaN(data.getTime())) return null
+  return inicioDiaLocal(data)
+}
+
+function calcularStatusVencimento(vencimento?: string | null) {
+  if (!vencimento) return null
+
+  const hoje = inicioDiaLocal(new Date())
+  const dataVencimento = parseDataLocal(vencimento)
+  if (!dataVencimento) return null
+
+  const umDia = 24 * 60 * 60 * 1000
+  const dias = Math.round((dataVencimento.getTime() - hoje.getTime()) / umDia)
+
+  return { dias }
+}
+
+function textoStatusPerfil(perfil: PerfilAcesso) {
+  const statusVencimento = calcularStatusVencimento(perfil.vencimento)
+
+  if (statusVencimento) {
+    if (statusVencimento.dias < 0) return 'Vencido'
+    if (statusVencimento.dias === 0) return 'Atenção - Vence hoje'
+    if (statusVencimento.dias <= 7) {
+      return `Vence em ${statusVencimento.dias} ${statusVencimento.dias === 1 ? 'dia' : 'dias'}`
+    }
+  }
+
+  if (perfil.status === 'ativo') return 'Plano ativo'
+  if (perfil.status === 'teste') return 'Teste grátis'
+  return 'Acesso bloqueado'
 }
 
 export default function PainelShell({
@@ -369,11 +418,7 @@ export default function PainelShell({
                     border: '1px solid rgba(255,255,255,0.10)',
                   }}
                 >
-                  {perfil.status === 'ativo'
-                    ? 'Plano ativo'
-                    : perfil.status === 'teste'
-                    ? 'Teste grátis'
-                    : 'Acesso bloqueado'}
+                  {textoStatusPerfil(perfil)}
                 </div>
               ) : null}
             </div>
