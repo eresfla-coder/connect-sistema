@@ -68,12 +68,69 @@ export async function GET(req: NextRequest) {
     const supabaseAdmin = getSupabaseAdmin()
     const url = new URL(req.url)
 
-    const tipo = String(url.searchParams.get('tipo') || '').trim()
-    const documentoId = String(
+    const documentType = String(url.searchParams.get('document_type') || '').trim()
+    const documentId = String(
+      url.searchParams.get('document_id') ||
       url.searchParams.get('documentoId') ||
       url.searchParams.get('id') ||
       ''
     ).trim()
+    const token = String(url.searchParams.get('token') || url.searchParams.get('p') || '').trim()
+    const tipoLegado = String(url.searchParams.get('tipo') || '').trim()
+    const documentoIdLegado = String(
+      url.searchParams.get('documentoId') ||
+      url.searchParams.get('id') ||
+      ''
+    ).trim()
+
+    if (tipoLegado === 'os') {
+      return NextResponse.json(
+        { success: false, error: 'Use document_type=ordem_servico e document_id.' },
+        { status: 404 }
+      )
+    }
+
+    if (documentType === 'ordem_servico' && documentId) {
+      let result
+
+      if (token) {
+        result = await supabaseAdmin
+          .from('public_documents')
+          .select('*')
+          .eq('documento_id', documentId)
+          .eq('token', token)
+          .in('tipo', ['ordem_servico', 'os'])
+          .maybeSingle()
+      } else {
+        result = await supabaseAdmin
+          .from('public_documents')
+          .select('*')
+          .eq('documento_id', documentId)
+          .in('tipo', ['ordem_servico', 'os'])
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      }
+
+      const { data, error } = result
+
+      if (error) {
+        console.error('[PUBLIC_DOCS_GET]', error)
+        return erroApi(error)
+      }
+
+      if (!data) {
+        return NextResponse.json(
+          { success: false, error: 'Documento não encontrado.' },
+          { status: 404 }
+        )
+      }
+
+      return NextResponse.json(data)
+    }
+
+    const tipo = tipoLegado
+    const documentoId = documentoIdLegado
 
     if (!tipo || !documentoId) {
       return NextResponse.json(
@@ -114,15 +171,21 @@ export async function POST(req: NextRequest) {
     const supabaseAdmin = getSupabaseAdmin()
     const body = await req.json()
 
-    const tipo = String(body?.tipo || '').trim()
+    const documentTypeRaw = String(body?.document_type || body?.tipo || '').trim()
     const payloadRecebido = body?.payload || null
 
     const documentoId = String(
+      body?.document_id ||
       body?.documentoId ||
       payloadRecebido?.id ||
       payloadRecebido?.i ||
       ''
     ).trim()
+
+    const tipo =
+      documentTypeRaw === 'os' || documentTypeRaw === 'ordem_servico'
+        ? 'ordem_servico'
+        : documentTypeRaw
 
     if (!tipo || !payloadRecebido || !documentoId || documentoId === 'NaN') {
       return NextResponse.json(
@@ -225,7 +288,9 @@ export async function POST(req: NextRequest) {
       success: true,
       token,
       tipo,
+      document_type: tipo,
       documentoId,
+      document_id: documentoId,
       user_id: userId || null,
     })
   } catch (error) {

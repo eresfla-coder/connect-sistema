@@ -470,7 +470,7 @@ export default function OrdemServicoPage() {
         consulta.map(async (item) => {
           try {
             const resp = await fetch(
-              `/api/public-docs?tipo=os&documentoId=${encodeURIComponent(String(item.id))}&t=${Date.now()}`,
+              `/api/public-docs?document_type=ordem_servico&document_id=${encodeURIComponent(String(item.id))}&t=${Date.now()}`,
               { cache: 'no-store' }
             )
 
@@ -523,14 +523,18 @@ export default function OrdemServicoPage() {
     const id = Number(item.id)
     const base = baseUrlAtual()
     const payload = { ...item, cfg: configPublicaOS() }
+    const tokenLocal = Array.from(crypto.getRandomValues(new Uint8Array(12)))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')
 
     try {
       const resp = await fetch('/api/public-docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tipo: 'os',
-          documentoId: String(id),
+          document_type: 'ordem_servico',
+          document_id: String(id),
+          token: tokenLocal,
           payload,
         }),
       })
@@ -541,13 +545,13 @@ export default function OrdemServicoPage() {
       }
 
       const json = await resp.json().catch(() => null)
-      const token = String(json?.token || '').trim()
+      const token = String(json?.token || tokenLocal).trim()
 
       if (!token) {
         throw new Error('Token da OS não retornado pela API.')
       }
 
-      return `${base}/impressao-ordem-servico/${id}?preview=1&p=${encodeURIComponent(token)}`
+      return `${base}/view/os/${id}?token=${encodeURIComponent(token)}`
     } catch (error) {
       console.error('[PUBLICAR_OS]', error)
       alert(error instanceof Error ? error.message : 'Erro ao publicar OS.')
@@ -968,8 +972,8 @@ export default function OrdemServicoPage() {
     alert('OS duplicada com sucesso.')
   }
 
-  function abrir(item: OrdemServico) {
-    window.location.href = `/view/os/${item.id}`
+  async function abrir(item: OrdemServico) {
+    window.location.href = await publicarOS(item)
   }
 
   async function copiarLink(item: OrdemServico) {

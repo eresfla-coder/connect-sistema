@@ -186,55 +186,45 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
     let cancelado = false
 
     async function carregar() {
-      const tokenPublico = searchParams.get('p') || searchParams.get('token')
+      const tokenPublico = searchParams.get('token') || searchParams.get('p')
       let osPublica: any = null
       let documentoIdPublico = id
       let configDoc: any = null
       let erroBusca = ''
 
-      // 1. Buscar pelo token público (prioridade máxima)
-      if (tokenPublico) {
+      if (tokenPublico && id) {
         try {
-          const resp = await fetch(`/api/public-docs/${encodeURIComponent(tokenPublico)}`, { cache: 'no-store' })
+          const resp = await fetch(
+            `/api/public-docs?document_type=ordem_servico&document_id=${encodeURIComponent(id)}&token=${encodeURIComponent(tokenPublico)}`,
+            { cache: 'no-store' }
+          )
           if (resp.ok) {
             const dados = await resp.json()
             osPublica = dados?.payload ? normalizar(dados.payload) : null
-            documentoIdPublico = String(dados?.documento_id || osPublica?.id || id)
-          } else if (resp.status === 404) {
-            erroBusca = 'Token público não encontrado no servidor.'
-          }
-        } catch (e) {
-          erroBusca = 'Erro ao buscar pelo token.'
-        }
-      }
-
-      // 2. Buscar pelo ID do documento no Supabase
-      if (!osPublica && id) {
-        try {
-          const resp = await fetch(`/api/public-docs?tipo=os&documentoId=${encodeURIComponent(id)}`, { cache: 'no-store' })
-          if (resp.ok) {
-            const dados = await resp.json()
-            osPublica = dados?.payload ? normalizar(dados.payload) : null
+            documentoIdPublico = String(dados?.documento_id || dados?.document_id || osPublica?.id || id)
             erroBusca = ''
           } else if (resp.status === 404) {
-            erroBusca = erroBusca || 'OS não encontrada no servidor público.'
+            erroBusca = 'OS não encontrada no servidor público.'
           }
-        } catch (e) {
-          erroBusca = erroBusca || 'Erro ao buscar OS pelo ID.'
+        } catch {
+          erroBusca = 'Erro ao buscar OS pública.'
         }
+      } else if (id) {
+        erroBusca = 'Link público inválido. Token ausente.'
       }
 
-      // 3. Buscar config atualizada da empresa dona (para telefone/whatsapp correto)
       if (osPublica) {
         const cfgPayload = extrairConfigDoPayload(osPublica)
         try {
           const cfgUrl = tokenPublico
             ? `/api/public-docs/config?token=${encodeURIComponent(tokenPublico)}`
-            : `/api/public-docs/config?tipo=os&documentoId=${encodeURIComponent(id)}`
-          const respCfg = await fetch(cfgUrl, { cache: 'no-store' })
-          if (respCfg.ok) {
-            const dadosCfg = await respCfg.json()
-            if (dadosCfg?.config) configDoc = extrairConfigDoPayload({ cfg: dadosCfg.config })
+            : ''
+          if (cfgUrl) {
+            const respCfg = await fetch(cfgUrl, { cache: 'no-store' })
+            if (respCfg.ok) {
+              const dadosCfg = await respCfg.json()
+              if (dadosCfg?.config) configDoc = extrairConfigDoPayload({ cfg: dadosCfg.config })
+            }
           }
         } catch {}
 
@@ -278,9 +268,9 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
     if (!os || typeof window === 'undefined') return ''
     const base = siteBase()
     const params = new URLSearchParams(window.location.search)
-    const tokenAtual = params.get('p') || params.get('token')
-    const linkBase = `${base}/impressao-ordem-servico/${os.id}?preview=1`
-    return tokenAtual ? `${linkBase}&p=${encodeURIComponent(tokenAtual)}` : linkBase
+    const tokenAtual = params.get('token') || params.get('p')
+    const linkBase = `${base}/view/os/${os.id}`
+    return tokenAtual ? `${linkBase}?token=${encodeURIComponent(tokenAtual)}` : linkBase
   }, [os])
 
   function copiarLinkAtual() {
@@ -311,13 +301,13 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
 
     // Atualizar no Supabase public-docs e só confirmar quando realmente salvar.
     try {
-      const tokenAtual = new URLSearchParams(window.location.search).get('p') || new URLSearchParams(window.location.search).get('token')
+      const tokenAtual = new URLSearchParams(window.location.search).get('token') || new URLSearchParams(window.location.search).get('p')
       const respSalvar = await fetch('/api/public-docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tipo: 'os',
-          documentoId: String(atualizado.id),
+          document_type: 'ordem_servico',
+          document_id: String(atualizado.id),
           token: tokenAtual || undefined,
           payload: { ...atualizado, cfg: (atualizado as any)?.cfg || (os as any)?.cfg || undefined },
         }),
