@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { gerarFinanceiroDeOrcamento } from '@/lib/financeiro'
+import { supabase } from '@/lib/supabase'
 
 type TipoPessoaCliente = 'PF' | 'PJ'
 
@@ -347,6 +348,108 @@ function normalizarStatus(status?: string): StatusOrcamento {
   return 'Pendente'
 }
 
+type OrcamentoRow = {
+  user_id?: string
+  local_id?: string
+  numero?: string
+  cliente?: string
+  telefone?: string
+  cliente_nome?: string
+  cliente_telefone?: string
+  cliente_email?: string
+  cliente_endereco?: string
+  itens?: ItemOrcamento[]
+  subtotal?: number
+  desconto?: number
+  entrega?: number
+  total?: number
+  observacao?: string
+  observacoes?: string
+  status?: string
+  aprovado?: boolean
+  data?: string
+  validade?: string
+  prazo_entrega?: string
+  forma_pagamento?: string
+  payload?: Partial<OrcamentoSalvo> | Record<string, unknown>
+}
+
+function orcamentoParaRowSupabase(orc: OrcamentoSalvo, userId: string): OrcamentoRow {
+  const status = normalizarStatus(orc.status)
+  const clienteNome = String(orc.cliente?.nome || '').trim()
+  const clienteTel = String(orc.cliente?.telefone || '').trim()
+  const observacao = String(orc.observacao || '')
+
+  return {
+    user_id: userId,
+    local_id: String(orc.id),
+    numero: orc.numero,
+    cliente: clienteNome,
+    telefone: clienteTel,
+    itens: orc.itens,
+    subtotal: orc.subtotal,
+    desconto: orc.desconto,
+    entrega: orc.entrega,
+    total: orc.total,
+    observacao,
+    status,
+    aprovado: status === 'Aprovado' || status === 'Convertido',
+    payload: orc,
+    cliente_nome: clienteNome,
+    cliente_telefone: clienteTel,
+    observacoes: observacao,
+    data: orc.data,
+    validade: orc.validade,
+    prazo_entrega: orc.prazoEntrega,
+    forma_pagamento: orc.formaPagamento,
+    cliente_email: orc.cliente?.email || '',
+    cliente_endereco: orc.cliente?.endereco || '',
+  }
+}
+
+function orcamentoDeRowSupabase(row: OrcamentoRow): OrcamentoSalvo {
+  const payload = row.payload && typeof row.payload === 'object' ? row.payload as Partial<OrcamentoSalvo> : null
+  const localId = Number(row.local_id || payload?.id || 0) || Date.now()
+
+  if (payload?.numero) {
+    return {
+      ...(payload as OrcamentoSalvo),
+      id: localId,
+      status: normalizarStatus(payload.status || row.status),
+    }
+  }
+
+  const clienteNome = String(row.cliente || row.cliente_nome || '').trim()
+  const clienteTel = String(row.telefone || row.cliente_telefone || '').trim()
+
+  return {
+    id: localId,
+    numero: String(row.numero || ''),
+    titulo: 'Orçamento Comercial',
+    cliente: clienteNome
+      ? {
+          id: localId,
+          nome: clienteNome,
+          telefone: clienteTel,
+          email: String(row.cliente_email || ''),
+          endereco: String(row.cliente_endereco || ''),
+        }
+      : null,
+    itens: Array.isArray(row.itens) ? row.itens : [],
+    subtotal: Number(row.subtotal || 0),
+    entrega: Number(row.entrega || 0),
+    desconto: Number(row.desconto || 0),
+    total: Number(row.total || 0),
+    formaPagamento: String(row.forma_pagamento || 'PIX'),
+    validade: String(row.validade || ''),
+    prazoEntrega: String(row.prazo_entrega || ''),
+    observacao: String(row.observacao || row.observacoes || ''),
+    status: normalizarStatus(row.status),
+    data: String(row.data || new Date().toLocaleDateString('pt-BR')),
+    link: '',
+  }
+}
+
 export default function OrcamentoPage() {
   const router = useRouter()
   const clientesMock: Cliente[] = [
@@ -435,6 +538,75 @@ export default function OrcamentoPage() {
     ...NOVO_CLIENTE_INICIAL,
   })
 
+  function carregarOrcamentosLocalFallback() {
+    try {
+      const salvos = localStorage.getItem(ORCAMENTOS_KEY)
+      if (salvos) {
+        const lista = JSON.parse(salvos)
+        if (Array.isArray(lista)) {
+          setOrcamentosSalvos(
+            lista.map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+          )
+        }
+      }
+    } catch {}
+  }
+
+  async function carregarOrcamentosSupabase() {
+    try {
+      const { data, error } = await supabase
+        .from('orcamentos')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      const normalizados = ((data || []) as OrcamentoRow[])
+        .map(orcamentoDeRowSupabase)
+        .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+
+      setOrcamentosSalvos(normalizados)
+      try { localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(normalizados)) } catch {}
+    } catch {
+      carregarOrcamentosLocalFallback()
+    }
+  }
+
+  async function persistirOrcamentoSupabase(orcamento: OrcamentoSalvo) {
+    try {
+      const { data } = await supabase.auth.getUser()
+      const userId = data?.user?.id
+      if (!userId) return
+
+      const row = orcamentoParaRowSupabase(orcamento, userId)
+      const { error } = await supabase
+        .from('orcamentos')
+        .upsert(row, { onConflict: 'user_id,local_id' })
+
+      if (error) console.warn('[orcamentos] erro ao persistir:', error.message)
+    } catch (e) {
+      console.warn('[orcamentos] erro ao persistir:', e)
+    }
+  }
+
+  async function excluirOrcamentoSupabase(orcamento: OrcamentoSalvo) {
+    try {
+      const { data } = await supabase.auth.getUser()
+      const userId = data?.user?.id
+      if (!userId) return
+
+      const { error } = await supabase
+        .from('orcamentos')
+        .delete()
+        .eq('user_id', userId)
+        .eq('local_id', String(orcamento.id))
+
+      if (error) console.warn('[orcamentos] erro ao excluir:', error.message)
+    } catch (e) {
+      console.warn('[orcamentos] erro ao excluir:', e)
+    }
+  }
+
   useEffect(() => {
     const verificar = () => setIsMobile(window.innerWidth <= 768)
     verificar()
@@ -522,17 +694,7 @@ export default function OrcamentoPage() {
       } catch {}
     }
 
-    const salvos = localStorage.getItem(ORCAMENTOS_KEY)
-    if (salvos) {
-      try {
-        const lista = JSON.parse(salvos)
-        if (Array.isArray(lista)) {
-          setOrcamentosSalvos(
-            lista.map((item) => ({ ...item, status: normalizarStatus(item.status) }))
-          )
-        }
-      } catch {}
-    }
+    void carregarOrcamentosSupabase()
 
     const salvosProdutos = localStorage.getItem(PRODUTOS_KEY)
     if (salvosProdutos) {
@@ -1346,7 +1508,7 @@ export default function OrcamentoPage() {
     )
   }
 
-  function salvarOrcamento() {
+  async function salvarOrcamento() {
     if (itens.length === 0) {
       notificar('Adicione pelo menos um item.', 'error')
       return
@@ -1384,6 +1546,7 @@ export default function OrcamentoPage() {
         item.id === editandoOrcamentoId ? atualizado : item
       )
       salvarListaOrcamentos(listaAtualizada)
+      void persistirOrcamentoSupabase(atualizado)
       gerarFinanceiroDeOrcamento(atualizado)
       notificar('Orçamento atualizado com sucesso! Parcelas financeiras atualizadas.')
       setFormAberto(false)
@@ -1418,6 +1581,7 @@ export default function OrcamentoPage() {
     }
 
     salvarListaOrcamentos([novo, ...orcamentosSalvos])
+    void persistirOrcamentoSupabase(novo)
     gerarFinanceiroDeOrcamento(novo)
     notificar('Orçamento salvo com sucesso! Parcelas financeiras geradas.')
     setFormAberto(false)
@@ -1542,8 +1706,10 @@ export default function OrcamentoPage() {
   function excluirOrcamento(id: number) {
     const confirmar = window.confirm('Deseja excluir este orçamento?')
     if (!confirmar) return
+    const orcamento = orcamentosSalvos.find((item) => item.id === id)
     const listaAtualizada = orcamentosSalvos.filter((item) => item.id !== id)
     salvarListaOrcamentos(listaAtualizada)
+    if (orcamento) void excluirOrcamentoSupabase(orcamento)
     if (editandoOrcamentoId === id) novoOrcamento()
     notificar('Orçamento excluído.', 'info')
   }
