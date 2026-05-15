@@ -12,6 +12,64 @@ function normalizarTipoPublico(documentTypeRaw: string) {
   return raw
 }
 
+function linhaPublicDocument(
+  documentType: string,
+  documentId: string,
+  token: string,
+  payload: Record<string, unknown>,
+  extras?: { user_id?: string }
+) {
+  return {
+    token,
+    document_type: documentType,
+    document_id: documentId,
+    payload,
+    updated_at: new Date().toISOString(),
+    tipo: documentType,
+    documento_id: documentId,
+    ...(extras?.user_id ? { user_id: extras.user_id } : {}),
+  }
+}
+
+async function buscarPublicDocumentPorTipoId(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  documentType: string,
+  documentId: string
+) {
+  const porColunasNovas = await supabaseAdmin
+    .from('public_documents')
+    .select('*')
+    .eq('document_type', documentType)
+    .eq('document_id', documentId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (porColunasNovas.data || !porColunasNovas.error) {
+    return porColunasNovas
+  }
+
+  if (documentType === 'ordem_servico') {
+    return supabaseAdmin
+      .from('public_documents')
+      .select('*')
+      .in('tipo', ['ordem_servico', 'os'])
+      .eq('documento_id', documentId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  }
+
+  return supabaseAdmin
+    .from('public_documents')
+    .select('*')
+    .eq('tipo', documentType)
+    .eq('documento_id', documentId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+}
+
 function gerarToken() {
   const arr = new Uint8Array(12)
   crypto.getRandomValues(arr)
@@ -142,13 +200,31 @@ export async function GET(req: NextRequest) {
         )
       }
 
-      const { data, error } = await supabaseAdmin
+      let data: Record<string, unknown> | null = null
+      let error: { message?: string } | null = null
+
+      const porNovasColunas = await supabaseAdmin
         .from('public_documents')
         .select('*')
-        .eq('tipo', documentType)
-        .eq('documento_id', documentId)
+        .eq('document_type', documentType)
+        .eq('document_id', documentId)
         .eq('token', token)
         .maybeSingle()
+
+      data = porNovasColunas.data
+      error = porNovasColunas.error
+
+      if (!data && !error) {
+        const porLegado = await supabaseAdmin
+          .from('public_documents')
+          .select('*')
+          .eq('tipo', documentType)
+          .eq('documento_id', documentId)
+          .eq('token', token)
+          .maybeSingle()
+        data = porLegado.data
+        error = porLegado.error
+      }
 
       if (error) {
         console.error('[PUBLIC_DOCS_GET]', error)
@@ -263,17 +339,37 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
 
     const documentTypeRaw = String(body?.document_type || body?.tipo || '').trim()
+    const documentType = normalizarTipoPublico(documentTypeRaw)
     const payloadRecebido = body?.payload ?? body?.snapshot ?? null
 
-    const documentoId = String(
-      body?.document_id ||
-      body?.documentoId ||
-      payloadRecebido?.id ||
-      payloadRecebido?.i ||
-      ''
-    ).trim()
+    const tokenRecebido = String(body?.token || '').trim()
 
-    const tipo = normalizarTipoPublico(documentTypeRaw)
+    const documentIdReciboContrato = String(body?.document_id || '').trim()
+
+    let documentoId = ''
+
+    if (documentType === 'recibo' || documentType === 'contrato') {
+      if (!documentTypeRaw || !documentIdReciboContrato || !tokenRecebido) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'document_type, document_id e token são obrigatórios.',
+          },
+          { status: 400 }
+        )
+      }
+      documentoId = documentIdReciboContrato
+    } else {
+      documentoId = String(
+        body?.document_id ||
+        body?.documentoId ||
+        payloadRecebido?.id ||
+        payloadRecebido?.i ||
+        ''
+      ).trim()
+    }
+
+    const tipo = documentType
 
     if (!tipo || !TIPOS_PUBLICOS.has(tipo)) {
       return NextResponse.json(
@@ -292,7 +388,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const tokenRecebido = String(body?.token || '').trim()
+    if (tipo === 'recibo' && (!tokenRecebido || !documentoId)) {
+      return NextResponse.json(
+        { success: false, error: 'document_type, document_id e token são obrigatórios.' },
+        { status: 400 }
+      )
+    }
 
     let existente: any = null
     let erroBusca: any = null
@@ -309,25 +410,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!existente && !erroBusca) {
-      const buscaPorDocumento =
-        tipo === 'ordem_servico'
-          ? await supabaseAdmin
-              .from('public_documents')
-              .select('*')
-              .in('tipo', ['ordem_servico', 'os'])
-              .eq('documento_id', documentoId)
-              .order('updated_at', { ascending: false })
-              .limit(1)
-              .maybeSingle()
-          : await supabaseAdmin
-              .from('public_documents')
-              .select('*')
-              .eq('tipo', tipo)
-              .eq('documento_id', documentoId)
-              .order('updated_at', { ascending: false })
-              .limit(1)
-              .maybeSingle()
-
+      const buscaPorDocumento = await buscarPublicDocumentPorTipoId(supabaseAdmin, tipo, documentoId)
       existente = buscaPorDocumento.data
       erroBusca = buscaPorDocumento.error
     }
@@ -362,13 +445,10 @@ export async function POST(req: NextRequest) {
       owner_user_id: userId || null,
     }
 
-    const dadosSalvar = {
-      token,
-      tipo,
-      documento_id: documentoId,
-      payload,
-      updated_at: new Date().toISOString(),
-      ...(userId ? { user_id: userId } : {}),
+    const dadosSalvar = linhaPublicDocument(tipo, documentoId, token, payload, userId ? { user_id: userId } : undefined)
+
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[PUBLIC_DOCS_POST] row', dadosSalvar)
     }
 
     async function salvarPublicDocument() {
@@ -382,23 +462,15 @@ export async function POST(req: NextRequest) {
       const insertResult = await supabaseAdmin.from('public_documents').insert(dadosSalvar)
 
       if (insertResult.error?.code === '23505') {
-        console.warn('[INSERT_PUBLIC_DOCS] Conflito único, tentando update por tipo+documento_id', {
-          tipo,
-          documento_id: documentoId,
+        console.warn('[INSERT_PUBLIC_DOCS] Conflito único, tentando update por document_type+document_id', {
+          document_type: tipo,
+          document_id: documentoId,
         })
-        const updateQuery =
-          tipo === 'ordem_servico'
-            ? supabaseAdmin
-                .from('public_documents')
-                .update(dadosSalvar)
-                .in('tipo', ['ordem_servico', 'os'])
-                .eq('documento_id', documentoId)
-            : supabaseAdmin
-                .from('public_documents')
-                .update(dadosSalvar)
-                .eq('tipo', tipo)
-                .eq('documento_id', documentoId)
-        return updateQuery
+        return supabaseAdmin
+          .from('public_documents')
+          .update(dadosSalvar)
+          .eq('document_type', tipo)
+          .eq('document_id', documentoId)
       }
 
       return insertResult

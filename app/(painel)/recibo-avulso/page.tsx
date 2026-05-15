@@ -6,7 +6,6 @@ import extenso from 'extenso'
 
 import { ReciboEmitidoView, type DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
 import { abrirReciboPdfEmNovaJanela } from '@/lib/recibo-print-html'
-import { supabase } from '@/lib/supabase-browser'
 
 type DadosRecibo = DadosReciboEmitido
 
@@ -70,24 +69,17 @@ function prepararPayloadReciboPublico(dados: DadosRecibo) {
 async function gerarLinkPublicoRecibo(dados: DadosRecibo): Promise<string> {
   const documentId = String(Date.now())
   const token = gerarToken()
-  const payload = prepararPayloadReciboPublico(dados)
-
-  let accessToken = ''
-  let userId = ''
-  try {
-    const { data: { session } } = await supabase.auth.getSession()
-    accessToken = session?.access_token || ''
-    userId = session?.user?.id || ''
-  } catch (error) {
-    console.warn('[RECIBO_PUBLICO] Sessão não disponível para publicar link:', error)
-  }
+  const snapshotDoRecibo = prepararPayloadReciboPublico(dados)
 
   const body = {
     document_type: 'recibo',
     document_id: documentId,
     token,
-    payload,
-    ...(userId ? { user_id: userId } : {}),
+    payload: snapshotDoRecibo,
+  }
+
+  if (process.env.NODE_ENV === 'development') {
+    console.error('[RECIBO_PUBLICO] POST /api/public-docs body', body)
   }
 
   try {
@@ -95,7 +87,6 @@ async function gerarLinkPublicoRecibo(dados: DadosRecibo): Promise<string> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: JSON.stringify(body),
     })
@@ -109,9 +100,7 @@ async function gerarLinkPublicoRecibo(dados: DadosRecibo): Promise<string> {
     }
 
     if (response.ok && json?.success !== false) {
-      const tokenSalvo = String(json?.token || token).trim()
-      const idSalvo = String(json?.document_id || documentId).trim()
-      return `${SITE_URL}/visualizar/recibo/${encodeURIComponent(idSalvo)}?token=${encodeURIComponent(tokenSalvo)}`
+      return `${SITE_URL}/visualizar/recibo/${documentId}?token=${encodeURIComponent(token)}`
     }
 
     console.error('[RECIBO_PUBLICO] Falha POST /api/public-docs', {
