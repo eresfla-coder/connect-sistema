@@ -37,6 +37,7 @@ type ContratoServico = {
 }
 
 const STORAGE_KEY = 'connect_contratos'
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || '').replace(/\/$/, '')
 
 // Migração: buscar do Supabase primeiro, fallback localStorage
 async function buscarContratos(): Promise<ContratoServico[]> {
@@ -286,6 +287,47 @@ export default function ContratosPage() {
     setEnviando(true)
     const config = JSON.parse(localStorage.getItem('connect_configuracoes') || '{}')
     const empresa = config.nomeEmpresa || 'Empresa'
+
+    const token = (() => {
+      try {
+        return crypto.randomUUID().replace(/-/g, '')
+      } catch {
+        return `${Date.now()}${Math.random().toString(36).slice(2)}`
+      }
+    })()
+
+    const empresaPublica = {
+      nome: config.nomeEmpresa || 'LOJA CONNECT',
+      telefone: config.telefone || '',
+      endereco: config.endereco || '',
+      cidadeUf: config.cidadeUf || '',
+    }
+
+    try {
+      const resp = await fetch('/api/public-docs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          document_type: 'contrato',
+          document_id: String(c.id),
+          token,
+          payload: { contrato: c, empresaPublica },
+        }),
+      })
+      if (!resp.ok) {
+        alert('Não foi possível gerar o link público do contrato. Tente novamente.')
+        setEnviando(false)
+        return
+      }
+    } catch {
+      alert('Não foi possível gerar o link público do contrato. Verifique sua conexão.')
+      setEnviando(false)
+      return
+    }
+
+    const base = SITE_URL || (typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : '')
+    const link = `${base}/visualizar/contrato/${encodeURIComponent(String(c.id))}?token=${encodeURIComponent(token)}`
+
     const texto = `Olá ${c.cliente?.nome || ''}!
 
 Segue seu *Contrato de Prestação de Serviço* Nº ${c.numero} da *${empresa}*.
@@ -295,7 +337,7 @@ Segue seu *Contrato de Prestação de Serviço* Nº ${c.numero} da *${empresa}*.
 *Parcelas:* ${c.parcelas}x de ${moedaHTML(c.valorParcela)}
 
 Acesse e assine digitalmente:
-${window.location.origin}/impressao-contrato/${c.id}?preview=1
+${link}
 
 Atenciosamente,
 ${empresa}`

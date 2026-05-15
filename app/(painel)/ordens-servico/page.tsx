@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { gerarFinanceiroDeOrdemServico, removerFinanceiroDoDocumento } from '@/lib/financeiro'
+import { supabase } from '@/lib/supabase'
 
 type Cliente = {
   id?: string | number
@@ -262,6 +263,95 @@ function montarWhatsappOS(item: OrdemServico) {
   return telefone ? `https://wa.me/${telefone}?text=${texto}` : `https://wa.me/?text=${texto}`
 }
 
+type OsRow = {
+  user_id?: string
+  local_id?: string
+  numero?: string
+  cliente?: string
+  telefone?: string
+  cliente_nome?: string
+  cliente_telefone?: string
+  equipamento?: string
+  status?: string
+  prioridade?: string
+  valor?: number
+  entrada?: number
+  saldo?: number
+  aprovado?: boolean
+  payload?: Partial<OrdemServico> | Record<string, unknown>
+}
+
+function osAprovadoPorStatus(status?: string) {
+  const valor = String(status || '').toLowerCase()
+  return valor.includes('aprov') || valor === 'finalizada' || valor === 'entregue'
+}
+
+function osParaRowSupabase(os: OrdemServico, userId: string): OsRow {
+  const clienteNome = String(os.cliente || '').trim()
+  const telefone = String(os.telefone || os.whatsapp || '').trim()
+  const status = String(os.status || 'Aberta')
+
+  return {
+    user_id: userId,
+    local_id: String(os.id),
+    numero: os.numero,
+    cliente: clienteNome,
+    telefone,
+    equipamento: String(os.equipamento || ''),
+    status,
+    prioridade: String(os.prioridade || 'Média'),
+    valor: Number(os.valor || 0),
+    entrada: Number(os.entrada || 0),
+    saldo: Number(os.saldo || 0),
+    aprovado: osAprovadoPorStatus(status),
+    payload: os,
+    cliente_nome: clienteNome,
+    cliente_telefone: telefone,
+  }
+}
+
+function osDeRowSupabase(row: OsRow): OrdemServico {
+  const payload = row.payload && typeof row.payload === 'object' ? row.payload as Partial<OrdemServico> : null
+  const localId = Number(row.local_id || payload?.id || 0) || Date.now()
+
+  if (payload?.numero) {
+    return {
+      ...(payload as OrdemServico),
+      id: localId,
+    }
+  }
+
+  const clienteNome = String(row.cliente || row.cliente_nome || '').trim()
+  const telefone = String(row.telefone || row.cliente_telefone || '').trim()
+
+  return {
+    id: localId,
+    numero: String(row.numero || ''),
+    cliente: clienteNome,
+    telefone,
+    whatsapp: telefone,
+    email: '',
+    endereco: '',
+    equipamento: String(row.equipamento || ''),
+    marca: '',
+    modelo: '',
+    serial: '',
+    defeito: '',
+    checklist: '',
+    observacao: '',
+    valor: Number(row.valor || 0),
+    entrada: Number(row.entrada || 0),
+    saldo: Number(row.saldo || 0),
+    status: String(row.status || 'Aberta'),
+    prioridade: String(row.prioridade || 'Média'),
+    tecnico: '',
+    previsao: '',
+    data: hojeBR(),
+    ultimaAtualizacao: hojeBR(),
+    link: '',
+  }
+}
+
 export default function OrdemServicoPage() {
   const router = useRouter()
   const [isMobile, setIsMobile] = useState(false)
@@ -444,6 +534,115 @@ export default function OrdemServicoPage() {
     window.dispatchEvent(new Event('connect-local-saved'))
   }
 
+  function carregarOsLocalFallback() {
+    try {
+      const salvo = localStorage.getItem(STORAGE_KEY)
+      if (salvo) {
+        const listaSalva = JSON.parse(salvo)
+        if (Array.isArray(listaSalva)) {
+          const listaCorrigida = listaSalva.map((item) => normalizarItem(item))
+          setLista(listaCorrigida)
+          setForm(ordemVazia(listaCorrigida))
+        }
+      }
+    } catch {}
+  }
+
+  async function persistirOsSupabase(os: OrdemServico, userId?: string | null) {
+    try {
+      const { data } = await supabase.auth.getUser()
+      const uid = userId || data?.user?.id
+      if (!uid) return
+
+      const row = osParaRowSupabase(os, uid)
+      const { error } = await supabase
+        .from('ordens_servico')
+        .upsert(row, { onConflict: 'user_id,local_id' })
+
+      if (error) console.warn('[ordens_servico] erro ao persistir:', error.message)
+    } catch (e) {
+      console.warn('[ordens_servico] erro ao persistir:', e)
+    }
+  }
+
+  async function excluirOsSupabase(os: OrdemServico) {
+    try {
+      const { data } = await supabase.auth.getUser()
+      const userId = data?.user?.id
+      if (!userId) return
+
+      const { error } = await supabase
+        .from('ordens_servico')
+        .delete()
+        .eq('user_id', userId)
+        .eq('local_id', String(os.id))
+
+      if (error) console.warn('[ordens_servico] erro ao excluir:', error.message)
+    } catch (e) {
+      console.warn('[ordens_servico] erro ao excluir:', e)
+    }
+  }
+
+  async function sincronizarOsLocaisAntigos(cloudList?: OrdemServico[]) {
+    const { data } = await supabase.auth.getUser()
+    const userId = data?.user?.id
+    if (!userId) return
+
+    let localList: OrdemServico[] = []
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      localList = raw ? JSON.parse(raw) : []
+      if (!Array.isArray(localList)) return
+    } catch {
+      return
+    }
+
+    const cloudIds = new Set((cloudList || []).map((item) => String(item.id)))
+    const pendentes = localList
+      .map((item) => normalizarItem(item))
+      .filter((item) => item?.id && !cloudIds.has(String(item.id)))
+
+    if (!pendentes.length) return
+
+    for (const os of pendentes) {
+      await persistirOsSupabase(os, userId)
+    }
+
+    const { data: rows, error } = await supabase
+      .from('ordens_servico')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error || !rows) return
+
+    const normalizados = (rows as OsRow[]).map((row) => normalizarItem(osDeRowSupabase(row)))
+    setLista(normalizados)
+    setForm(ordemVazia(normalizados))
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizados)) } catch {}
+  }
+
+  async function carregarOsSupabase() {
+    try {
+      const { data, error } = await supabase
+        .from('ordens_servico')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      const normalizados = ((data || []) as OsRow[])
+        .map((row) => normalizarItem(osDeRowSupabase(row)))
+
+      setLista(normalizados)
+      setForm(ordemVazia(normalizados))
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizados)) } catch {}
+      await sincronizarOsLocaisAntigos(normalizados)
+    } catch (e) {
+      console.warn('[ordens_servico] fallback local:', e)
+      carregarOsLocalFallback()
+    }
+  }
+
   async function sincronizarAprovacoesOSPublicas(forcar = false) {
     if (syncOsPublicaRodandoRef.current) return
 
@@ -513,6 +712,9 @@ export default function OrdemServicoPage() {
         const mapa = new Map(atualizados.map((item) => [String(item.id), item]))
         const listaFinal = base.map((item) => mapa.get(String(item.id)) || item)
         salvarLista(listaFinal)
+        for (const item of listaFinal) {
+          if (mapa.has(String(item.id))) void persistirOsSupabase(item)
+        }
       }
     } finally {
       syncOsPublicaRodandoRef.current = false
@@ -584,18 +786,7 @@ export default function OrdemServicoPage() {
   }, [])
 
   useEffect(() => {
-    const salvo = localStorage.getItem(STORAGE_KEY)
-    if (salvo) {
-      try {
-        const listaSalva = JSON.parse(salvo)
-        if (Array.isArray(listaSalva)) {
-          const listaCorrigida = listaSalva.map((item) => normalizarItem(item))
-          setLista(listaCorrigida)
-          setForm(ordemVazia(listaCorrigida))
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(listaCorrigida))
-        }
-      } catch {}
-    }
+    void carregarOsSupabase()
 
     const clientesSalvos = localStorage.getItem(CLIENTES_KEY)
     if (clientesSalvos) {
@@ -627,17 +818,7 @@ export default function OrdemServicoPage() {
 
   useEffect(() => {
     function carregarDadosLocaisV78() {
-      try {
-        const salvo = localStorage.getItem(STORAGE_KEY)
-        if (salvo) {
-          const listaSalva = JSON.parse(salvo)
-          if (Array.isArray(listaSalva)) {
-            const listaCorrigida = listaSalva.map((item) => normalizarItem(item))
-            setLista(listaCorrigida)
-            setForm(ordemVazia(listaCorrigida))
-          }
-        }
-      } catch {}
+      void carregarOsSupabase()
 
       try {
         const clientesSalvos = localStorage.getItem(CLIENTES_KEY)
@@ -849,6 +1030,7 @@ export default function OrdemServicoPage() {
 
     const novaLista = [nova, ...lista]
     salvarLista(novaLista)
+    void persistirOsSupabase(nova)
     gerarFinanceiroDeOrdemServico(nova)
 
     const orcAtualizados = orcamentos.map((item) => (item.id === orc.id ? { ...item, status: 'Convertido' } : item))
@@ -872,7 +1054,7 @@ export default function OrdemServicoPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function salvar() {
+  async function salvar() {
     if (!form.cliente.trim()) {
       alert('Preencha o cliente.')
       return
@@ -899,6 +1081,7 @@ export default function OrdemServicoPage() {
 
       const novaLista = lista.map((item) => (item.id === editandoId ? atualizada : item))
       salvarLista(novaLista)
+      void persistirOsSupabase(atualizada)
       gerarFinanceiroDeOrdemServico(atualizada)
       alert('OS atualizada com sucesso.')
       limpar()
@@ -919,6 +1102,7 @@ export default function OrdemServicoPage() {
 
     const novaLista = [nova, ...lista]
     salvarLista(novaLista)
+    void persistirOsSupabase(nova)
     gerarFinanceiroDeOrdemServico(nova)
     alert('OS salva com sucesso e financeiro atualizado.')
     limpar()
@@ -933,13 +1117,14 @@ export default function OrdemServicoPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function excluir(id: number) {
+  async function excluir(id: number) {
     if (!confirm('Deseja excluir esta OS?')) return
 
     const atual = lista.find((item) => item.id === id)
     const novaLista = lista.filter((item) => item.id !== id)
 
     salvarLista(novaLista)
+    if (atual) void excluirOsSupabase(atual)
     removerFinanceiroDoDocumento('ordem_servico', id)
 
     if (atual?.orcamentoId) {
@@ -969,6 +1154,7 @@ export default function OrdemServicoPage() {
 
     const novaLista = [copia, ...lista]
     salvarLista(novaLista)
+    void persistirOsSupabase(copia)
     alert('OS duplicada com sucesso.')
   }
 

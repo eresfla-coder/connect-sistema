@@ -202,6 +202,7 @@ export default function AdminSaasMasterPage() {
   const [inviteText, setInviteText] = useState('')
   const [invitePhone, setInvitePhone] = useState('')
   const [isMobileAdmin, setIsMobileAdmin] = useState(false)
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
   const [novoCliente, setNovoCliente] = useState<NovoClienteForm>({
     email: '',
     nome_empresa: '',
@@ -219,7 +220,11 @@ export default function AdminSaasMasterPage() {
   }, [])
 
   useEffect(() => {
-    const verificar = () => setIsMobileAdmin(window.innerWidth <= 760)
+    const verificar = () => {
+      const mobile = window.innerWidth < 900
+      setIsMobileAdmin(mobile)
+      if (!mobile) setMobileDrawerOpen(false)
+    }
     verificar()
     window.addEventListener('resize', verificar)
     return () => window.removeEventListener('resize', verificar)
@@ -781,9 +786,9 @@ export default function AdminSaasMasterPage() {
         <section style={{ ...styles.heroMaster, ...(isMobileAdmin ? styles.heroMasterMobile : {}) }}>
           <div style={styles.heroContent}>
             <div style={styles.kicker}>Painel dono do sistema • SaaS Master</div>
-            <h1 style={styles.title}>Central Admin Connect Pro</h1>
-            <p style={styles.subtitle}>Controle clientes, planos, bloqueios, sessões, trial, cobrança, uso e crescimento do seu SaaS em uma única tela.</p>
-            <div style={styles.heroActions}>
+            <h1 style={{ ...styles.title, ...(isMobileAdmin ? styles.titleMobile : {}) }}>Central Admin Connect Pro</h1>
+            <p style={{ ...styles.subtitle, ...(isMobileAdmin ? styles.subtitleMobile : {}) }}>Controle clientes, planos, bloqueios, sessões, trial, cobrança, uso e crescimento do seu SaaS em uma única tela.</p>
+            <div style={{ ...styles.heroActions, ...(isMobileAdmin ? styles.heroActionsMobile : {}) }}>
               <button
                 style={styles.primaryHeroButton}
                 onClick={() => {
@@ -828,10 +833,25 @@ export default function AdminSaasMasterPage() {
           <KpiCard titulo="Sessões" valor={String(sessoes.length)} detalhe="dispositivos ativos" cor="#38bdf8" icone="📱" />
         </section>
 
-        <section style={{ ...styles.commandCenter, ...(isMobileAdmin ? styles.commandCenterMobile : {}) }}>
-          <div style={styles.centerLeft}>
-            <div style={styles.centerTitle}>Radar SaaS</div>
-            <div style={styles.radarGrid}>
+        {isMobileAdmin ? (
+          <button type="button" style={styles.mobileMenuButton} onClick={() => setMobileDrawerOpen((open) => !open)}>
+            {mobileDrawerOpen ? '✕ Fechar radar e ações' : '☰ Abrir radar e ações'}
+          </button>
+        ) : null}
+
+        {isMobileAdmin && mobileDrawerOpen ? (
+          <div style={styles.drawerBackdrop} onClick={() => setMobileDrawerOpen(false)} />
+        ) : null}
+
+        {!isMobileAdmin || mobileDrawerOpen ? (
+          <section style={{
+            ...styles.commandCenter,
+            ...(isMobileAdmin ? styles.commandCenterMobile : {}),
+            ...(isMobileAdmin ? styles.commandCenterDrawer : {}),
+          }}>
+            <div style={styles.centerLeft}>
+              <div style={styles.centerTitle}>Radar SaaS</div>
+              <div style={{ ...styles.radarGrid, ...(isMobileAdmin ? styles.radarGridMobile : {}) }}>
               <RadarItem label="Vencidos" value={String(resumo.vencidos)} color="#ef4444" />
               <RadarItem label="Vencendo 7 dias" value={String(resumo.vencendo7)} color="#facc15" />
               <RadarItem label="Bloqueados" value={String(resumo.bloqueados)} color="#fb7185" />
@@ -840,31 +860,32 @@ export default function AdminSaasMasterPage() {
           </div>
           <div style={styles.centerRight}>
             <div style={styles.centerTitle}>Ações inteligentes</div>
-            <div style={styles.quickActions}>
-              <button style={styles.quickButton} onClick={() => setFiltro('risco')}>Ver clientes em risco</button>
-              <button style={styles.quickButton} onClick={() => setFiltro('trial')}>Ver trials</button>
-              <button style={styles.quickButton} onClick={() => setAba('sessoes')}>Sessões ativas</button>
-              <button style={styles.quickButton} onClick={() => setAba('metricas')}>Uso do sistema</button>
+            <div style={{ ...styles.quickActions, ...(isMobileAdmin ? styles.quickActionsMobile : {}) }}>
+              <button style={styles.quickButton} onClick={() => { setFiltro('risco'); if (isMobileAdmin) setMobileDrawerOpen(false) }}>Ver clientes em risco</button>
+              <button style={styles.quickButton} onClick={() => { setFiltro('trial'); if (isMobileAdmin) setMobileDrawerOpen(false) }}>Ver trials</button>
+              <button style={styles.quickButton} onClick={() => { setAba('sessoes'); if (isMobileAdmin) setMobileDrawerOpen(false) }}>Sessões ativas</button>
+              <button style={styles.quickButton} onClick={() => { setAba('metricas'); if (isMobileAdmin) setMobileDrawerOpen(false) }}>Uso do sistema</button>
             </div>
           </div>
         </section>
+        ) : null}
 
-        <section style={styles.tabs}>
-          <button style={aba === 'clientes' ? styles.tabActive : styles.tab} onClick={() => setAba('clientes')}>Clientes e planos</button>
-          <button style={aba === 'sessoes' ? styles.tabActive : styles.tab} onClick={() => setAba('sessoes')}>Sessões ativas</button>
-          <button style={aba === 'metricas' ? styles.tabActive : styles.tab} onClick={() => setAba('metricas')}>Uso e crescimento</button>
+        <section style={{ ...styles.tabs, ...(isMobileAdmin ? styles.tabsMobile : {}) }}>
+          <button style={{ ...(aba === 'clientes' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('clientes')}>Clientes e planos</button>
+          <button style={{ ...(aba === 'sessoes' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('sessoes')}>Sessões ativas</button>
+          <button style={{ ...(aba === 'metricas' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('metricas')}>Uso e crescimento</button>
         </section>
 
         {aba === 'clientes' && (
           <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>
-            <div style={styles.panelTop}>
+            <div style={{ ...styles.panelTop, ...(isMobileAdmin ? styles.panelTopMobile : {}) }}>
               <div>
-                <h2 style={styles.panelTitle}>Clientes, planos e cobrança</h2>
+                <h2 style={{ ...styles.panelTitle, ...(isMobileAdmin ? styles.panelTitleMobile : {}) }}>Clientes, planos e cobrança</h2>
                 <p style={styles.panelSub}>Gerencie assinatura, status, limite, acesso, senha provisória e cobrança WhatsApp.</p>
               </div>
               <div style={{ ...styles.toolbar, ...(isMobileAdmin ? styles.toolbarMobile : {}) }}>
                 <input style={{ ...styles.search, ...(isMobileAdmin ? styles.searchMobile : {}) }} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar cliente, sistema, e-mail ou telefone" />
-                <select style={styles.select} value={filtro} onChange={(e) => setFiltro(e.target.value as FiltroStatus)}>
+                <select style={{ ...styles.select, ...(isMobileAdmin ? styles.selectMobile : {}) }} value={filtro} onChange={(e) => setFiltro(e.target.value as FiltroStatus)}>
                   <option style={styles.selectOption} value="todos">Todos</option>
                   <option style={styles.selectOption} value="risco">Risco</option>
                   <option style={styles.selectOption} value="trial">Trial</option>
@@ -906,9 +927,9 @@ export default function AdminSaasMasterPage() {
 
                 return (
                   <div key={cliente.id} style={{ ...styles.clientRow, ...(isMobileAdmin ? styles.clientRowMobile : {}) }}>
-                    <div style={styles.clientIdentity}>
-                      <div style={styles.clientName}>{cliente.nome_empresa || 'Cliente sem nome'}</div>
-                      <div style={styles.clientLine}>{cliente.email || '-'} {cliente.telefone ? `• ${cliente.telefone}` : ''}</div>
+                    <div style={{ ...styles.clientIdentity, ...(isMobileAdmin ? styles.clientIdentityMobile : {}) }}>
+                      <div style={{ ...styles.clientName, ...(isMobileAdmin ? styles.clientNameMobile : {}) }}>{cliente.nome_empresa || 'Cliente sem nome'}</div>
+                      <div style={{ ...styles.clientLine, ...(isMobileAdmin ? styles.clientLineMobile : {}) }}>{cliente.email || '-'} {cliente.telefone ? `• ${cliente.telefone}` : ''}</div>
                       <div style={styles.systemLine}>{clienteSistema(cliente)}</div>
                     </div>
 
@@ -953,7 +974,7 @@ export default function AdminSaasMasterPage() {
         )}
 
         {aba === 'sessoes' && (
-          <section style={styles.panel}>
+          <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>
             <div style={styles.panelTop}>
               <div>
                 <h2 style={styles.panelTitle}>Sessões ativas e proteção anti-compartilhamento</h2>
@@ -978,7 +999,7 @@ export default function AdminSaasMasterPage() {
         )}
 
         {aba === 'metricas' && (
-          <section style={styles.panel}>
+          <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>
             <div style={styles.panelTop}>
               <div>
                 <h2 style={styles.panelTitle}>Uso do sistema e crescimento</h2>
@@ -1215,7 +1236,7 @@ const styles: Record<string, CSSProperties> = {
   riskTitle: { fontWeight: 950, marginBottom: 10, color: '#fef3c7' },
   riskList: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 },
   riskItem: { minHeight: 54, borderRadius: 15, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(15,23,42,0.36)', color: '#fff', display: 'grid', textAlign: 'left', padding: '8px 10px', cursor: 'pointer' },
-  clientList: { display: 'grid', gap: 11, overflow: 'visible', paddingBottom: 4 },
+  clientList: { display: 'grid', gap: 11, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch' },
   clientRow: { minWidth: 1250, display: 'grid', gridTemplateColumns: 'minmax(240px,1.4fr) 105px 105px 105px 120px 130px 105px 110px 195px', gap: 9, alignItems: 'center', borderRadius: 20, padding: 13, background: 'linear-gradient(135deg, rgba(248,250,252,0.075), rgba(15,23,42,0.42))', border: '1px solid rgba(255,255,255,0.13)', boxShadow: '0 12px 28px rgba(15,23,42,0.16), inset 0 1px 0 rgba(255,255,255,0.04)' },
   clientIdentity: { minWidth: 0 },
   clientName: { fontSize: 18, fontWeight: 950, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#ffffff' },
@@ -1263,7 +1284,23 @@ const styles: Record<string, CSSProperties> = {
   cancelButton: { height: 46, borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', padding: '0 18px', background: 'rgba(255,255,255,0.07)', color: '#fff', fontWeight: 850, cursor: 'pointer' },
   saveButton: { height: 46, borderRadius: 999, border: 'none', padding: '0 19px', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontWeight: 950, cursor: 'pointer', boxShadow: '0 14px 30px rgba(34,197,94,0.26)' },
 
-  pageMobile: { padding: 'max(12px, env(safe-area-inset-top)) 10px 18px' },
+  pageMobile: { padding: 'max(12px, env(safe-area-inset-top)) 10px 18px' },  mobileMenuButton: { width: '100%', minHeight: 46, borderRadius: 16, border: '1px solid rgba(147,197,253,0.28)', background: 'rgba(59,130,246,0.18)', color: '#dbeafe', fontWeight: 900, cursor: 'pointer' },
+  drawerBackdrop: { position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.62)', backdropFilter: 'blur(4px)', zIndex: 1190 },
+  commandCenterDrawer: { position: 'fixed', top: 0, left: 0, bottom: 0, width: 'min(88vw, 360px)', zIndex: 1200, margin: 0, borderRadius: '0 24px 24px 0', overflowY: 'auto', boxShadow: '18px 0 48px rgba(2,6,23,0.45)', alignContent: 'start' },
+  titleMobile: { fontSize: 'clamp(28px, 8vw, 40px)', letterSpacing: -1.1 },
+  subtitleMobile: { fontSize: 14, lineHeight: 1.5 },
+  heroActionsMobile: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, marginTop: 16 },
+  tabsMobile: { overflowX: 'auto', flexWrap: 'nowrap', WebkitOverflowScrolling: 'touch', gap: 8, paddingBottom: 4 },
+  tabMobile: { flexShrink: 0, fontSize: 13, height: 40, padding: '0 14px' },
+  radarGridMobile: { gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8 },
+  quickActionsMobile: { gridTemplateColumns: '1fr', gap: 8 },
+  panelTopMobile: { flexDirection: 'column', alignItems: 'stretch' },
+  panelTitleMobile: { fontSize: 22, lineHeight: 1.2 },
+  selectMobile: { width: '100%' },
+  clientIdentityMobile: { gridColumn: '1 / -1' },
+  clientNameMobile: { whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip', wordBreak: 'break-word', fontSize: 17 },
+  clientLineMobile: { whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip', wordBreak: 'break-word' },
+
   containerMobile: { gap: 12 },
   heroMasterMobile: { borderRadius: 22, padding: 16, display: 'grid', gap: 14 },
   heroSideMobile: { minWidth: 0, width: '100%' },
@@ -1273,7 +1310,7 @@ const styles: Record<string, CSSProperties> = {
   toolbarMobile: { display: 'grid', gridTemplateColumns: '1fr', width: '100%' },
   searchMobile: { minWidth: 0, width: '100%' },
   clientListMobile: { overflowX: 'visible', gap: 10 },
-  clientRowMobile: { minWidth: 0, gridTemplateColumns: '1fr', gap: 8, padding: 12, borderRadius: 18 },
-  rowActionsMobile: { justifyContent: 'stretch', display: 'grid', gridTemplateColumns: '1fr 1fr', width: '100%' },
+  clientRowMobile: { minWidth: 0, gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8, padding: 12, borderRadius: 18 },
+  rowActionsMobile: { gridColumn: '1 / -1', justifyContent: 'stretch', display: 'grid', gridTemplateColumns: '1fr 1fr', width: '100%' },
 }
 

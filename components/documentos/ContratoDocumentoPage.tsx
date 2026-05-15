@@ -38,39 +38,129 @@ export default function ContratoDocumentoPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const id = String(params?.id || '')
+  const token = String(searchParams.get('token') || '').trim()
 
   const [contrato, setContrato] = useState<Contrato | null>(null)
   const [empresa, setEmpresa] = useState({ nome: 'LOJA CONNECT', telefone: '', endereco: '', cidadeUf: '' })
   const [loading, setLoading] = useState(true)
+  const [erroPublico, setErroPublico] = useState<string | null>(null)
   const [assinado, setAssinado] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
-    if (!id) return
+    let vivo = true
 
-    try {
-      const salvo = localStorage.getItem('connect_contratos')
-      if (salvo) {
-        const lista = JSON.parse(salvo)
-        const encontrado = lista.find((c: Contrato) => String(c.id) === id)
-        if (encontrado) {
-          setContrato(encontrado)
+    async function carregar() {
+      setLoading(true)
+      setErroPublico(null)
+      setContrato(null)
+
+      if (!id) {
+        if (vivo) setLoading(false)
+        return
+      }
+
+      if (token) {
+        try {
+          const resp = await fetch(
+            `/api/public-docs?document_type=contrato&document_id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}`,
+            { cache: 'no-store' }
+          )
+          if (!resp.ok) {
+            if (vivo) {
+              setErroPublico('Contrato não encontrado ou link inválido. Peça um novo link ao emitente.')
+              setLoading(false)
+            }
+            return
+          }
+          const row = await resp.json()
+          const payload = row?.payload
+          const c = payload?.contrato
+          const ep = payload?.empresaPublica
+          if (!c || typeof c !== 'object') {
+            if (vivo) {
+              setErroPublico('Não foi possível carregar este contrato. Peça um novo link ao emitente.')
+              setLoading(false)
+            }
+            return
+          }
+          const cli = c.cliente || {}
+          if (vivo) {
+            setContrato({
+              id: String(c.id ?? id),
+              numero: String(c.numero ?? ''),
+              data: String(c.data ?? ''),
+              validade: String(c.validade ?? ''),
+              cliente: {
+                nome: cli.nome,
+                telefone: cli.telefone,
+                cpf: cli.cpf,
+                cnpj: cli.cnpj,
+                endereco: cli.endereco,
+                bairro: cli.bairro,
+                cidade: cli.cidade,
+                tipoPessoa: cli.tipoPessoa,
+              },
+              descricaoServico: String(c.descricaoServico ?? ''),
+              descricaoServicoItens: Array.isArray(c.descricaoServicoItens) ? c.descricaoServicoItens : [],
+              clausulasExtras: String(c.clausulasExtras ?? ''),
+              valorTotal: Number(c.valorTotal ?? 0),
+              parcelas: Number(c.parcelas ?? 1),
+              valorParcela: Number(c.valorParcela ?? 0),
+              formaPagamento: String(c.formaPagamento ?? ''),
+              prazoExecucao: String(c.prazoExecucao ?? ''),
+              garantia: String(c.garantia ?? ''),
+              cidadeContrato: String(c.cidadeContrato ?? ''),
+            })
+            if (ep && typeof ep === 'object') {
+              setEmpresa({
+                nome: String(ep.nome || 'LOJA CONNECT'),
+                telefone: String(ep.telefone || ''),
+                endereco: String(ep.endereco || ''),
+                cidadeUf: String(ep.cidadeUf || ''),
+              })
+            }
+            setLoading(false)
+          }
+          return
+        } catch {
+          if (vivo) {
+            setErroPublico('Erro ao carregar o contrato. Verifique sua conexão e tente de novo.')
+            setLoading(false)
+          }
+          return
         }
       }
-    } catch {}
 
-    try {
-      const cfg = JSON.parse(localStorage.getItem('connect_configuracoes') || '{}')
-      setEmpresa({
-        nome: cfg.nomeEmpresa || 'LOJA CONNECT',
-        telefone: cfg.telefone || '',
-        endereco: cfg.endereco || '',
-        cidadeUf: cfg.cidadeUf || '',
-      })
-    } catch {}
+      try {
+        const salvo = localStorage.getItem('connect_contratos')
+        if (salvo) {
+          const lista = JSON.parse(salvo)
+          const encontrado = lista.find((c: Contrato) => String(c.id) === id)
+          if (encontrado) {
+            setContrato(encontrado)
+          }
+        }
+      } catch {}
 
-    setLoading(false)
-  }, [id])
+      try {
+        const cfg = JSON.parse(localStorage.getItem('connect_configuracoes') || '{}')
+        setEmpresa({
+          nome: cfg.nomeEmpresa || 'LOJA CONNECT',
+          telefone: cfg.telefone || '',
+          endereco: cfg.endereco || '',
+          cidadeUf: cfg.cidadeUf || '',
+        })
+      } catch {}
+
+      if (vivo) setLoading(false)
+    }
+
+    void carregar()
+    return () => {
+      vivo = false
+    }
+  }, [id, token])
 
   useEffect(() => {
     if (assinado) return
@@ -305,7 +395,13 @@ export default function ContratoDocumentoPage() {
 
   if (loading) return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#fff' }}><Loader2 className="animate-spin" size={32} /></div>
 
-  if (!contrato) return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#fff', color: '#64748b' }}>Contrato não encontrado.</div>
+  if (!contrato) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#fff', color: '#64748b', padding: 24, textAlign: 'center' }}>
+        {erroPublico || 'Contrato não encontrado.'}
+      </div>
+    )
+  }
 
   const cli = contrato.cliente || {}
 

@@ -129,6 +129,76 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data)
     }
 
+    if ((documentType === 'contrato' || documentType === 'recibo') && documentId) {
+      if (!token) {
+        return NextResponse.json(
+          { success: false, error: 'Link inválido ou incompleto. Peça um novo link ao emitente.' },
+          { status: 400 }
+        )
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('public_documents')
+        .select('*')
+        .eq('tipo', documentType)
+        .eq('documento_id', documentId)
+        .eq('token', token)
+        .maybeSingle()
+
+      if (error) {
+        console.error('[PUBLIC_DOCS_GET]', error)
+        return erroApi(error)
+      }
+
+      if (!data) {
+        return NextResponse.json(
+          { success: false, error: 'Documento não encontrado ou link expirado.' },
+          { status: 404 }
+        )
+      }
+
+      return NextResponse.json(data)
+    }
+
+    if (documentType === 'orcamento' && documentId) {
+      let result
+
+      if (token) {
+        result = await supabaseAdmin
+          .from('public_documents')
+          .select('*')
+          .eq('tipo', 'orcamento')
+          .eq('documento_id', documentId)
+          .eq('token', token)
+          .maybeSingle()
+      } else {
+        result = await supabaseAdmin
+          .from('public_documents')
+          .select('*')
+          .eq('tipo', 'orcamento')
+          .eq('documento_id', documentId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      }
+
+      const { data, error } = result
+
+      if (error) {
+        console.error('[PUBLIC_DOCS_GET]', error)
+        return erroApi(error)
+      }
+
+      if (!data) {
+        return NextResponse.json(
+          { success: false, error: 'Documento não encontrado.' },
+          { status: 404 }
+        )
+      }
+
+      return NextResponse.json(data)
+    }
+
     const tipo = tipoLegado
     const documentoId = documentoIdLegado
 
@@ -172,7 +242,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
 
     const documentTypeRaw = String(body?.document_type || body?.tipo || '').trim()
-    const payloadRecebido = body?.payload || null
+    const payloadRecebido = body?.payload ?? body?.snapshot ?? null
 
     const documentoId = String(
       body?.document_id ||

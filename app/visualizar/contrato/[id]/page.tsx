@@ -5,7 +5,7 @@ import { Loader2 } from 'lucide-react'
 
 import ContratoDocumentoPage from '@/components/documentos/ContratoDocumentoPage'
 
-export default function Page() {
+export default function VisualizarContratoPublicoPage() {
   return (
     <Suspense
       fallback={

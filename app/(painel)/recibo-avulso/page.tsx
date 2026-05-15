@@ -4,25 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import extenso from 'extenso'
 
-type DadosRecibo = {
-  nomeCliente?: string
-  clienteTelefone?: string
-  referente?: string
-  valorNumero?: string | number
-  dataRecibo?: string
-  formaPagamento?: string
-  observacao?: string
-  config?: {
-    nomeEmpresa?: string
-    cidadeUf?: string
-    telefone?: string
-    responsavel?: string
-    corPrimaria?: string
-    corSecundaria?: string
-    logoUrl?: string
-    endereco?: string
-  }
-}
+import { ReciboEmitidoView, type DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
+import { abrirReciboPdfEmNovaJanela } from '@/lib/recibo-print-html'
+
+type DadosRecibo = DadosReciboEmitido
 
 const RECIBO_KEY = 'connect_recibo_visualizacao'
 const CONFIG_KEY = 'connect_configuracoes'
@@ -67,14 +52,7 @@ function gerarToken() {
   }
 }
 
-function toBase64Url(value: string) {
-  const utf8 = encodeURIComponent(value).replace(/%([0-9A-F]{2})/g, (_, p1) =>
-    String.fromCharCode(parseInt(p1, 16))
-  )
-  return btoa(utf8).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
-}
-
-async function gerarLinkPublicoRecibo(dados: DadosRecibo) {
+async function gerarLinkPublicoRecibo(dados: DadosRecibo): Promise<string> {
   const documentId = String(Date.now())
   const token = gerarToken()
 
@@ -102,8 +80,8 @@ async function gerarLinkPublicoRecibo(dados: DadosRecibo) {
     console.error('[RECIBO_PUBLICO] Erro ao salvar documento público:', error)
   }
 
-  const payload = toBase64Url(JSON.stringify(dados))
-  return `${SITE_URL}/recibo-avulso?preview=1&d=${payload}`
+  alert('Não foi possível gerar o link público do recibo. Verifique sua conexão e tente novamente.')
+  return ''
 }
 
 function hojeInput() {
@@ -209,6 +187,7 @@ export default function ReciboAvulsoPage() {
   useEffect(() => {
     try {
       const paramsRecibo = new URLSearchParams(window.location.search)
+      if (paramsRecibo.get('preview') !== '1') return
       const payload = paramsRecibo.get('d')
       if (!payload) return
 
@@ -322,6 +301,7 @@ export default function ReciboAvulsoPage() {
 
     const telefone = normalizarTelefoneWhatsapp(dados?.clienteTelefone)
     const link = await gerarLinkPublicoRecibo(dados)
+    if (!link) return
 
     let mensagem = `Olá ${dados?.nomeCliente || 'cliente'}!\n\n`
     mensagem += `Segue seu recibo.\n`
@@ -373,144 +353,7 @@ export default function ReciboAvulsoPage() {
 
   function abrirVisualizacaoPDF() {
     if (!dados) return
-
-    const logoAbsoluta = String(logoUrl).startsWith('data:')
-      ? String(logoUrl)
-      : logoUrl
-        ? `${window.location.origin}${String(logoUrl).startsWith('/') ? String(logoUrl) : `/${String(logoUrl)}`}`
-        : ''
-
-    const html = `
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-      <head>
-        <meta charset="UTF-8" />
-        <title>Recibo</title>
-        <style>
-          * { box-sizing: border-box; }
-          html, body { margin: 0; padding: 0; background: #eef4ff; font-family: Arial, sans-serif; color: #111827; }
-          .topbar { max-width: 980px; margin: 18px auto 12px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; padding: 0 12px; }
-          .btn { border: none; border-radius: 12px; padding: 11px 18px; font-weight: 800; cursor: pointer; }
-          .btn-sec { background: #e5e7eb; color: #111827; }
-          .btn-pri { background: #2563eb; color: #fff; }
-
-          .page-wrap { max-width: 980px; margin: 0 auto 20px; padding: 0 12px 20px; }
-          .page { background: ${escapeHtml(corSecundaria)}; border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); border: 1px solid #94a3b8; }
-          .inner { background: #fff; border-radius: 22px; padding: 18px; border: 1px solid #cbd5e1; }
-
-          .header { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 3px solid ${escapeHtml(corPrimaria)}; padding-bottom: 12px; margin-bottom: 12px; }
-          .brand { display: flex; gap: 12px; align-items: center; }
-          .brand img { width: 82px; height: 82px; object-fit: contain; border-radius: 12px; }
-          .company-name { font-weight: 900; font-size: 30px; line-height: 1.05; color: #111827; }
-          .muted { color: #4b5563; margin-top: 2px; }
-          .head-right { text-align: right; }
-          .head-right .titulo { font-weight: 900; font-size: 22px; color: #111827; }
-          .head-right .numero { margin-top: 10px; font-weight: 700; }
-
-          .hero { border: 1px solid #94a3b8; border-radius: 14px; padding: 12px; margin-bottom: 10px; display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; }
-          .hero-badge { display: inline-block; background: ${escapeHtml(corPrimaria)}; color: #fff; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
-          .hero-box { display: inline-block; background: #fff59d; padding: 9px 15px; border-radius: 14px; font-size: 28px; font-weight: 900; color: #111827; box-shadow: inset 0 -12px 0 rgba(255,235,59,0.45); }
-
-          .cards3, .cards2 { display: grid; gap: 8px; margin-bottom: 8px; }
-          .cards3 { grid-template-columns: repeat(3,1fr); }
-          .cards2 { grid-template-columns: repeat(2,1fr); }
-
-          .card { border: 1px solid #94a3b8; border-radius: 12px; padding: 10px; min-height: 86px; text-align: center; background: #fff; }
-          .icone { font-size: 16px; margin-bottom: 4px; }
-          .label { font-weight: 800; font-size: 12px; margin-bottom: 4px; color: #3f3f46; }
-          .value { font-size: 14px; font-weight: 700; line-height: 1.2; word-break: break-word; }
-
-          .box { border: 1px solid #94a3b8; border-radius: 14px; padding: 10px; margin-bottom: 8px; }
-          .box-titulo { font-weight: 900; margin-bottom: 5px; color: #6b7280; }
-
-          .assinatura { margin-top: 34px; text-align: center; }
-          .assinatura .linha { width: 230px; max-width: 100%; margin: 0 auto; border-top: 2px solid #111827; padding-top: 8px; }
-          .assinatura .nome { font-size: 14px; font-weight: 900; color: #0f172a; text-transform: uppercase; }
-          .assinatura .sub { margin-top: 1px; font-size: 10px; color: #64748b; font-weight: 700; letter-spacing: .3px; }
-
-          @page { size: A4 portrait; margin: 6mm; }
-          @media print {
-            html, body { background: white !important; }
-            .topbar { display: none !important; }
-            .page-wrap { max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
-            .page { box-shadow: none !important; border-radius: 0 !important; padding: 0 !important; border: none !important; background: #fff !important; }
-            .inner { border: none !important; padding: 0 !important; }
-            .cards3, .cards2, .hero, .box, .assinatura { break-inside: avoid-page; page-break-inside: avoid; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="topbar">
-          <button class="btn btn-sec" onclick="window.close()">Fechar</button>
-          <button class="btn btn-pri" onclick="window.print()">Visualizar / Baixar PDF</button>
-        </div>
-
-        <div class="page-wrap">
-          <div class="page">
-            <div class="inner">
-              <div class="header">
-                <div class="brand">
-                  ${logoAbsoluta ? `<img src="${escapeHtml(logoAbsoluta)}" alt="Logo" />` : ''}
-                  <div>
-                    <div class="company-name">${escapeHtml(cfg.nomeEmpresa || 'LOJA CONNECT')}</div>
-                    <div class="muted">${escapeHtml(cfg.endereco || '')}</div>
-                    <div class="muted">${escapeHtml(cfg.cidadeUf || '')}</div>
-                    <div class="muted">${escapeHtml(cfg.telefone || '')}</div>
-                  </div>
-                </div>
-                <div class="head-right">
-                  <div class="titulo">Recibo Comercial</div>
-                  <div class="numero">${escapeHtml(formatarDataBR(dados?.dataRecibo))}</div>
-                </div>
-              </div>
-
-              <div class="hero">
-                <div>
-                  <div style="font-size:18px;color:#111827;line-height:1.3">Recebi de <strong>${escapeHtml(dados?.nomeCliente || '')}</strong></div>
-                  <div style="margin-top:5px;font-size:14px;color:#374151">Referente a <strong>${escapeHtml(dados?.referente || 'pagamento')}</strong></div>
-                  <div style="margin-top:7px;font-size:12px;font-weight:800;color:#374151">${escapeHtml(valorExtenso)}</div>
-                </div>
-                <div style="text-align:right">
-                  <div class="hero-badge">RECIBO</div><br />
-                  <div style="font-size:11px;font-weight:900;color:#6b7280;text-transform:uppercase;margin-bottom:4px">Valor recebido</div>
-                  <div class="hero-box">${escapeHtml(moeda(valorNumerico))}</div>
-                </div>
-              </div>
-
-              <div class="cards3">
-                <div class="card"><div class="icone">👤</div><div class="label">Cliente</div><div class="value">${escapeHtml(dados?.nomeCliente || '')}</div></div>
-                <div class="card"><div class="icone">${escapeHtml(emojiPagamento(formaPagamento))}</div><div class="label">Pagamento</div><div class="value">${escapeHtml(formaPagamento)}</div></div>
-                <div class="card"><div class="icone">📅</div><div class="label">Data</div><div class="value">${escapeHtml(formatarDataBR(dados?.dataRecibo))}</div></div>
-              </div>
-
-              <div class="box">
-                <div class="box-titulo">📝 Observações</div>
-                <div>${escapeHtml(dados?.observacao || 'Obrigado pela preferência.')}</div>
-              </div>
-
-              <div class="cards2">
-                <div class="card"><div class="icone">👤</div><div class="label">Responsável</div><div class="value">${escapeHtml(cfg.responsavel || 'ERES FAUSTINO')}</div></div>
-                <div class="card"><div class="icone">${escapeHtml(emojiPagamento(formaPagamento))}</div><div class="label">Recebido em</div><div class="value">${escapeHtml(formaPagamento)}</div></div>
-              </div>
-
-              <div class="assinatura">
-                <div class="linha">
-                  <div class="nome">${escapeHtml(cfg.responsavel || 'ERES FAUSTINO')}</div>
-                  <div class="sub">EMITENTE / ASSINATURA AUTOMÁTICA</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </body>
-      </html>
-    `
-
-    const janela = window.open('', '_blank')
-    if (!janela) return
-    janela.document.open()
-    janela.document.write(html)
-    janela.document.close()
+    abrirReciboPdfEmNovaJanela(dados)
   }
 
   if (!dados) {
@@ -613,109 +456,15 @@ export default function ReciboAvulsoPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg,#f4f7fb 0%,#eaf1fb 100%)', overflowX: 'clip', overflowY: 'auto', padding: isMobile ? 'calc(env(safe-area-inset-top, 0px) + 12px) 10px 96px' : 20, boxSizing: 'border-box' }}>
-      <div style={{ maxWidth: 980, width: '100%', margin: '0 auto 14px', display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <button
-          onClick={fecharRecibo}
-          title="Fechar recibo"
-          style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#ef4444,#991b1b)', color: '#fff', border: '1px solid rgba(239,68,68,.45)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(239,68,68,.22)' }}
-        >
-          ✕ Fechar
-        </button>
-        <button
-          onClick={() => router.back()}
-          style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#0f172a,#334155)', color: '#fff', border: '1px solid rgba(148,163,184,.40)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(15,23,42,.22)' }}
-        >
-          ← Voltar
-        </button>
-        <button
-          onClick={novoRecibo}
-          style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#0f172a,#334155)', color: '#fff', border: '1px solid rgba(148,163,184,.40)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(15,23,42,.22)' }}
-        >
-          Novo recibo
-        </button>
-
-        <button
-          onClick={enviarWhatsApp}
-          style={{ minHeight: 50, minWidth: isMobile ? 150 : 190, background: 'linear-gradient(135deg,#16a34a 0%, #065f46 100%)', color: '#fff', border: '1px solid rgba(34,197,94,.50)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 28px rgba(34,197,94,.30), inset 0 1px 0 rgba(255,255,255,.14)' }}
-        >
-          🟢 Enviar link
-        </button>
-
-        <button
-          onClick={abrirVisualizacaoPDF}
-          style={{ minHeight: 50, minWidth: isMobile ? 180 : 230, background: 'linear-gradient(135deg,#0f3bff 0%, #001b6b 100%)', color: '#fff', border: '1px solid rgba(59,130,246,.55)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 28px rgba(37,99,235,.30), inset 0 1px 0 rgba(255,255,255,.14)' }}
-        >
-          📄 Visualizar / Baixar PDF
-        </button>
-      </div>
-
-      <div style={{ maxWidth: 980, width: '100%', margin: '0 auto', background: corSecundaria, borderRadius: isMobile ? 18 : 24, padding: isMobile ? 10 : 20, boxShadow: '0 18px 40px rgba(15,23,42,0.10)', border: '1px solid #94a3b8' }}>
-        <div style={{ background: '#fff', borderRadius: isMobile ? 16 : 22, padding: isMobile ? 12 : 18, border: '1px solid #cbd5e1', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', borderBottom: `3px solid ${corPrimaria}`, paddingBottom: 12, marginBottom: 12, background: 'linear-gradient(135deg,#ffffff 0%,#f8fbff 100%)', borderRadius: 18, padding: 16 }}>
-            <div style={{ display: 'flex', gap: 12, alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', width: isMobile ? '100%' : 'auto' }}>
-              {logoUrl ? (
-                <img
-                  src={logoUrl}
-                  alt="Logo"
-                  style={{ width: isMobile ? 64 : 82, height: isMobile ? 64 : 82, objectFit: 'contain', borderRadius: 12, alignSelf: isMobile ? 'flex-start' : 'center' }}
-                />
-              ) : null}
-              <div>
-                <div style={{ fontWeight: 900, fontSize: isMobile ? 20 : 30, lineHeight: 1.05, color: '#111827', wordBreak: 'break-word' }}>{cfg.nomeEmpresa || 'LOJA CONNECT'}</div>
-                <div style={{ color: '#1f2937', marginTop: 6 }}>{cfg.endereco || ''}</div>
-                <div style={{ color: '#1f2937' }}>{cfg.cidadeUf || ''}</div>
-                <div style={{ color: '#1f2937' }}>{cfg.telefone || ''}</div>
-              </div>
-            </div>
-
-            <div style={{ textAlign: isMobile ? 'left' : 'right', width: isMobile ? '100%' : 'auto' }}>
-              <div style={{ fontWeight: 900, fontSize: 22, color: '#111827' }}>Recibo Comercial</div>
-              <div style={{ marginTop: 10, fontWeight: 700 }}>{formatarDataBR(dados?.dataRecibo)}</div>
-            </div>
-          </div>
-
-          <div style={{ border: '1px solid #cbd5e1', borderRadius: 14, padding: 12, marginBottom: 10, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr auto', gap: 14, alignItems: 'center', overflow: 'hidden' }}>
-            <div>
-              <div style={{ fontSize: 18, color: '#111827', lineHeight: 1.3 }}>Recebi de <strong>{dados?.nomeCliente || ''}</strong></div>
-              <div style={{ marginTop: 5, fontSize: 14, color: '#374151' }}>Referente a <strong>{dados?.referente || 'pagamento'}</strong></div>
-              <div style={{ marginTop: 7, fontSize: 12, fontWeight: 800, color: '#374151' }}>{valorExtenso}</div>
-            </div>
-            <div style={{ textAlign: isMobile ? 'left' : 'right', width: isMobile ? '100%' : 'auto' }}>
-              <div style={{ display: 'inline-block', background: corPrimaria, color: '#fff', padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>RECIBO</div>
-              <br />
-              <div style={{ fontSize: 11, fontWeight: 900, color: '#334155', textTransform: 'uppercase', marginBottom: 4 }}>Valor recebido</div>
-              <div style={{ display: 'inline-block', maxWidth: '100%', background: '#fff59d', padding: isMobile ? '8px 12px' : '9px 15px', borderRadius: 14, fontSize: isMobile ? 22 : 28, fontWeight: 900, color: '#111827', boxShadow: 'inset 0 -12px 0 rgba(255,235,59,0.45)' }}>
-                {moeda(valorNumerico)}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3,1fr)', gap: 8, marginBottom: 8 }}>
-            <Card emoji="👤" titulo="Cliente" valor={dados?.nomeCliente || ''} />
-            <Card emoji={emojiPagamento(formaPagamento)} titulo="Pagamento" valor={formaPagamento} />
-            <Card emoji="📅" titulo="Data" valor={formatarDataBR(dados?.dataRecibo)} />
-          </div>
-
-          <div style={{ border: '1px solid #cbd5e1', borderRadius: 14, padding: 10, marginBottom: 8 }}>
-            <div style={{ fontWeight: 900, marginBottom: 5, color: '#334155' }}>📝 Observações</div>
-            <div>{dados?.observacao || 'Obrigado pela preferência.'}</div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2,1fr)', gap: 8, marginBottom: 8 }}>
-            <Card emoji="👤" titulo="Responsável" valor={cfg.responsavel || 'ERES FAUSTINO'} />
-            <Card emoji={emojiPagamento(formaPagamento)} titulo="Recebido em" valor={formaPagamento} />
-          </div>
-
-          <div style={{ marginTop: 46, textAlign: 'center' }}>
-            <div style={{ width: 230, maxWidth: '100%', margin: '0 auto', borderTop: '2px solid #111827', paddingTop: 8 }}>
-              <div style={{ fontSize: 14, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase' }}>{cfg.responsavel || 'ERES FAUSTINO'}</div>
-              <div style={{ marginTop: 1, fontSize: 10, color: '#64748b', fontWeight: 700, letterSpacing: '.3px' }}>EMITENTE / ASSINATURA AUTOMÁTICA</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ReciboEmitidoView
+      dados={dados}
+      isMobile={isMobile}
+      onFechar={fecharRecibo}
+      onVoltar={() => router.back()}
+      onNovo={novoRecibo}
+      onEnviarLink={enviarWhatsApp}
+      onPdf={abrirVisualizacaoPDF}
+    />
   )
 }
 
@@ -769,16 +518,6 @@ function SelectCampo({
           <option key={item} value={item}>{item}</option>
         ))}
       </select>
-    </div>
-  )
-}
-
-function Card({ emoji, titulo, valor }: { emoji: string; titulo: string; valor: string }) {
-  return (
-    <div style={{ border: '1px solid #94a3b8', borderRadius: 12, padding: 10, minHeight: 86, textAlign: 'center', background: '#ffffff', color: '#0f172a' }}>
-      <div style={{ fontSize: 16, marginBottom: 4 }}>{emoji}</div>
-      <div style={{ fontWeight: 800, fontSize: 12, marginBottom: 4, color: '#1f2937' }}>{titulo}</div>
-      <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.2, wordBreak: 'break-word' }}>{valor}</div>
     </div>
   )
 }
