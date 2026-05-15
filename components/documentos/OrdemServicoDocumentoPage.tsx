@@ -89,6 +89,22 @@ function textoPdf(valor?: string) {
   return limparPartesRepetidas(valor) || '-'
 }
 
+function osEstaAprovada(os: OrdemServico) {
+  const digital = os.aprovacaoDigital || os.assinaturaDigital
+  if (digital?.status === 'aprovado') return true
+  const status = String(os.status || '').trim().toLowerCase()
+  if (status === 'aprovada') return true
+  if (status.includes('aprov') && !status.includes('não') && !status.includes('nao') && !status.includes('recus')) {
+    return true
+  }
+  return false
+}
+
+function dataAprovacaoDigital(os: OrdemServico) {
+  const digital = os.aprovacaoDigital || os.assinaturaDigital
+  return digital?.data || os.aprovadoEm || os.ultimaAtualizacao || '-'
+}
+
 function siteBase() {
   if (typeof window !== 'undefined') return window.location.origin
   return SITE_URL || 'https://appconnectpro.com.br'
@@ -264,6 +280,8 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
 
   const contatoEmpresa = useMemo(() => limparPartesRepetidas([empresa.telefone, empresa.email, empresa.endereco, empresa.cidadeUf].filter(Boolean).join(' • ')), [empresa])
 
+  const osAprovada = useMemo(() => (os ? osEstaAprovada(os) : false), [os])
+
   const linkCompartilhamento = useMemo(() => {
     if (!os || typeof window === 'undefined') return ''
     const base = siteBase()
@@ -374,8 +392,13 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
         .toolbar .approve { background: #16a34a; border-color: #16a34a; color: white; }
         .approval-msg { width: 190mm; max-width: 100%; margin: -4px auto 10px; padding: 10px 12px; border-radius: 14px; background: #ecfdf5; border: 1px solid #86efac; color: #166534; font-weight: 900; text-align: center; }
         .approval-badge { display:inline-flex; align-items:center; justify-content:center; padding: 2px 8px; border-radius:999px; background:#dcfce7; color:#166534; font-weight:950; font-size:8px; margin-left:6px; }
-        .digital-approval { border: 1px solid #86efac; border-radius: 10px; background: #f0fdf4; padding: 4px 6px; margin-top: 3mm; color: #14532d; font-size: 7.5px; font-weight: 850; break-inside: avoid; page-break-inside: avoid; }
-        .digital-approval strong { display: block; font-size: 8.5px; font-weight: 950; margin-bottom: 2px; }
+        .signatures-section { margin-top: 8mm; padding-top: 2mm; break-inside: avoid; page-break-inside: avoid; }
+        .digital-approval { border: 1px solid #86efac; border-radius: 10px; background: #f0fdf4; padding: 6px 8px; margin: 0 0 5mm; color: #14532d; font-size: 7.5px; font-weight: 850; line-height: 1.45; break-inside: avoid; page-break-inside: avoid; }
+        .digital-approval strong { display: block; font-size: 8.5px; font-weight: 950; margin-bottom: 3px; }
+        .digital-approval .approval-line { display: block; margin-top: 2px; }
+        .sig-digital-client { margin: 0 0 6mm; padding: 4mm 6mm; border: 1px dashed #86efac; border-radius: 10px; background: #f8fff9; text-align: center; break-inside: avoid; page-break-inside: avoid; }
+        .sig-digital-name { font-family: 'Segoe Script', 'Brush Script MT', 'Lucida Handwriting', cursive; font-size: 15px; font-weight: 600; color: #14532d; line-height: 1.2; margin: 0; }
+        .sig-digital-caption { margin-top: 3px; font-size: 7px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; color: #166534; }
         .sheet { width: 190mm; min-height: auto; margin: 0 auto; background: white; border: 1px solid #cbd5e1; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px rgba(15,23,42,.10); }
         .header { display: grid; grid-template-columns: 1fr auto; gap: 7px; align-items: center; padding: 2.4mm 5.5mm 1.4mm; background: linear-gradient(135deg,#f8fbff,#eef4fb); border-bottom: 1.5px solid #2563eb; }
         .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
@@ -396,7 +419,7 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
         .grid4 .info-cell:nth-last-child(-n+4) { border-bottom: 0; }
         .label { color: #475569; font-size: 6.1px; font-weight: 900; text-transform: uppercase; letter-spacing: .12em; }
         .value { color: #0f172a; font-size: 7.9px; font-weight: 900; margin-top: 1px; word-break: break-word; }
-        .main-grid { display: grid; grid-template-columns: 1.12fr .88fr; gap: 4px; align-items: start; }
+        .main-grid { display: grid; grid-template-columns: 1.12fr .88fr; gap: 4px; align-items: start; margin-bottom: 4mm; }
         .block { border: 1px solid #dbe4ef; border-radius: 8px; background: #fbfdff; padding: 2px 4px; min-height: 5.5mm; margin-bottom: 2px; break-inside: avoid; page-break-inside: avoid; }
         .block .label { margin-bottom: 1px; }
         .block .text { font-size: 7.7px; font-weight: 750; line-height: 1.12; color: #0f172a; white-space: pre-wrap; }
@@ -406,8 +429,11 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
         .finance-total strong { font-size: 10.8px; }
         .dates { border: 1px solid #dbe4ef; border-radius: 8px; padding: 2px 4px; background: #fbfdff; }
         .date-row { display: flex; justify-content: space-between; gap: 8px; font-size: 7.7px; font-weight: 850; padding: 1px 0; }
-        .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 8mm; margin-top: 2mm; font-size: 7.3px; color: #334155; break-inside: avoid; page-break-inside: avoid; }
-        .sig-line { border-top: 1px solid #334155; text-align: center; padding-top: 2px; }
+        .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; margin-top: 0; font-size: 7.3px; color: #334155; break-inside: avoid; page-break-inside: avoid; }
+        .signatures.signatures--manual { margin-top: 2mm; }
+        .signatures.signatures--tech-only { grid-template-columns: 1fr; max-width: 48%; margin-left: auto; margin-right: 0; margin-top: 2mm; }
+        .sig-line { border-top: 1px solid #334155; text-align: center; padding-top: 4px; margin-top: 2mm; break-inside: avoid; page-break-inside: avoid; }
+        .sig-line.sig-tech { margin-top: 3mm; }
         @media print {
           html, body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; width: 210mm; height: auto; overflow: visible !important; }
           body { margin: 0 !important; }
@@ -423,7 +449,11 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
           .title h2 { font-size: 14px !important; }
           .grid4 .info-cell { min-height: 5.5mm !important; padding: 1.5px 3px !important; }
           .block { min-height: 5mm !important; padding: 1.5px 3px !important; margin-bottom: 1.5px !important; }
-          .signatures { margin-top: 1.6mm !important; }
+          .signatures-section { margin-top: 7mm !important; padding-top: 2mm !important; }
+          .digital-approval { margin-bottom: 5mm !important; padding: 5px 7px !important; }
+          .sig-digital-client { margin-bottom: 5mm !important; }
+          .signatures { gap: 10mm !important; }
+          .sig-line { padding-top: 4px !important; margin-top: 2.5mm !important; }
         }
         @media (max-width: 760px) { .approval-msg { width:auto; margin: 0 8px 10px; } .os-doc-page { padding: calc(env(safe-area-inset-top, 0px) + 74px) 10px calc(env(safe-area-inset-bottom, 0px) + 18px); touch-action: pan-y; } .toolbar { position: fixed; left: 8px; right: 8px; top: calc(env(safe-area-inset-top, 0px) + 8px); margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .toolbar button { width: 100%; min-width: 0; height: 44px; } .sheet { width: 100%; min-height: auto; border-radius: 14px; overflow: visible; } .header, .title, .content { padding-left: 14px; padding-right: 14px; } .header { grid-template-columns: 1fr; } .brand { align-items: flex-start; } .brand h1 { font-size: 24px; } .grid4 { grid-template-columns: repeat(2, 1fr); } .main-grid { grid-template-columns: 1.12fr .88fr; } .client-line { align-items: flex-start; flex-direction: column; } .digital-approval { font-size: 11px; } }
       `}</style>
@@ -497,16 +527,29 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
             </div>
           </div>
 
-          {os.aprovacaoDigital?.status || os.assinaturaDigital?.status ? (
-            <div className="digital-approval">
-              <strong>Assinatura / aprovação digital</strong>
-              Status: {(os.aprovacaoDigital || os.assinaturaDigital)?.status === 'aprovado' ? 'Aprovada pelo cliente' : 'Recusada pelo cliente'}
-              {' • '}
-              Data: {(os.aprovacaoDigital || os.assinaturaDigital)?.data || os.aprovadoEm || os.ultimaAtualizacao || '-'}
-            </div>
-          ) : null}
-
-          <div className="signatures"><div className="sig-line">Assinatura do cliente</div><div className="sig-line">Assinatura técnico</div></div>
+          <section className="signatures-section">
+            {osAprovada ? (
+              <>
+                <div className="digital-approval">
+                  <strong>Assinatura / aprovação digital</strong>
+                  <span className="approval-line">Status: Aprovada pelo cliente</span>
+                  <span className="approval-line">Data: {dataAprovacaoDigital(os)}</span>
+                </div>
+                <div className="sig-digital-client">
+                  <p className="sig-digital-name">{os.cliente || 'Cliente'}</p>
+                  <div className="sig-digital-caption">Assinatura digital do cliente</div>
+                </div>
+                <div className="signatures signatures--tech-only">
+                  <div className="sig-line sig-tech">Assinatura técnico / empresa</div>
+                </div>
+              </>
+            ) : (
+              <div className="signatures signatures--manual">
+                <div className="sig-line">Assinatura do cliente</div>
+                <div className="sig-line">Assinatura técnico</div>
+              </div>
+            )}
+          </section>
         </main>
       </article>
     </div>

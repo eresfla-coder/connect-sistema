@@ -17,10 +17,14 @@ type Assinatura = {
   valor_anual: number
 }
 
+function formatarPrecoPlano(valor: number) {
+  return valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 const PLANOS = [
   {
     nome: 'Mensal',
-    preco: 99,
+    preco: 49.9,
     periodo: 'mês',
     descricao: 'Acesso completo a todas as funcionalidades',
     recursos: [
@@ -35,9 +39,9 @@ const PLANOS = [
   },
   {
     nome: 'Anual',
-    preco: 999,
+    preco: 479.9,
     periodo: 'ano',
-    descricao: 'Economize R$ 189 com pagamento anual',
+    descricao: 'Economize R$ 119 com pagamento anual',
     recursos: [
       'Tudo do plano mensal',
       '2 meses grátis',
@@ -91,7 +95,7 @@ export default function PlanosPage() {
         .from('pagamentos')
         .insert({
           user_id: session.session.user.id,
-          valor: plano === 'mensal' ? 99 : 999,
+          valor: plano === 'mensal' ? 49.9 : 479.9,
           status: 'pendente',
           metodo: 'pix',
           descricao: `Assinatura ${plano} - Connect Sistema`,
@@ -118,7 +122,7 @@ export default function PlanosPage() {
           status: 'ativa',
           data_inicio: new Date().toISOString(),
           data_fim: new Date(Date.now() + (plano === 'mensal' ? 30 : 365) * 86400000).toISOString(),
-          valor_mensal: plano === 'mensal' ? 99 : 999,
+          valor_mensal: plano === 'mensal' ? 49.9 : 479.9,
         })
 
       router.push('/dashboard')
@@ -205,7 +209,7 @@ export default function PlanosPage() {
               <p style={{ fontSize: 14, color: '#64748b', margin: '0 0 20px', minHeight: 40 }}>{plano.descricao}</p>
 
               <div style={{ marginBottom: 24 }}>
-                <span style={{ fontSize: 42, fontWeight: 900, color: '#0f172a' }}>R$ {plano.preco}</span>
+                <span style={{ fontSize: 42, fontWeight: 900, color: '#0f172a' }}>R$ {formatarPrecoPlano(plano.preco)}</span>
                 <span style={{ fontSize: 16, color: '#64748b' }}>/{plano.periodo}</span>
               </div>
 

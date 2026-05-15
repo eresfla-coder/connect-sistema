@@ -14,7 +14,7 @@ export default function PagamentoPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
             <div style={{ padding: 20, borderRadius: 24, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.10)' }}>
               <div style={{ color: '#93c5fd', fontWeight: 900, fontSize: 12, letterSpacing: 1.2, textTransform: 'uppercase' }}>Plano mensal</div>
-              <div style={{ marginTop: 8, fontSize: 38, fontWeight: 950 }}>R$ 19,90</div>
+              <div style={{ marginTop: 8, fontSize: 38, fontWeight: 950 }}>R$ 49,90</div>
               <div style={{ color: '#cbd5e1', marginTop: 6 }}>por mês</div>
             </div>
             <div style={{ padding: 20, borderRadius: 24, background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.22)' }}>

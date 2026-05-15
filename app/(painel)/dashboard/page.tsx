@@ -82,8 +82,41 @@ type ConfiguracaoSistema = {
   logoUrl: string
 }
 
-type ResumoFinanceiro = { total: number; recebido: number; aberto: number; atrasado: number }
+type ResumoFinanceiro = {
+  total: number
+  recebido: number
+  aberto: number
+  atrasado: number
+  faturamentoEstimado: number
+  conversaoPct: number
+}
 type TipoPainel = 'geral' | 'orcamentos' | 'os' | 'servicos'
+
+type ReciboResumo = {
+  id?: string | number
+  nomeCliente?: string
+  referente?: string
+  valorNumero?: string | number
+  dataRecibo?: string
+}
+
+type FinanceiroTituloResumo = {
+  id?: string
+  valor?: number
+  valor_pago?: number
+  valor_recebido?: number
+  status?: string
+  data_vencimento?: string
+}
+
+type DadosDashboard = {
+  orcamentos: OrcamentoSalvo[]
+  ordens: OrdemServicoResumo[]
+  produtos: ProdutoResumo[]
+  servicos: ServicoResumo[]
+  recibos: ReciboResumo[]
+  financeiroTitulos: FinanceiroTituloResumo[]
+}
 
 type ItemPainel = {
   id: number
@@ -103,9 +136,278 @@ const OS_KEY = 'connect_ordens_servico_salvas'
 const CONFIG_KEY = 'connect_configuracoes'
 const PRODUTOS_KEY = 'connect_produtos'
 const SERVICOS_KEY = 'connect_servicos'
+const FINANCEIRO_KEY = 'connect_financeiro_titulos'
+const RECIBOS_KEY = 'connect_recibos_salvos'
+const RECIBOS_VIS_KEY = 'connect_recibo_visualizacao'
+
+function formatarMoeda(valor?: number) {
+  return Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
 
 function moeda(valor?: number) {
-  return Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  return formatarMoeda(valor)
+}
+
+function lerLocalJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw)
+    return (parsed as T) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+function statusTexto(status?: string) {
+  return String(status || '').trim().toLowerCase()
+}
+
+function isOrcamentoAprovado(status?: string) {
+  const s = statusTexto(status)
+  return s.includes('aprov') || s.includes('convert')
+}
+
+function isOrcamentoPendente(status?: string) {
+  const s = statusTexto(status)
+  if (!s) return true
+  if (isOrcamentoAprovado(s)) return false
+  return s.includes('pend') || s.includes('abert') || s.includes('enviad') || s.includes('aguard') || s.includes('rascunho')
+}
+
+function isOsFinalizada(status?: string) {
+  const s = statusTexto(status)
+  return s.includes('final') || s.includes('entreg') || s.includes('conclu')
+}
+
+function isOsAberta(status?: string) {
+  const s = statusTexto(status)
+  if (isOsFinalizada(s)) return false
+  return s.includes('abert') || s.includes('andamento') || s.includes('aguard') || s.includes('analise') || s.includes('análise') || !s
+}
+
+function valorOsBruto(item: Record<string, unknown>) {
+  return Number(item.valor ?? item.valorTotal ?? 0)
+}
+
+function saldoOsBruto(item: Record<string, unknown>) {
+  if (item.saldo !== undefined && item.saldo !== null && String(item.saldo) !== '') {
+    return Number(item.saldo || 0)
+  }
+  return Math.max(valorOsBruto(item) - Number(item.entrada || 0), 0)
+}
+
+function valorRecibo(item: ReciboResumo) {
+  const bruto = item.valorNumero ?? (item as { valor?: string | number }).valor
+  if (typeof bruto === 'number') return bruto
+  const texto = String(bruto || '').replace(/\./g, '').replace(',', '.')
+  const n = Number(texto)
+  return Number.isFinite(n) ? n : 0
+}
+
+function normalizarOrcamentoDashboard(item: Record<string, unknown>): OrcamentoSalvo {
+  const payload =
+    item.payload && typeof item.payload === 'object' ? (item.payload as Record<string, unknown>) : null
+  const clienteRaw = (item.cliente || payload?.cliente) as OrcamentoSalvo['cliente'] | string | undefined
+  const cliente =
+    typeof clienteRaw === 'object' && clienteRaw
+      ? clienteRaw
+      : {
+          nome: String(item.cliente_nome || item.cliente || clienteRaw || ''),
+          telefone: String(item.telefone || item.cliente_telefone || ''),
+        }
+
+  return {
+    id: Number(item.id || item.local_id || payload?.id || Date.now()),
+    numero: String(item.numero || payload?.numero || ''),
+    titulo: String(item.titulo || payload?.titulo || 'Orçamento Comercial'),
+    cliente,
+    total: Number(item.total ?? payload?.total ?? 0),
+    status: String(item.status || payload?.status || 'Pendente'),
+    data: String(item.data || payload?.data || ''),
+    itens: Array.isArray(item.itens) ? (item.itens as OrcamentoSalvo['itens']) : Array.isArray(payload?.itens) ? (payload?.itens as OrcamentoSalvo['itens']) : [],
+  }
+}
+
+function normalizarOsDashboard(item: Record<string, unknown>): OrdemServicoResumo {
+  const payload =
+    item.payload && typeof item.payload === 'object' ? (item.payload as Record<string, unknown>) : null
+  const base = { ...payload, ...item } as Record<string, unknown>
+
+  return {
+    id: Number(base.id || base.local_id || Date.now()),
+    numero: String(base.numero || ''),
+    cliente: String(base.cliente || base.cliente_nome || ''),
+    equipamento: String(base.equipamento || ''),
+    valor: valorOsBruto(base),
+    saldo: saldoOsBruto(base),
+    status: String(base.status || 'Aberta'),
+    prioridade: String(base.prioridade || ''),
+    data: String(base.data || base.ultimaAtualizacao || ''),
+    entrada: Number(base.entrada || 0),
+  } as OrdemServicoResumo & { entrada?: number }
+}
+
+function mapearOrcamentoSupabase(row: Record<string, unknown>) {
+  return normalizarOrcamentoDashboard(row)
+}
+
+function mapearOsSupabase(row: Record<string, unknown>) {
+  return normalizarOsDashboard(row)
+}
+
+function calcularMargem(produto: ProdutoResumo) {
+  if (produto.margemRealPct !== undefined && produto.margemRealPct !== null) {
+    return Number(produto.margemRealPct || 0)
+  }
+  const preco = Number(produto.preco || 0)
+  const custo = Number(produto.custo || 0)
+  if (preco <= 0) return 0
+  return ((preco - custo) / preco) * 100
+}
+
+function calcularResumoFinanceiro(dados: DadosDashboard): ResumoFinanceiro {
+  const orcamentos = dados.orcamentos || []
+  const ordens = dados.ordens || []
+  const recibos = dados.recibos || []
+  const titulos = dados.financeiroTitulos || []
+
+  const faturamentoOrcamentos = orcamentos
+    .filter((o) => isOrcamentoAprovado(o.status))
+    .reduce((acc, o) => acc + Number(o.total || 0), 0)
+
+  const faturamentoOs = ordens
+    .filter((o) => isOsFinalizada(o.status))
+    .reduce((acc, o) => acc + valorOsBruto(o as unknown as Record<string, unknown>), 0)
+
+  const aReceberOrcamentos = orcamentos
+    .filter((o) => isOrcamentoPendente(o.status))
+    .reduce((acc, o) => acc + Number(o.total || 0), 0)
+
+  const aReceberOs = ordens
+    .filter((o) => isOsAberta(o.status))
+    .reduce((acc, o) => acc + saldoOsBruto(o as unknown as Record<string, unknown>), 0)
+
+  let recebidoRecibos = recibos.reduce((acc, r) => acc + valorRecibo(r), 0)
+  let recebidoEntradasOs = ordens.reduce(
+    (acc, o) => acc + Number((o as OrdemServicoResumo & { entrada?: number }).entrada || 0),
+    0
+  )
+
+  let abertoFinanceiro = 0
+  let recebidoFinanceiro = 0
+  let atrasadoFinanceiro = 0
+  let totalFinanceiro = 0
+
+  titulos.forEach((titulo) => {
+    const valor = Number(titulo.valor || 0)
+    const pago = Number(titulo.valor_pago ?? titulo.valor_recebido ?? 0)
+    const aberto = Math.max(valor - pago, 0)
+    totalFinanceiro += valor
+    recebidoFinanceiro += pago
+    abertoFinanceiro += aberto
+    if (statusTexto(titulo.status).includes('atrasad')) {
+      atrasadoFinanceiro += aberto
+    }
+  })
+
+  const aReceber = aReceberOrcamentos + aReceberOs + abertoFinanceiro
+  const recebido = recebidoRecibos + recebidoEntradasOs + recebidoFinanceiro
+  const faturamentoEstimado = faturamentoOrcamentos + faturamentoOs
+  const conversaoPct = orcamentos.length
+    ? (orcamentos.filter((o) => isOrcamentoAprovado(o.status)).length / orcamentos.length) * 100
+    : 0
+
+  return {
+    total: faturamentoEstimado + aReceber + totalFinanceiro,
+    recebido,
+    aberto: aReceber,
+    atrasado: atrasadoFinanceiro,
+    faturamentoEstimado,
+    conversaoPct,
+  }
+}
+
+function detectarRiscos(
+  financeiro: ResumoFinanceiro,
+  precificacao: { risco: number; estoqueBaixo: number },
+  conversaoPct: number,
+  orcamentosCount: number
+) {
+  const lista: Array<{ titulo: string; texto: string; tom: 'red' | 'yellow' | 'green' | 'blue' }> = []
+  if (financeiro.atrasado > 0) {
+    lista.push({ titulo: 'Cobrança', texto: `${formatarMoeda(financeiro.atrasado)} em atraso.`, tom: 'red' })
+  }
+  if (precificacao.risco > 0) {
+    lista.push({ titulo: 'Margem', texto: `${precificacao.risco} produto(s) com margem baixa.`, tom: 'yellow' })
+  }
+  if (precificacao.estoqueBaixo > 0) {
+    lista.push({ titulo: 'Estoque', texto: `${precificacao.estoqueBaixo} produto(s) com estoque baixo.`, tom: 'blue' })
+  }
+  if (conversaoPct >= 60 && orcamentosCount > 0) {
+    lista.push({ titulo: 'Conversão', texto: `Conversão em ${conversaoPct.toFixed(0)}%. Bom desempenho comercial.`, tom: 'green' })
+  }
+  if (!lista.length) {
+    lista.push({ titulo: 'Tudo certo', texto: 'Nenhum alerta crítico detectado agora.', tom: 'green' })
+  }
+  return lista.slice(0, 4)
+}
+
+async function carregarDadosDashboard(): Promise<DadosDashboard> {
+  let orcamentos = (lerLocalJson<Record<string, unknown>[]>(ORCAMENTOS_KEY, []) || []).map(normalizarOrcamentoDashboard)
+  let ordens = (lerLocalJson<Record<string, unknown>[]>(OS_KEY, []) || []).map(normalizarOsDashboard)
+  const produtos = lerLocalJson<ProdutoResumo[]>(PRODUTOS_KEY, [])
+  const servicos = lerLocalJson<ServicoResumo[]>(SERVICOS_KEY, [])
+  const financeiroTitulos = lerLocalJson<FinanceiroTituloResumo[]>(FINANCEIRO_KEY, [])
+
+  const recibosSalvos: ReciboResumo[] = (lerLocalJson<Record<string, unknown>[]>(RECIBOS_KEY, []) || []).map((item) => ({
+    id: item.id as string | number | undefined,
+    nomeCliente: String(item.nomeCliente || item.cliente || ''),
+    referente: String(item.referente || item.descricao || ''),
+    valorNumero: (item.valorNumero ?? item.valor ?? item.valorPago) as string | number | undefined,
+    dataRecibo: String(item.dataRecibo || item.data || item.dataCriacao || ''),
+  }))
+  const reciboAtualRaw = lerLocalJson<Record<string, unknown> | null>(RECIBOS_VIS_KEY, null)
+  const reciboAtual: ReciboResumo | null = reciboAtualRaw
+    ? {
+        nomeCliente: String(reciboAtualRaw.nomeCliente || ''),
+        referente: String(reciboAtualRaw.referente || ''),
+        valorNumero: (reciboAtualRaw.valorNumero ?? reciboAtualRaw.valor) as string | number | undefined,
+        dataRecibo: String(reciboAtualRaw.dataRecibo || ''),
+      }
+    : null
+  const recibos: ReciboResumo[] = [...recibosSalvos]
+  if (reciboAtual && valorRecibo(reciboAtual) > 0) {
+    const jaExiste = recibos.some(
+      (r) =>
+        String(r.nomeCliente || '') === String(reciboAtual.nomeCliente || '') &&
+        valorRecibo(r) === valorRecibo(reciboAtual) &&
+        String(r.dataRecibo || '') === String(reciboAtual.dataRecibo || '')
+    )
+    if (!jaExiste) recibos.push(reciboAtual)
+  }
+
+  try {
+    const { data, error } = await supabase.from('orcamentos').select('*').order('created_at', { ascending: false })
+    if (!error && Array.isArray(data) && data.length) {
+      orcamentos = data.map((row) => mapearOrcamentoSupabase(row as Record<string, unknown>))
+      try {
+        localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(orcamentos))
+      } catch {}
+    }
+  } catch {}
+
+  try {
+    const { data, error } = await supabase.from('ordens_servico').select('*').order('created_at', { ascending: false })
+    if (!error && Array.isArray(data) && data.length) {
+      ordens = data.map((row) => mapearOsSupabase(row as Record<string, unknown>))
+      try {
+        localStorage.setItem(OS_KEY, JSON.stringify(ordens))
+      } catch {}
+    }
+  } catch {}
+
+  return { orcamentos, ordens, produtos, servicos, recibos, financeiroTitulos }
 }
 
 function numero(valor?: number) {
@@ -197,13 +499,20 @@ export default function DashboardPage() {
   const [dataAtual, setDataAtual] = useState('')
   const [painel, setPainel] = useState<TipoPainel>('geral')
   const [busca, setBusca] = useState('')
-  const [financeiro, setFinanceiro] = useState<ResumoFinanceiro>({ total: 0, recebido: 0, aberto: 0, atrasado: 0 })
+  const [dashboardDados, setDashboardDados] = useState<DadosDashboard>({
+    orcamentos: [],
+    ordens: [],
+    produtos: [],
+    servicos: [],
+    recibos: [],
+    financeiroTitulos: [],
+  })
 
-  const orcamentosRaw = useLocalData<OrcamentoSalvo[]>(ORCAMENTOS_KEY, [])
-  const osRaw = useLocalData<OrdemServicoResumo[]>(OS_KEY, [])
-  const produtosRaw = useLocalData<ProdutoResumo[]>(PRODUTOS_KEY, [])
-  const servicosRaw = useLocalData<ServicoResumo[]>(SERVICOS_KEY, [])
   const configRaw = useLocalData<Partial<ConfiguracaoSistema>>(CONFIG_KEY, {})
+  const orcamentosRaw = dashboardDados.orcamentos
+  const osRaw = dashboardDados.ordens
+  const produtosRaw = dashboardDados.produtos
+  const servicosRaw = dashboardDados.servicos
 
   const config: ConfiguracaoSistema = useMemo(() => ({
     nomeEmpresa: configRaw?.nomeEmpresa || 'CONNECT SISTEMAS',
@@ -235,31 +544,28 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let ativo = true
-    async function carregarFinanceiro() {
-      const { data, error } = await supabase.from('financeiro').select('*')
-      if (error) return
-      const resumo = ((data || []) as any[]).reduce(
-        (acc, item) => {
-          const valor = Number(item?.valor || 0)
-          const pago = Number(item?.valor_pago ?? item?.valor_recebido ?? item?.pago ?? 0)
-          const aberto = Math.max(valor - pago, 0)
-          acc.total += valor
-          acc.recebido += pago
-          acc.aberto += aberto
-          if (String(item?.status || '').toLowerCase() === 'atrasado') acc.atrasado += aberto
-          return acc
-        },
-        { total: 0, recebido: 0, aberto: 0, atrasado: 0 }
-      )
-      if (ativo) setFinanceiro(resumo)
+    const carregar = async () => {
+      const dados = await carregarDadosDashboard()
+      if (ativo) setDashboardDados(dados)
     }
-    carregarFinanceiro()
-    window.addEventListener('connect-financeiro-change', carregarFinanceiro as EventListener)
+    carregar()
+    const onChange = () => {
+      carregar()
+    }
+    window.addEventListener('storage', onChange)
+    window.addEventListener('connect-data-change', onChange)
+    window.addEventListener('connect-cloud-updated', onChange)
+    window.addEventListener('connect-financeiro-change', onChange)
     return () => {
       ativo = false
-      window.removeEventListener('connect-financeiro-change', carregarFinanceiro as EventListener)
+      window.removeEventListener('storage', onChange)
+      window.removeEventListener('connect-data-change', onChange)
+      window.removeEventListener('connect-cloud-updated', onChange)
+      window.removeEventListener('connect-financeiro-change', onChange)
     }
   }, [])
+
+  const financeiro = useMemo(() => calcularResumoFinanceiro(dashboardDados), [dashboardDados])
 
   const orcamentos = useMemo<ItemPainel[]>(() => {
     return (Array.isArray(orcamentosRaw) ? orcamentosRaw : [])
@@ -286,7 +592,7 @@ export default function DashboardPage() {
         cliente: item.cliente || 'Cliente não informado',
         linha2: item.equipamento || 'Ordem de serviço',
         status: item.status || 'Aberta',
-        valor: Number(item.valor || item.saldo || 0),
+        valor: Number(item.valor || saldoOsBruto(item as unknown as Record<string, unknown>) || 0),
         data: item.data || '',
         mes: mesIndex(item.data),
         tipo: 'os' as const,
@@ -354,15 +660,15 @@ export default function DashboardPage() {
     const produtos = Array.isArray(produtosRaw) ? produtosRaw : []
     const produtosFisicos = produtos.filter((p) => String(p.tipoCadastro || '').toLowerCase() !== 'servico')
     const comPreco = produtos.filter((p) => Number(p.preco || 0) > 0)
-    const margemMedia = comPreco.length ? comPreco.reduce((acc, p) => acc + Number(p.margemRealPct || 0), 0) / comPreco.length : 0
+    const margemMedia = comPreco.length ? comPreco.reduce((acc, p) => acc + calcularMargem(p), 0) / comPreco.length : 0
     const lucroPotencial = produtosFisicos.reduce((acc, p) => acc + Number(p.lucroEstimado || 0) * Math.max(Number(p.estoque || 0), 0), 0)
     const valorEstoque = produtosFisicos.reduce((acc, p) => acc + Number(p.preco || 0) * Math.max(Number(p.estoque || 0), 0), 0)
-    const risco = produtos.filter((p) => p.statusMargem === 'risco' || Number(p.margemRealPct || 0) < 15).length
+    const risco = produtos.filter((p) => p.statusMargem === 'risco' || calcularMargem(p) < 15).length
     const codigoBarras = produtos.filter((p) => String(p.codigoBarras || '').trim()).length
     const estoqueBaixo = produtosFisicos.filter((p) => Number(p.estoque || 0) <= 2).length
     const topRisco = [...produtos]
-      .filter((p) => p.statusMargem === 'risco' || Number(p.margemRealPct || 0) < 15)
-      .sort((a, b) => Number(a.margemRealPct || 0) - Number(b.margemRealPct || 0))
+      .filter((p) => p.statusMargem === 'risco' || calcularMargem(p) < 15)
+      .sort((a, b) => calcularMargem(a) - calcularMargem(b))
       .slice(0, 4)
     return { total: produtosFisicos.length, servicos: servicos.length, margemMedia, lucroPotencial, valorEstoque, risco, codigoBarras, estoqueBaixo, topRisco }
   }, [produtosRaw, servicos.length])
@@ -402,15 +708,10 @@ export default function DashboardPage() {
     return Array.from(mapa.values()).sort((a, b) => b.qtd - a.qtd).slice(0, 5)
   }, [orcamentosRaw])
 
-  const alertas = useMemo(() => {
-    const lista: Array<{ titulo: string; texto: string; tom: 'red' | 'yellow' | 'green' | 'blue' }> = []
-    if (financeiro.atrasado > 0) lista.push({ titulo: 'Cobrança', texto: `${moeda(financeiro.atrasado)} em atraso no financeiro.`, tom: 'red' })
-    if (precificacao.risco > 0) lista.push({ titulo: 'Margem', texto: `${precificacao.risco} produto(s) com margem baixa.`, tom: 'yellow' })
-    if (precificacao.estoqueBaixo > 0) lista.push({ titulo: 'Estoque', texto: `${precificacao.estoqueBaixo} produto(s) com estoque baixo.`, tom: 'blue' })
-    if (resumo.conversao >= 60 && orcamentos.length > 0) lista.push({ titulo: 'Conversão', texto: `Conversão em ${resumo.conversao.toFixed(0)}%. Bom desempenho comercial.`, tom: 'green' })
-    if (!lista.length) lista.push({ titulo: 'Tudo certo', texto: 'Nenhum alerta crítico detectado agora.', tom: 'green' })
-    return lista.slice(0, 4)
-  }, [financeiro.atrasado, precificacao.risco, precificacao.estoqueBaixo, resumo.conversao, orcamentos.length])
+  const alertas = useMemo(
+    () => detectarRiscos(financeiro, precificacao, financeiro.conversaoPct, orcamentos.length),
+    [financeiro, precificacao, orcamentos.length]
+  )
 
   const shellStyle: CSSProperties = {
     minHeight: '100vh',
@@ -452,10 +753,10 @@ export default function DashboardPage() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4,minmax(0,1fr))', gap: isMobile ? 10 : 12 }}>
-                <HeroCard titulo="Faturamento estimado" valor={moeda(resumo.valorOrcado + resumo.valorOS)} detalhe="Orçamentos + OS" icon="📈" tone="blue" />
-                <HeroCard titulo="A receber" valor={moeda(financeiro.aberto)} detalhe="Financeiro em aberto" icon="💼" tone="yellow" />
-                <HeroCard titulo="Recebido" valor={moeda(financeiro.recebido)} detalhe="Pagamentos confirmados" icon="✅" tone="green" />
-                <HeroCard titulo="Conversão" valor={`${resumo.conversao.toFixed(0)}%`} detalhe={`${resumo.aprovados} aprovado(s)`} icon="🎯" tone="cyan" />
+                <HeroCard titulo="Faturamento estimado" valor={moeda(financeiro.faturamentoEstimado)} detalhe="Aprovados + OS finalizadas" icon="📈" tone="blue" />
+                <HeroCard titulo="A receber" valor={moeda(financeiro.aberto)} detalhe="OS, orçamentos e títulos" icon="💼" tone="yellow" />
+                <HeroCard titulo="Recebido" valor={moeda(financeiro.recebido)} detalhe="Recibos, entradas e pagos" icon="✅" tone="green" />
+                <HeroCard titulo="Conversão" valor={`${financeiro.conversaoPct.toFixed(0)}%`} detalhe={`${resumo.aprovados} aprovado(s)`} icon="🎯" tone="cyan" />
               </div>
             </div>
 

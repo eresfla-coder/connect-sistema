@@ -311,13 +311,23 @@ function osParaRowSupabase(os: OrdemServico, userId: string): OsRow {
 }
 
 function osDeRowSupabase(row: OsRow): OrdemServico {
-  const payload = row.payload && typeof row.payload === 'object' ? row.payload as Partial<OrdemServico> : null
+  const payload = row.payload && typeof row.payload === 'object' ? (row.payload as Partial<OrdemServico>) : null
   const localId = Number(row.local_id || payload?.id || 0) || Date.now()
 
-  if (payload?.numero) {
+  if (payload && (payload.numero || payload.cliente)) {
     return {
       ...(payload as OrdemServico),
       id: localId,
+      numero: String(payload.numero || row.numero || ''),
+      cliente: String(payload.cliente || row.cliente || row.cliente_nome || ''),
+      telefone: String(payload.telefone || payload.whatsapp || row.telefone || row.cliente_telefone || ''),
+      whatsapp: String(payload.whatsapp || payload.telefone || row.telefone || row.cliente_telefone || ''),
+      equipamento: String(payload.equipamento || row.equipamento || ''),
+      valor: Number(payload.valor ?? row.valor ?? 0),
+      entrada: Number(payload.entrada ?? row.entrada ?? 0),
+      saldo: Number(payload.saldo ?? row.saldo ?? 0),
+      status: String(payload.status || row.status || 'Aberta'),
+      prioridade: String(payload.prioridade || row.prioridade || 'Média'),
     }
   }
 
@@ -534,42 +544,63 @@ export default function OrdemServicoPage() {
     window.dispatchEvent(new Event('connect-local-saved'))
   }
 
+  async function obterUserIdSupabase() {
+    const { data: userData, error: userError } = await supabase.auth.getUser()
+    if (userData?.user?.id) return userData.user.id
+    if (userError) {
+      console.error('[ordens_servico] sessão inválida ao obter usuário:', userError.message)
+    }
+
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionData?.session?.user?.id) return sessionData.session.user.id
+    if (sessionError) {
+      console.error('[ordens_servico] sessão inválida ao obter sessão:', sessionError.message)
+    }
+    return null
+  }
+
   function carregarOsLocalFallback() {
     try {
       const salvo = localStorage.getItem(STORAGE_KEY)
-      if (salvo) {
-        const listaSalva = JSON.parse(salvo)
-        if (Array.isArray(listaSalva)) {
-          const listaCorrigida = listaSalva.map((item) => normalizarItem(item))
-          setLista(listaCorrigida)
-          setForm(ordemVazia(listaCorrigida))
-        }
-      }
-    } catch {}
+      if (!salvo) return
+      const listaSalva = JSON.parse(salvo)
+      if (!Array.isArray(listaSalva)) return
+      const listaCorrigida = listaSalva.map((item) => normalizarItem(item))
+      setLista(listaCorrigida)
+      setForm(ordemVazia(listaCorrigida))
+    } catch (e) {
+      console.error('[ordens_servico] erro ao carregar localStorage:', e)
+    }
   }
 
   async function persistirOsSupabase(os: OrdemServico, userId?: string | null) {
     try {
-      const { data } = await supabase.auth.getUser()
-      const uid = userId || data?.user?.id
-      if (!uid) return
+      const uid = userId || (await obterUserIdSupabase())
+      if (!uid) {
+        console.error('[ordens_servico] não foi possível salvar: usuário não autenticado.')
+        return
+      }
 
       const row = osParaRowSupabase(os, uid)
       const { error } = await supabase
         .from('ordens_servico')
         .upsert(row, { onConflict: 'user_id,local_id' })
 
-      if (error) console.warn('[ordens_servico] erro ao persistir:', error.message)
+      if (error) {
+        console.error('[ordens_servico] erro ao persistir no Supabase:', error.message, { local_id: row.local_id })
+      }
     } catch (e) {
-      console.warn('[ordens_servico] erro ao persistir:', e)
+      console.error('[ordens_servico] erro ao persistir:', e)
     }
   }
 
   async function excluirOsSupabase(os: OrdemServico) {
     try {
-      const { data } = await supabase.auth.getUser()
-      const userId = data?.user?.id
-      if (!userId) return
+      const userId = await obterUserIdSupabase()
+      if (!userId) {
+        console.error('[ordens_servico] não foi possível excluir: usuário não autenticado.')
+        return
+      }
 
       const { error } = await supabase
         .from('ordens_servico')
@@ -577,15 +608,14 @@ export default function OrdemServicoPage() {
         .eq('user_id', userId)
         .eq('local_id', String(os.id))
 
-      if (error) console.warn('[ordens_servico] erro ao excluir:', error.message)
+      if (error) console.error('[ordens_servico] erro ao excluir:', error.message)
     } catch (e) {
-      console.warn('[ordens_servico] erro ao excluir:', e)
+      console.error('[ordens_servico] erro ao excluir:', e)
     }
   }
 
   async function sincronizarOsLocaisAntigos(cloudList?: OrdemServico[]) {
-    const { data } = await supabase.auth.getUser()
-    const userId = data?.user?.id
+    const userId = await obterUserIdSupabase()
     if (!userId) return
 
     let localList: OrdemServico[] = []
@@ -593,7 +623,8 @@ export default function OrdemServicoPage() {
       const raw = localStorage.getItem(STORAGE_KEY)
       localList = raw ? JSON.parse(raw) : []
       if (!Array.isArray(localList)) return
-    } catch {
+    } catch (e) {
+      console.error('[ordens_servico] erro ao ler localStorage para sync:', e)
       return
     }
 
@@ -611,34 +642,73 @@ export default function OrdemServicoPage() {
     const { data: rows, error } = await supabase
       .from('ordens_servico')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
-    if (error || !rows) return
+    if (error) {
+      console.error('[ordens_servico] erro ao recarregar após sync:', error.message)
+      return
+    }
 
-    const normalizados = (rows as OsRow[]).map((row) => normalizarItem(osDeRowSupabase(row)))
+    const normalizados = ((rows || []) as OsRow[]).map((row) => normalizarItem(osDeRowSupabase(row)))
     setLista(normalizados)
     setForm(ordemVazia(normalizados))
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizados)) } catch {}
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizados))
+    } catch (e) {
+      console.error('[ordens_servico] erro ao salvar localStorage após sync:', e)
+    }
   }
 
   async function carregarOsSupabase() {
     try {
+      const userId = await obterUserIdSupabase()
+      if (!userId) {
+        console.error('[ordens_servico] carregamento na nuvem ignorado: usuário não autenticado.')
+        carregarOsLocalFallback()
+        return
+      }
+
       const { data, error } = await supabase
         .from('ordens_servico')
         .select('*')
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
 
       if (error) throw error
 
-      const normalizados = ((data || []) as OsRow[])
-        .map((row) => normalizarItem(osDeRowSupabase(row)))
+      const normalizados = ((data || []) as OsRow[]).map((row) => normalizarItem(osDeRowSupabase(row)))
 
-      setLista(normalizados)
-      setForm(ordemVazia(normalizados))
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizados)) } catch {}
-      await sincronizarOsLocaisAntigos(normalizados)
+      let localList: OrdemServico[] = []
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY)
+        const parsed = raw ? JSON.parse(raw) : []
+        if (Array.isArray(parsed)) {
+          localList = parsed.map((item) => normalizarItem(item))
+        }
+      } catch (e) {
+        console.error('[ordens_servico] erro ao ler localStorage no carregamento:', e)
+      }
+
+      if (normalizados.length === 0 && localList.length > 0) {
+        await sincronizarOsLocaisAntigos([])
+        return
+      }
+
+      const listaFinal = normalizados.length > 0 ? normalizados : localList
+      setLista(listaFinal)
+      setForm(ordemVazia(listaFinal))
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(listaFinal))
+      } catch (e) {
+        console.error('[ordens_servico] erro ao salvar localStorage:', e)
+      }
+
+      if (normalizados.length > 0) {
+        await sincronizarOsLocaisAntigos(normalizados)
+      }
     } catch (e) {
-      console.warn('[ordens_servico] fallback local:', e)
+      console.error('[ordens_servico] erro ao carregar do Supabase — usando localStorage:', e)
       carregarOsLocalFallback()
     }
   }
@@ -786,7 +856,14 @@ export default function OrdemServicoPage() {
   }, [])
 
   useEffect(() => {
+    carregarOsLocalFallback()
     void carregarOsSupabase()
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        void carregarOsSupabase()
+      }
+    })
 
     const clientesSalvos = localStorage.getItem(CLIENTES_KEY)
     if (clientesSalvos) {
@@ -814,10 +891,15 @@ export default function OrdemServicoPage() {
         setOrcamentos([])
       }
     }
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
   }, [])
 
   useEffect(() => {
     function carregarDadosLocaisV78() {
+      carregarOsLocalFallback()
       void carregarOsSupabase()
 
       try {
