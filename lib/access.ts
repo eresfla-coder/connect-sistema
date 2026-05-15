@@ -11,6 +11,21 @@ export function isAdminEmail(email?: string | null) {
   )
 }
 
+/** E-mail do usuário Supabase (campo principal ou metadata OAuth). */
+export function emailDoUsuarioAuth(
+  user?: { email?: string | null; user_metadata?: Record<string, unknown> | null } | null
+) {
+  if (!user) return ''
+
+  const direto = String(user.email || '').trim().toLowerCase()
+  if (direto) return direto
+
+  const meta = (user.user_metadata || {}) as Record<string, unknown>
+  const metaEmail = String(meta.email || meta.user_email || meta.preferred_username || '').trim().toLowerCase()
+
+  return metaEmail
+}
+
 export function normalizarStatus(status?: string | null) {
   const valor = String(status || '').trim().toLowerCase()
 

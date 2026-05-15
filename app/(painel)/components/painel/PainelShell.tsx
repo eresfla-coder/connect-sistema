@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
-import { isAdminEmail } from "@/lib/access";
+import { emailDoUsuarioAuth, isAdminEmail } from "@/lib/access";
 import { readLocalCloudPayload } from "@/lib/connect-cloud-storage";
 import { installDemoGuard, isDemoMode, sairDemoMode } from "@/lib/connect-demo";
 
@@ -60,32 +60,53 @@ export default function PainelLayout({
   useEffect(() => {
     let ativo = true;
 
-    async function carregarAdminLogado() {
+    async function resolverAdmin() {
       try {
         if (isDemoMode()) {
           if (ativo) setAdminLogado(false);
           return;
         }
+
         const { data: { session } } = await supabase.auth.getSession();
+        let email = emailDoUsuarioAuth(session?.user ?? null);
+
+        if (!email) {
+          const { data: { user }, error } = await supabase.auth.getUser();
+          if (!error && user) {
+            email = emailDoUsuarioAuth(user);
+          }
+        }
+
         if (!ativo) return;
-        setAdminLogado(isAdminEmail(session?.user?.email));
+        setAdminLogado(isAdminEmail(email));
       } catch {
         if (ativo) setAdminLogado(false);
       }
     }
 
-    carregarAdminLogado();
+    void resolverAdmin();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!ativo) return;
-      setAdminLogado(isDemoMode() ? false : isAdminEmail(session?.user?.email));
+      if (isDemoMode()) {
+        setAdminLogado(false);
+        return;
+      }
+      const email = emailDoUsuarioAuth(session?.user ?? null);
+      setAdminLogado(isAdminEmail(email));
     });
+
+    const onFocus = () => {
+      void resolverAdmin();
+    };
+    window.addEventListener("focus", onFocus);
 
     return () => {
       ativo = false;
       subscription.unsubscribe();
+      window.removeEventListener("focus", onFocus);
     };
-  }, []);
+  }, [pathname]);
 
   useEffect(() => {
     const verificarTela = () => {
@@ -282,6 +303,9 @@ export default function PainelLayout({
   const menu: MenuItem[] = useMemo(
     () => [
       { nome: "Dashboard", href: "/dashboard", icone: "📊" },
+      ...(adminLogado
+        ? [{ nome: "Admin SaaS", href: "/admin", icone: "🛡️", destaque: true } as MenuItem]
+        : []),
       {
         nome: "Orçamentos",
         href: "/orcamentos",
@@ -302,7 +326,6 @@ export default function PainelLayout({
       { nome: "Produtos", href: "/produtos", icone: "📦" },
       { nome: "Financeiro", href: "/financeiro", icone: "💸" },
       { nome: "Planos", href: "/planos", icone: "👑", destaque: true },
-      ...(adminLogado ? [{ nome: "Admin SaaS", href: "/admin", icone: "🛡️", destaque: true } as MenuItem] : []),
       { nome: "Config", href: "/configuracoes", icone: "⚙️" },
     ],
     [orcamentosBadge, osBadge, resumoCRMBadge, adminLogado],
@@ -444,6 +467,33 @@ export default function PainelLayout({
       >
         {menuAberto && isMobile ? "×" : "☰"}
       </button>
+
+      {adminLogado && isMobile ? (
+        <Link
+          href="/admin"
+          style={{
+            position: "fixed",
+            top: "calc(env(safe-area-inset-top, 0px) + 12px)",
+            right: "max(12px, env(safe-area-inset-right, 0px))",
+            zIndex: 10080,
+            textDecoration: "none",
+            minHeight: 44,
+            padding: "0 12px",
+            borderRadius: 14,
+            border: "1px solid rgba(196,181,253,.45)",
+            background: "linear-gradient(135deg,#111827 0%,#7c3aed 52%,#0f172a 100%)",
+            color: "#fff",
+            fontWeight: 900,
+            fontSize: 12,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            boxShadow: "0 10px 22px rgba(124,58,237,.22)",
+          }}
+        >
+          🛡️ Admin
+        </Link>
+      ) : null}
 
       {false && menuAberto && isMobile && (
         <div
