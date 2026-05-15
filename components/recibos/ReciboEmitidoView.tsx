@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import extenso from 'extenso'
 
 export type DadosReciboEmitido = {
@@ -73,6 +73,12 @@ type Props = {
   onEnviarLink: () => void
   onPdf: () => void
   showEnviarLink?: boolean
+  /** Oculta “Novo recibo” (ex.: link público). Padrão: true. */
+  showNovoRecibo?: boolean
+  /** Oculta “Voltar” (ex.: link público). Padrão: true. */
+  showVoltar?: boolean
+  /** Toolbar mínima + fechar com window.close e fallback de mensagem. */
+  modoPublico?: boolean
 }
 
 export function ReciboEmitidoView({
@@ -84,7 +90,31 @@ export function ReciboEmitidoView({
   onEnviarLink,
   onPdf,
   showEnviarLink = true,
+  showNovoRecibo = true,
+  showVoltar = true,
+  modoPublico = false,
 }: Props) {
+  const [avisoFecharPublico, setAvisoFecharPublico] = useState(false)
+
+  const barraPublicaMinima = showEnviarLink === false
+  const showVoltarUi = barraPublicaMinima ? false : showVoltar
+  const showNovoUi = barraPublicaMinima ? false : showNovoRecibo
+  const modoPublicoUi = barraPublicaMinima ? true : modoPublico
+
+  function fecharModoPublico() {
+    setAvisoFecharPublico(false)
+    try {
+      window.close()
+    } catch {
+      setAvisoFecharPublico(true)
+      return
+    }
+    window.setTimeout(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        setAvisoFecharPublico(true)
+      }
+    }, 450)
+  }
   const valorNumerico = useMemo(() => {
     const valor = parseFloat(String(dados?.valorNumero || 0).replace(',', '.'))
     return Number.isNaN(valor) ? 0 : valor
@@ -103,42 +133,62 @@ export function ReciboEmitidoView({
 
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg,#f4f7fb 0%,#eaf1fb 100%)', overflowX: 'clip', overflowY: 'auto', padding: isMobile ? 'calc(env(safe-area-inset-top, 0px) + 12px) 10px 96px' : 20, boxSizing: 'border-box' }}>
-      <div style={{ maxWidth: 980, width: '100%', margin: '0 auto 14px', display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <button
-          onClick={onFechar}
-          title="Fechar recibo"
-          style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#ef4444,#991b1b)', color: '#fff', border: '1px solid rgba(239,68,68,.45)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(239,68,68,.22)' }}
-        >
-          ✕ Fechar
-        </button>
-        <button
-          onClick={onVoltar}
-          style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#0f172a,#334155)', color: '#fff', border: '1px solid rgba(148,163,184,.40)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(15,23,42,.22)' }}
-        >
-          ← Voltar
-        </button>
-        <button
-          onClick={onNovo}
-          style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#0f172a,#334155)', color: '#fff', border: '1px solid rgba(148,163,184,.40)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(15,23,42,.22)' }}
-        >
-          Novo recibo
-        </button>
-
-        {showEnviarLink ? (
+      <div style={{ maxWidth: 980, width: '100%', margin: '0 auto 14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
           <button
-            onClick={onEnviarLink}
-            style={{ minHeight: 50, minWidth: isMobile ? 150 : 190, background: 'linear-gradient(135deg,#16a34a 0%, #065f46 100%)', color: '#fff', border: '1px solid rgba(34,197,94,.50)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 28px rgba(34,197,94,.30), inset 0 1px 0 rgba(255,255,255,.14)' }}
+            onClick={modoPublicoUi ? fecharModoPublico : onFechar}
+            title="Fechar recibo"
+            style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#ef4444,#991b1b)', color: '#fff', border: '1px solid rgba(239,68,68,.45)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(239,68,68,.22)' }}
           >
-            🟢 Enviar link
+            ✕ Fechar
           </button>
-        ) : null}
+          {showVoltarUi ? (
+            <button
+              onClick={onVoltar}
+              style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#0f172a,#334155)', color: '#fff', border: '1px solid rgba(148,163,184,.40)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(15,23,42,.22)' }}
+            >
+              ← Voltar
+            </button>
+          ) : null}
+          {showNovoUi ? (
+            <button
+              onClick={onNovo}
+              style={{ minHeight: 50, minWidth: isMobile ? 120 : 150, background: 'linear-gradient(135deg,#0f172a,#334155)', color: '#fff', border: '1px solid rgba(148,163,184,.40)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 24px rgba(15,23,42,.22)' }}
+            >
+              Novo recibo
+            </button>
+          ) : null}
 
-        <button
-          onClick={onPdf}
-          style={{ minHeight: 50, minWidth: isMobile ? 180 : 230, background: 'linear-gradient(135deg,#0f3bff 0%, #001b6b 100%)', color: '#fff', border: '1px solid rgba(59,130,246,.55)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 28px rgba(37,99,235,.30), inset 0 1px 0 rgba(255,255,255,.14)' }}
-        >
-          📄 Visualizar / Baixar PDF
-        </button>
+          {showEnviarLink ? (
+            <button
+              onClick={onEnviarLink}
+              style={{ minHeight: 50, minWidth: isMobile ? 150 : 190, background: 'linear-gradient(135deg,#16a34a 0%, #065f46 100%)', color: '#fff', border: '1px solid rgba(34,197,94,.50)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 28px rgba(34,197,94,.30), inset 0 1px 0 rgba(255,255,255,.14)' }}
+            >
+              🟢 Enviar link
+            </button>
+          ) : null}
+
+          <button
+            onClick={onPdf}
+            style={{ minHeight: 50, minWidth: isMobile ? 180 : 230, background: 'linear-gradient(135deg,#0f3bff 0%, #001b6b 100%)', color: '#fff', border: '1px solid rgba(59,130,246,.55)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 28px rgba(37,99,235,.30), inset 0 1px 0 rgba(255,255,255,.14)' }}
+          >
+            📄 Visualizar / Baixar PDF
+          </button>
+        </div>
+        {modoPublicoUi && avisoFecharPublico ? (
+          <p
+            style={{
+              textAlign: 'center',
+              color: '#475569',
+              fontWeight: 700,
+              fontSize: 15,
+              margin: '14px 12px 0',
+              lineHeight: 1.45,
+            }}
+          >
+            Você já pode fechar esta aba.
+          </p>
+        ) : null}
       </div>
 
       <div style={{ maxWidth: 980, width: '100%', margin: '0 auto', background: corSecundaria, borderRadius: isMobile ? 18 : 24, padding: isMobile ? 10 : 20, boxShadow: '0 18px 40px rgba(15,23,42,0.10)', border: '1px solid #94a3b8' }}>

@@ -101,13 +101,11 @@ function ReciboPublicoInner() {
       dados={dados}
       isMobile={isMobile}
       showEnviarLink={false}
-      onFechar={() => {
-        window.close()
-      }}
-      onVoltar={() => {
-        if (window.history.length > 1) window.history.back()
-        else window.close()
-      }}
+      showNovoRecibo={false}
+      showVoltar={false}
+      modoPublico
+      onFechar={() => {}}
+      onVoltar={() => {}}
       onNovo={() => {}}
       onEnviarLink={() => {}}
       onPdf={() => abrirReciboPdfEmNovaJanela(dados)}
