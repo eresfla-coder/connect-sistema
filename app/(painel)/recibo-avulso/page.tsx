@@ -6,6 +6,7 @@ import extenso from 'extenso'
 
 import { ReciboEmitidoView, type DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
 import { abrirReciboPdfEmNovaJanela } from '@/lib/recibo-print-html'
+import { supabase } from '@/lib/supabase-browser'
 
 type DadosRecibo = DadosReciboEmitido
 
@@ -52,35 +53,85 @@ function gerarToken() {
   }
 }
 
+function prepararPayloadReciboPublico(dados: DadosRecibo) {
+  try {
+    const payload = JSON.parse(JSON.stringify(dados)) as DadosRecibo
+    const logoUrl = payload.config?.logoUrl
+    if (typeof logoUrl === 'string' && logoUrl.startsWith('data:') && logoUrl.length > 120_000) {
+      payload.config = { ...payload.config, logoUrl: '' }
+    }
+    return payload
+  } catch (error) {
+    console.error('[RECIBO_PUBLICO] Payload inválido para serialização:', error)
+    return dados
+  }
+}
+
 async function gerarLinkPublicoRecibo(dados: DadosRecibo): Promise<string> {
   const documentId = String(Date.now())
   const token = gerarToken()
+  const payload = prepararPayloadReciboPublico(dados)
+
+  let accessToken = ''
+  let userId = ''
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    accessToken = session?.access_token || ''
+    userId = session?.user?.id || ''
+  } catch (error) {
+    console.warn('[RECIBO_PUBLICO] Sessão não disponível para publicar link:', error)
+  }
+
+  const body = {
+    document_type: 'recibo',
+    document_id: documentId,
+    token,
+    payload,
+    ...(userId ? { user_id: userId } : {}),
+  }
 
   try {
     const response = await fetch('/api/public-docs', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
-      body: JSON.stringify({
-        document_type: 'recibo',
-        document_id: documentId,
-        token,
-        payload: dados,
-        snapshot: dados,
-      }),
+      body: JSON.stringify(body),
     })
 
-    if (response.ok) {
-      return `${SITE_URL}/visualizar/recibo/${documentId}?token=${token}`
+    const raw = await response.text()
+    let json: { success?: boolean; error?: string; token?: string; document_id?: string } | null = null
+    try {
+      json = raw ? JSON.parse(raw) : null
+    } catch {
+      json = null
     }
 
-    console.error('[RECIBO_PUBLICO] Falha ao salvar documento público:', await response.text())
+    if (response.ok && json?.success !== false) {
+      const tokenSalvo = String(json?.token || token).trim()
+      const idSalvo = String(json?.document_id || documentId).trim()
+      return `${SITE_URL}/visualizar/recibo/${encodeURIComponent(idSalvo)}?token=${encodeURIComponent(tokenSalvo)}`
+    }
+
+    console.error('[RECIBO_PUBLICO] Falha POST /api/public-docs', {
+      status: response.status,
+      statusText: response.statusText,
+      body: json ?? raw,
+      request: { document_type: 'recibo', document_id: documentId, token },
+    })
+
+    const msgApi = String(json?.error || '').trim()
+    alert(
+      msgApi
+        ? `Não foi possível gerar o link público do recibo.\n\n${msgApi}`
+        : 'Não foi possível gerar o link público do recibo. Verifique sua conexão e tente novamente.',
+    )
   } catch (error) {
-    console.error('[RECIBO_PUBLICO] Erro ao salvar documento público:', error)
+    console.error('[RECIBO_PUBLICO] Erro de rede ao salvar documento público:', error)
+    alert('Não foi possível gerar o link público do recibo. Verifique sua conexão e tente novamente.')
   }
 
-  alert('Não foi possível gerar o link público do recibo. Verifique sua conexão e tente novamente.')
   return ''
 }
 

@@ -1,5 +1,6 @@
 export const ADMIN_EMAILS = [
   'eresfla@gmail.com',
+  'lojaconnect@hotmail.com',
 ]
 
 export function isAdminEmail(email?: string | null) {

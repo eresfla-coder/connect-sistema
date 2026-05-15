@@ -66,9 +66,9 @@ export default function PainelLayout({
           if (ativo) setAdminLogado(false);
           return;
         }
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { session } } = await supabase.auth.getSession();
         if (!ativo) return;
-        setAdminLogado(isAdminEmail(user?.email));
+        setAdminLogado(isAdminEmail(session?.user?.email));
       } catch {
         if (ativo) setAdminLogado(false);
       }
@@ -302,8 +302,8 @@ export default function PainelLayout({
       { nome: "Produtos", href: "/produtos", icone: "📦" },
       { nome: "Financeiro", href: "/financeiro", icone: "💸" },
       { nome: "Planos", href: "/planos", icone: "👑", destaque: true },
-      { nome: "Config", href: "/configuracoes", icone: "⚙️" },
       ...(adminLogado ? [{ nome: "Admin SaaS", href: "/admin", icone: "🛡️", destaque: true } as MenuItem] : []),
+      { nome: "Config", href: "/configuracoes", icone: "⚙️" },
     ],
     [orcamentosBadge, osBadge, resumoCRMBadge, adminLogado],
   );
@@ -874,6 +874,28 @@ export default function PainelLayout({
                 alignItems: "center",
               }}
             >
+              {adminLogado ? (
+                <Link
+                  href="/admin"
+                  style={{
+                    textDecoration: "none",
+                    minHeight: 42,
+                    padding: "0 16px",
+                    borderRadius: 14,
+                    border: "1px solid rgba(196,181,253,.45)",
+                    background: "linear-gradient(135deg,#111827 0%,#7c3aed 52%,#0f172a 100%)",
+                    color: "#fff",
+                    fontWeight: 900,
+                    fontSize: 13,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    boxShadow: "0 10px 22px rgba(124,58,237,.22)",
+                  }}
+                >
+                  🛡️ Admin SaaS
+                </Link>
+              ) : null}
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontWeight: 900, fontSize: 22, lineHeight: 1 }}>
                   {horaAtual}

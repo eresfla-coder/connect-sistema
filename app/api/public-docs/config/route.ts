@@ -25,7 +25,11 @@ export async function GET(request: Request) {
     if (token) {
       query = query.eq('token', token)
     } else if (tipo && documentoId) {
-      query = query.eq('tipo', tipo).eq('documento_id', documentoId).order('updated_at', { ascending: false })
+      const tipoNorm = String(tipo).toLowerCase()
+      query =
+        tipoNorm === 'os' || tipoNorm === 'ordem_servico'
+          ? query.in('tipo', ['ordem_servico', 'os']).eq('documento_id', documentoId).order('updated_at', { ascending: false })
+          : query.eq('tipo', tipo).eq('documento_id', documentoId).order('updated_at', { ascending: false })
     } else {
       return erro('Token ou documento não fornecido.')
     }
