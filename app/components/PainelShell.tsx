@@ -30,6 +30,7 @@ type PerfilAcesso = PerfilAssinatura & {
 function rotaSemShell(pathname: string | null) {
   if (!pathname) return false
   return (
+    pathname === '/' ||
     pathname === '/login' ||
     pathname === '/bloqueado' ||
     pathname.startsWith('/publico') ||
@@ -97,6 +98,10 @@ export default function PainelShell({
   useEffect(() => {
     if (semShell) {
       setCarregandoAcesso(false)
+      return
+    }
+
+    if (pathname === '/') {
       return
     }
 
@@ -214,6 +219,7 @@ export default function PainelShell({
 
     const admin: MenuItem[] = [
       { nome: 'Central Admin', href: '/admin', icone: '🏛️', badge: 'SaaS' },
+      { nome: 'Growth', href: '/admin/growth', icone: '🚀', badge: 'NEW' },
       { nome: 'Painel Cliente', href: '/admin/painel-cliente', icone: '👤' },
       { nome: 'Financeiro Premium', href: '/admin/financeiro', icone: '📈' },
       { nome: 'Cobrança Premium', href: '/admin/cobranca', icone: '💎' },

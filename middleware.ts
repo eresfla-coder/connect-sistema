@@ -5,6 +5,7 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   const rotasPublicas =
+    pathname === '/' ||
     pathname === '/login' ||
     pathname === '/bloqueado' ||
     pathname.startsWith('/publico') ||

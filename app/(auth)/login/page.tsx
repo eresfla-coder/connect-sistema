@@ -1,8 +1,9 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { dataIsoVencimentoTrial, perfilAcessoBloqueado } from '@/lib/acesso-saas'
+import { lerLeadPendente, marcarLeadConvertido } from '@/lib/growth-store'
 import { supabase } from '@/lib/supabase'
 
 export default function LoginPage() {
@@ -14,6 +15,13 @@ export default function LoginPage() {
   const [mensagemErro, setMensagemErro] = useState('')
   const [mensagemSucesso, setMensagemSucesso] = useState('')
   const router = useRouter()
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('criar') === '1') setModo('criar')
+    const emailUrl = params.get('email')
+    if (emailUrl) setEmail(emailUrl)
+  }, [])
 
   function limparMensagens() {
     setMensagemErro('')
@@ -124,6 +132,7 @@ export default function LoginPage() {
       }
 
       const userId = authData.user?.id || null
+      const lead = lerLeadPendente()
 
       const { error: perfilError } = await supabase
         .from('perfis')
@@ -132,6 +141,9 @@ export default function LoginPage() {
             {
               id: userId,
               email,
+              nome: lead?.nome || email.split('@')[0],
+              telefone: lead?.telefone || null,
+              whatsapp: lead?.telefone || null,
               ativo: true,
               status: 'teste',
               vencimento: dataIsoVencimentoTrial(),
@@ -145,7 +157,10 @@ export default function LoginPage() {
         return
       }
 
-      setMensagemSucesso('Conta criada com sucesso. Agora você já pode entrar.')
+      marcarLeadConvertido(email)
+      setMensagemSucesso(
+        'Conta criada com teste grátis ativo. Faça login e comece o onboarding.',
+      )
       setModo('entrar')
       setConfirmarSenha('')
       setSenha('')

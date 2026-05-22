@@ -9,6 +9,11 @@ export const metadata: Metadata = {
     capable: true,
     title: 'Connect Sistema',
   },
+  openGraph: {
+    title: 'Connect Sistema',
+    description: 'Orçamentos, OS e cobrança SaaS',
+    images: ['/logo-connect.png'],
+  },
 }
 
 export default function PainelLayout({

@@ -1,14 +1,25 @@
-'use client'
+import dynamic from 'next/dynamic'
 
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+const LandingGrowthPage = dynamic(
+  () => import('@/app/components/landing/LandingGrowthPage'),
+  {
+    loading: () => (
+      <div
+        style={{
+          minHeight: '100vh',
+          background: '#020617',
+          color: '#fff',
+          display: 'grid',
+          placeItems: 'center',
+        }}
+      >
+        Carregando Connect Sistema...
+      </div>
+    ),
+    ssr: true,
+  },
+)
 
-export default function PainelIndexPage() {
-  const router = useRouter()
-
-  useEffect(() => {
-    router.replace('/dashboard')
-  }, [router])
-
-  return null
+export default function HomePage() {
+  return <LandingGrowthPage />
 }
