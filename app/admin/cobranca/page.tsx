@@ -1,17 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import Link from 'next/link'
+import { carregarDadosAdminAssinatura } from '@/lib/admin-dados-assinatura'
 import {
   abrirWhatsAppCobranca,
-  colunasPerfisCobranca,
-  colunasPerfisCobrancaMinimas,
   formatarMoeda,
-  montarResumoAssinatura,
   NOME_SISTEMA_COBRANCA,
-  perfilEhAdminConnect,
   type GrupoCobranca,
-  type PerfilAssinatura,
   type ResumoAssinatura,
 } from '@/lib/assinatura-cobranca'
 
@@ -40,70 +36,17 @@ export default function AdminCobrancaPage() {
       setErro('')
 
       try {
-        const { data: authData, error: authError } = await supabase.auth.getUser()
-        if (authError || !authData?.user) {
-          if (!ativo) return
-          setErro('Faça login para acessar o painel de cobrança.')
+        const dados = await carregarDadosAdminAssinatura()
+        if (!ativo) return
+
+        if (dados.erro) {
+          setErro(dados.erro)
           setAssinaturas([])
           return
         }
 
-        const userId = authData.user.id
-
-        const { data: meuPerfil } = await supabase
-          .from('perfis')
-          .select(colunasPerfisCobranca())
-          .eq('id', userId)
-          .maybeSingle()
-
-        const perfilAtual = (meuPerfil || null) as PerfilAssinatura | null
-        const souAdmin = perfilEhAdminConnect(perfilAtual)
-        if (!ativo) return
-        setAdminLiberado(souAdmin)
-
-        let lista: PerfilAssinatura[] = []
-
-        const tentativaCompleta = await supabase
-          .from('perfis')
-          .select(colunasPerfisCobranca())
-          .order('vencimento', { ascending: true, nullsFirst: false })
-
-        if (!tentativaCompleta.error && Array.isArray(tentativaCompleta.data)) {
-          lista = tentativaCompleta.data as unknown as PerfilAssinatura[]
-        } else {
-          const tentativaMinima = await supabase
-            .from('perfis')
-            .select(colunasPerfisCobrancaMinimas())
-            .order('vencimento', { ascending: true, nullsFirst: false })
-
-          if (tentativaMinima.error) {
-            const apenasMeu = await supabase
-              .from('perfis')
-              .select(colunasPerfisCobrancaMinimas())
-              .eq('id', userId)
-              .maybeSingle()
-
-            if (apenasMeu.error || !apenasMeu.data) {
-              setErro(
-                'Não foi possível carregar as assinaturas. Verifique permissões da tabela perfis no Supabase.',
-              )
-              setAssinaturas([])
-              return
-            }
-
-            lista = [apenasMeu.data as unknown as PerfilAssinatura]
-          } else {
-            lista = (tentativaMinima.data || []) as unknown as PerfilAssinatura[]
-          }
-        }
-
-        if (!souAdmin && lista.length > 1) {
-          lista = lista.filter((item) => item.id === userId)
-        }
-
-        const resumos = lista.map(montarResumoAssinatura)
-        if (!ativo) return
-        setAssinaturas(resumos)
+        setAdminLiberado(dados.souAdmin)
+        setAssinaturas(dados.resumos)
       } catch {
         if (!ativo) return
         setErro('Erro inesperado ao montar o painel de cobrança.')
@@ -170,8 +113,33 @@ export default function AdminCobrancaPage() {
             gap: 10,
           }}
         >
-          <div style={{ fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1.1 }}>
-            Cobrança Premium
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 10,
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div style={{ fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1.1 }}>
+              Cobrança Premium
+            </div>
+            <Link
+              href="/admin/financeiro"
+              style={{
+                textDecoration: 'none',
+                padding: '8px 14px',
+                borderRadius: 12,
+                background: 'rgba(14,165,233,0.14)',
+                border: '1px solid rgba(14,165,233,0.35)',
+                color: '#7dd3fc',
+                fontWeight: 800,
+                fontSize: 13,
+              }}
+            >
+              Financeiro →
+            </Link>
           </div>
           <div style={{ color: '#cbd5e1', fontWeight: 600, fontSize: isMobile ? 14 : 16 }}>
             Mini painel administrativo — assinaturas {NOME_SISTEMA_COBRANCA}
