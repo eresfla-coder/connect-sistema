@@ -7,6 +7,7 @@ import {
   type ResumoAssinatura,
 } from '@/lib/assinatura-cobranca'
 import type { AssinaturaAdmin, PagamentoAdmin } from '@/lib/admin-dados-assinatura'
+import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
 
 export type PontoGraficoMensal = {
   mes: string
@@ -274,12 +275,7 @@ export function montarMensagemRenovacao(resumo: ResumoAssinatura) {
 }
 
 export function abrirWhatsAppMensagem(resumo: ResumoAssinatura, mensagem: string) {
-  const telefone = normalizarTelefoneWhatsApp(resumo.telefone)
-  const url = telefone
-    ? `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`
-    : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
-
-  window.open(url, '_blank', 'noopener,noreferrer')
+  abrirWhatsAppComTelefone(resumo.telefone, mensagem)
 }
 
 export function acaoCobrar(resumo: ResumoAssinatura) {

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
+import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
 
 const STORAGE_KEY = 'connect_orcamentos_salvos'
 const CONFIG_KEY = 'connect_configuracoes'
@@ -203,7 +204,7 @@ export default function OrcamentoPublicoPage() {
       return
     }
 
-    window.open(`https://wa.me/${numero}?text=${encodeURIComponent(texto)}`, '_blank')
+    abrirWhatsAppComTelefone(numeroBruto, texto)
   }
 
   if (!carregado) {

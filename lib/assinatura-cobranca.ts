@@ -1,3 +1,5 @@
+import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
+
 export const NOME_SISTEMA_COBRANCA = 'Connect Sistema'
 
 export type PerfilAssinatura = {
@@ -241,14 +243,7 @@ export function montarMensagemCobranca(resumo: ResumoAssinatura) {
 }
 
 export function abrirWhatsAppCobranca(resumo: ResumoAssinatura) {
-  const mensagem = montarMensagemCobranca(resumo)
-  const telefone = normalizarTelefoneWhatsApp(resumo.telefone)
-
-  const url = telefone
-    ? `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`
-    : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
-
-  window.open(url, '_blank', 'noopener,noreferrer')
+  abrirWhatsAppComTelefone(resumo.telefone, montarMensagemCobranca(resumo))
 }
 
 export function perfilEhAdminConnect(perfil?: PerfilAssinatura | null) {

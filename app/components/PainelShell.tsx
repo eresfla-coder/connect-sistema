@@ -3,12 +3,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { infoTrialAssinatura, perfilAcessoBloqueado } from '@/lib/acesso-saas'
 import {
-  normalizarTelefoneWhatsApp,
   perfilEhAdminConnect,
   type PerfilAssinatura,
 } from '@/lib/assinatura-cobranca'
+import { carregarPerfilUsuario, limparCachePerfil } from '@/lib/sync-perfil'
+import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
 import { supabase } from '@/lib/supabase'
+import OnboardingPremium from './OnboardingPremium'
+import TrialBanner from './TrialBanner'
 
 type MenuItem = {
   nome: string
@@ -23,13 +27,15 @@ type PerfilAcesso = PerfilAssinatura & {
   vencimento?: string | null
 }
 
-function venceuPerfil(vencimento?: string | null) {
-  if (!vencimento) return false
-  const hoje = new Date()
-  hoje.setHours(0, 0, 0, 0)
-  const dataVencimento = new Date(vencimento)
-  dataVencimento.setHours(0, 0, 0, 0)
-  return dataVencimento < hoje
+function rotaSemShell(pathname: string | null) {
+  if (!pathname) return false
+  return (
+    pathname === '/login' ||
+    pathname === '/bloqueado' ||
+    pathname.startsWith('/publico') ||
+    pathname.startsWith('/impressao-ordem-servico') ||
+    pathname.startsWith('/impressao-orcamento')
+  )
 }
 
 export default function PainelShell({
@@ -86,45 +92,31 @@ export default function PainelShell({
     return () => window.removeEventListener('storage', atualizarBadges)
   }, [])
 
+  const semShell = rotaSemShell(pathname)
+
   useEffect(() => {
+    if (semShell) {
+      setCarregandoAcesso(false)
+      return
+    }
+
     let componenteAtivo = true
 
     async function verificarAcesso() {
       try {
-        const { data: authData, error: authError } = await supabase.auth.getUser()
+        const { perfil: perfilData, erro } = await carregarPerfilUsuario()
 
         if (!componenteAtivo) return
 
-        if (authError || !authData?.user) {
+        if (!perfilData || erro) {
           setCarregandoAcesso(false)
           router.replace('/login')
           return
         }
 
-        const user = authData.user
-
-        const { data: perfilData, error: perfilError } = await supabase
-          .from('perfis')
-          .select('id, email, nome, nome_empresa, telefone, whatsapp, celular, ativo, status, vencimento, is_admin')
-          .eq('id', user.id)
-          .single()
-
-        if (!componenteAtivo) return
-
-        if (perfilError || !perfilData) {
-          setCarregandoAcesso(false)
-          router.replace('/bloqueado')
-          return
-        }
-
         setPerfil(perfilData)
 
-        const bloqueado =
-          perfilData.ativo === false ||
-          perfilData.status === 'bloqueado' ||
-          venceuPerfil(perfilData.vencimento)
-
-        if (bloqueado) {
+        if (perfilAcessoBloqueado(perfilData)) {
           setCarregandoAcesso(false)
           router.replace('/bloqueado')
           return
@@ -146,6 +138,7 @@ export default function PainelShell({
       if (!componenteAtivo) return
 
       if (!session?.user) {
+        limparCachePerfil()
         setPerfil(null)
         setCarregandoAcesso(false)
         router.replace('/login')
@@ -156,7 +149,16 @@ export default function PainelShell({
       componenteAtivo = false
       subscription.unsubscribe()
     }
-  }, [router])
+  }, [router, semShell, pathname])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
+    if (pathname === '/login') return
+
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // PWA opcional — falha silenciosa
+    })
+  }, [pathname])
 
   function abrirWhatsApp() {
     try {
@@ -169,16 +171,15 @@ export default function PainelShell({
         config?.numero_whatsapp ||
         ''
 
-      const numeroFinal = normalizarTelefoneWhatsApp(String(telefoneBruto))
-      if (!numeroFinal) {
+      if (!telefoneBruto) {
         alert('Cadastre o número do WhatsApp em Configurações.')
         return
       }
 
-      const mensagem = 'Olá! Gostaria de falar com você.'
-      const url = `https://wa.me/${numeroFinal}?text=${encodeURIComponent(mensagem)}`
-
-      window.open(url, '_blank', 'noopener,noreferrer')
+      abrirWhatsAppComTelefone(
+        String(telefoneBruto),
+        'Olá! Gostaria de falar com você.',
+      )
     } catch (error) {
       console.error('Erro ao abrir WhatsApp:', error)
       alert('Não foi possível abrir o WhatsApp.')
@@ -186,13 +187,18 @@ export default function PainelShell({
   }
 
   async function handleLogout() {
+    limparCachePerfil()
     await supabase.auth.signOut()
+    document.cookie = 'connect_auth=; path=/; max-age=0; samesite=lax'
     router.push('/login')
   }
+
+  const infoTrial = useMemo(() => infoTrialAssinatura(perfil), [perfil])
 
   const menu: MenuItem[] = useMemo(() => {
     const operacional: MenuItem[] = [
       { nome: 'Dashboard Gerencial', href: '/dashboard', icone: '📊' },
+      { nome: 'Minha Conta', href: '/conta', icone: '👤' },
       { nome: 'Orçamentos', href: '/orcamentos', icone: '💰', destaque: true, badge: orcamentosBadge },
       { nome: 'Ordem de Serviço', href: '/ordens-servico', icone: '🔧', badge: osBadge },
       { nome: 'Cadastro de Clientes', href: '/clientes', icone: '👥' },
@@ -227,6 +233,10 @@ export default function PainelShell({
     if (ativo) return '0 8px 20px rgba(249,115,22,0.32)'
     if (item.destaque) return '0 8px 20px rgba(34,197,94,0.28)'
     return 'none'
+  }
+
+  if (semShell) {
+    return <>{children}</>
   }
 
   if (carregandoAcesso) {
@@ -551,8 +561,12 @@ export default function PainelShell({
           </button>
         </aside>
 
-        <main style={{ flex: 1, padding: 20 }}>{children}</main>
+        <main style={{ flex: 1, padding: 20 }}>
+          <TrialBanner info={infoTrial} isMobile={isMobile} />
+          {children}
+        </main>
       </div>
+      <OnboardingPremium />
     </div>
   )
 }

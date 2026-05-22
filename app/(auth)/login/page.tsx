@@ -2,16 +2,8 @@
 
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { dataIsoVencimentoTrial, perfilAcessoBloqueado } from '@/lib/acesso-saas'
 import { supabase } from '@/lib/supabase'
-
-function venceuPerfil(vencimento?: string | null) {
-  if (!vencimento) return false
-  const hoje = new Date()
-  hoje.setHours(0, 0, 0, 0)
-  const dataVencimento = new Date(vencimento)
-  dataVencimento.setHours(0, 0, 0, 0)
-  return dataVencimento < hoje
-}
 
 export default function LoginPage() {
   const [modo, setModo] = useState<'entrar' | 'criar'>('entrar')
@@ -77,12 +69,7 @@ export default function LoginPage() {
         return
       }
 
-      const acessoBloqueado =
-        data.ativo === false ||
-        data.status === 'bloqueado' ||
-        venceuPerfil(data.vencimento)
-
-      if (acessoBloqueado) {
+      if (perfilAcessoBloqueado(data)) {
         removerCookieLogin()
         router.push('/bloqueado')
         return
@@ -147,6 +134,7 @@ export default function LoginPage() {
               email,
               ativo: true,
               status: 'teste',
+              vencimento: dataIsoVencimentoTrial(),
             },
           ],
           { onConflict: 'id' }

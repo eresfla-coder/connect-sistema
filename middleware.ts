@@ -4,7 +4,6 @@ import type { NextRequest } from 'next/server'
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // ROTAS LIVRES (SEM LOGIN)
   const rotasPublicas =
     pathname === '/login' ||
     pathname === '/bloqueado' ||
@@ -14,21 +13,21 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon.ico') ||
     pathname.startsWith('/logo-connect.png') ||
-    pathname.startsWith('/manifest.json')
+    pathname.startsWith('/manifest.json') ||
+    pathname.startsWith('/sw.js') ||
+    pathname.endsWith('.zip')
 
   if (rotasPublicas) {
     return NextResponse.next()
   }
 
-  // COOKIE/TOKEN DE AUTENTICAÇÃO
   const token =
     request.cookies.get('sb-access-token')?.value ||
-    request.cookies.get('supabase-auth-token')?.value
+    request.cookies.get('supabase-auth-token')?.value ||
+    request.cookies.get('connect_auth')?.value
 
-  // SE NÃO ESTIVER LOGADO, REDIRECIONA
   if (!token) {
-    const loginUrl = new URL('/login', request.url)
-    return NextResponse.redirect(loginUrl)
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
   return NextResponse.next()

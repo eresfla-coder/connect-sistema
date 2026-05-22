@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import BotaoReciboAvulso from '@/components/recibos/botao-recibo-avulso'
+import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
 
 type Cliente = {
   id?: string | number
@@ -542,7 +543,7 @@ export default function OrdemServicoPage() {
 
   function compartilharWhatsApp(item: OrdemServico) {
     const link = linkValido(item)
-    window.open(`https://wa.me/?text=${encodeURIComponent(link)}`, '_blank')
+    abrirWhatsAppComTelefone('', link)
   }
 
   const pageStyle: React.CSSProperties = {

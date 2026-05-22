@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import extenso from 'extenso'
+import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
 
 type DadosRecibo = {
   nomeCliente?: string
@@ -97,12 +98,8 @@ export default function RecibosPage() {
   const formaPagamento = dados?.formaPagamento || 'Dinheiro'
 
   function enviarWhatsApp() {
-    const telefone = normalizarTelefoneWhatsApp(dados?.clienteTelefone)
     const mensagem = `Olá ${dados?.nomeCliente || ''}!\n\nSegue seu recibo:\nValor: ${moeda(valorNumerico)}\nReferente: ${dados?.referente || 'pagamento'}\n\nUse o botão "Visualizar / Baixar PDF".`
-    const url = telefone
-      ? `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`
-      : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
-    window.open(url, '_blank')
+    abrirWhatsAppComTelefone(dados?.clienteTelefone || '', mensagem)
   }
 
   return (

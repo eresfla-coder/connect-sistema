@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { marcarPassoOnboarding } from '@/lib/onboarding'
+import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
 
 type TipoPessoaCliente = 'PF' | 'PJ'
 
@@ -864,11 +866,7 @@ export default function OrcamentoPage() {
     mensagem += `Segue seu orçamento *${orc.numero}* no valor de *${moeda(orc.total)}*.\n`
     if (orc.validade) mensagem += `Validade: ${orc.validade}.\n`
     mensagem += `\nAcesse aqui: ${orc.link}`
-    if (telefone) {
-      window.open(`https://wa.me/55${telefone}?text=${encodeURIComponent(mensagem)}`, '_blank')
-      return
-    }
-    window.open(`https://wa.me/?text=${encodeURIComponent(mensagem)}`, '_blank')
+    abrirWhatsAppComTelefone(telefone, mensagem)
   }
 
   function enviarWhatsApp() {
@@ -907,7 +905,8 @@ export default function OrcamentoPage() {
     mensagem += `\n💰 *Total:* ${moeda(total)}`
     mensagem += `\n\n${observacao}`
     mensagem += `\n\nSe aprovar, me responda e já deixo tudo encaminhado ✅`
-    window.open(`https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`, '_blank')
+    abrirWhatsAppComTelefone(clienteSelecionado.telefone, mensagem)
+    marcarPassoOnboarding('whatsapp')
   }
 
   function gerarPDF() {

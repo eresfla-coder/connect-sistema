@@ -1,3 +1,5 @@
+import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
+
 type Item = {
   nome: string
   quantidade: number
@@ -38,9 +40,5 @@ export function enviarWhatsapp(orcamento: OrcamentoWhatsapp) {
     mensagem += `\n\nContato da empresa: ${orcamento.empresa.telefone}`
   }
 
-  const numero = (orcamento.telefone || '').replace(/\D/g, '')
-
-  const url = `https://wa.me/55${numero}?text=${encodeURIComponent(mensagem)}`
-
-  window.open(url, '_blank')
+  abrirWhatsAppComTelefone(orcamento.telefone || '', mensagem)
 }
