@@ -91,6 +91,26 @@ export default function LandingGrowthPage() {
   }, [])
 
   useEffect(() => {
+    const preloads = [
+      { href: '/logo-connect.png', as: 'image' },
+      { href: '/login', as: 'document' },
+    ]
+    const links: HTMLLinkElement[] = []
+    for (const item of preloads) {
+      if (document.querySelector(`link[rel="preload"][href="${item.href}"]`)) continue
+      const link = document.createElement('link')
+      link.rel = 'preload'
+      link.href = item.href
+      link.as = item.as
+      document.head.appendChild(link)
+      links.push(link)
+    }
+    return () => {
+      for (const link of links) link.remove()
+    }
+  }, [])
+
+  useEffect(() => {
     let ativo = true
     async function checarSessao() {
       const { data } = await supabase.auth.getUser()

@@ -14,6 +14,10 @@ export const metadata: Metadata = {
     description: 'Orçamentos, OS e cobrança SaaS',
     images: ['/logo-connect.png'],
   },
+  icons: {
+    icon: '/logo-connect.png',
+    apple: '/logo-connect.png',
+  },
 }
 
 export default function PainelLayout({
