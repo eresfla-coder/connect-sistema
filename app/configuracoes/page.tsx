@@ -418,7 +418,7 @@ export default function ConfiguracoesPage() {
                   alt="Logo"
                   onError={(e) => {
                     const img = e.currentTarget as HTMLImageElement
-                    img.src = '/logo-connect.png'
+                    img.src = DEFAULT_LOGO_PATH
                   }}
                   style={{
                     maxWidth: '100%',
