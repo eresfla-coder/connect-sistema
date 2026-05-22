@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import {
+  normalizarTelefoneWhatsApp,
+  perfilEhAdminConnect,
+  type PerfilAssinatura,
+} from '@/lib/assinatura-cobranca'
 import { supabase } from '@/lib/supabase'
 
 type MenuItem = {
@@ -13,11 +18,8 @@ type MenuItem = {
   badge?: string
 }
 
-type PerfilAcesso = {
-  id: string
-  email?: string | null
+type PerfilAcesso = PerfilAssinatura & {
   ativo?: boolean | null
-  status?: string | null
   vencimento?: string | null
 }
 
@@ -103,7 +105,7 @@ export default function PainelShell({
 
         const { data: perfilData, error: perfilError } = await supabase
           .from('perfis')
-          .select('id, email, ativo, status, vencimento')
+          .select('id, email, nome, nome_empresa, telefone, whatsapp, celular, ativo, status, vencimento, is_admin')
           .eq('id', user.id)
           .single()
 
@@ -167,20 +169,16 @@ export default function PainelShell({
         config?.numero_whatsapp ||
         ''
 
-      const numero = String(telefoneBruto).replace(/\D/g, '')
-      if (!numero) {
+      const numeroFinal = normalizarTelefoneWhatsApp(String(telefoneBruto))
+      if (!numeroFinal) {
         alert('Cadastre o número do WhatsApp em Configurações.')
         return
       }
 
-      const numeroFinal = numero.startsWith('55') ? numero : `55${numero}`
       const mensagem = 'Olá! Gostaria de falar com você.'
+      const url = `https://wa.me/${numeroFinal}?text=${encodeURIComponent(mensagem)}`
 
-      window.open(
-        `https://wa.me/${numeroFinal}?text=${encodeURIComponent(mensagem)}`,
-        '_blank',
-        'noopener,noreferrer'
-      )
+      window.open(url, '_blank', 'noopener,noreferrer')
     } catch (error) {
       console.error('Erro ao abrir WhatsApp:', error)
       alert('Não foi possível abrir o WhatsApp.')
@@ -192,13 +190,9 @@ export default function PainelShell({
     router.push('/login')
   }
 
-  const menu: MenuItem[] = useMemo(
-    () => [
+  const menu: MenuItem[] = useMemo(() => {
+    const operacional: MenuItem[] = [
       { nome: 'Dashboard Gerencial', href: '/dashboard', icone: '📊' },
-      { nome: 'Central Admin', href: '/admin', icone: '🏛️', badge: 'SaaS' },
-      { nome: 'Painel Cliente', href: '/admin/painel-cliente', icone: '👤' },
-      { nome: 'Financeiro Premium', href: '/admin/financeiro', icone: '📈' },
-      { nome: 'Cobrança Premium', href: '/admin/cobranca', icone: '💎' },
       { nome: 'Orçamentos', href: '/orcamentos', icone: '💰', destaque: true, badge: orcamentosBadge },
       { nome: 'Ordem de Serviço', href: '/ordens-servico', icone: '🔧', badge: osBadge },
       { nome: 'Cadastro de Clientes', href: '/clientes', icone: '👥' },
@@ -206,9 +200,21 @@ export default function PainelShell({
       { nome: 'Formas de Pagamento', href: '/formas-pagamento', icone: '💳' },
       { nome: 'Categorias', href: '/categorias', icone: '📂' },
       { nome: 'Configurações', href: '/configuracoes', icone: '⚙️' },
-    ],
-    [orcamentosBadge, osBadge]
-  )
+    ]
+
+    if (!perfil || !perfilEhAdminConnect(perfil)) {
+      return operacional
+    }
+
+    const admin: MenuItem[] = [
+      { nome: 'Central Admin', href: '/admin', icone: '🏛️', badge: 'SaaS' },
+      { nome: 'Painel Cliente', href: '/admin/painel-cliente', icone: '👤' },
+      { nome: 'Financeiro Premium', href: '/admin/financeiro', icone: '📈' },
+      { nome: 'Cobrança Premium', href: '/admin/cobranca', icone: '💎' },
+    ]
+
+    return [operacional[0], ...admin, ...operacional.slice(1)]
+  }, [orcamentosBadge, osBadge, perfil])
 
   function corItem(item: MenuItem, ativo: boolean) {
     if (ativo) return 'linear-gradient(135deg,#f97316,#ea580c)'

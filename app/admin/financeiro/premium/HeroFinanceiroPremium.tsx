@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { formatarMetrica } from '@/lib/financeiro-admin'
 import { NOME_SISTEMA_COBRANCA } from '@/lib/assinatura-cobranca'
 import { FINANCEIRO_PREMIUM } from './theme'
@@ -137,23 +136,6 @@ export default function HeroFinanceiroPremium({
               Financeiro Premium
             </div>
           </div>
-
-          <Link
-            href="/admin/cobranca"
-            style={{
-              textDecoration: 'none',
-              padding: '12px 18px',
-              borderRadius: 14,
-              background: 'rgba(15,23,42,0.55)',
-              border: '1px solid rgba(255,255,255,0.16)',
-              color: '#fdba74',
-              fontWeight: 900,
-              fontSize: 13,
-              backdropFilter: 'blur(8px)',
-            }}
-          >
-            Cobrança →
-          </Link>
         </div>
 
         <div

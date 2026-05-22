@@ -1,7 +1,6 @@
 'use client'
 
 import type { CSSProperties } from 'react'
-import Link from 'next/link'
 import { NOME_SISTEMA_COBRANCA } from '@/lib/assinatura-cobranca'
 
 type Props = {
@@ -106,40 +105,6 @@ export default function CentralAdminHero({
           Copiar resumo
         </button>
       </div>
-
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 10,
-          marginTop: 16,
-          paddingTop: 16,
-          borderTop: '1px solid rgba(255,255,255,0.10)',
-        }}
-      >
-        <LinkAdmin href="/admin/financeiro" label="Financeiro Premium" cor="#7dd3fc" />
-        <LinkAdmin href="/admin/cobranca" label="Cobrança Premium" cor="#fdba74" />
-      </div>
     </header>
-  )
-}
-
-function LinkAdmin({ href, label, cor }: { href: string; label: string; cor: string }) {
-  return (
-    <Link
-      href={href}
-      style={{
-        textDecoration: 'none',
-        padding: '8px 14px',
-        borderRadius: 12,
-        background: 'rgba(15,23,42,0.45)',
-        border: '1px solid rgba(255,255,255,0.12)',
-        color: cor,
-        fontWeight: 800,
-        fontSize: 13,
-      }}
-    >
-      {label} →
-    </Link>
   )
 }

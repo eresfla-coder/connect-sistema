@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { carregarDadosAdminAssinatura } from '@/lib/admin-dados-assinatura'
 import {
   abrirWhatsAppCobranca,
@@ -113,33 +112,8 @@ export default function AdminCobrancaPage() {
             gap: 10,
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 10,
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <div style={{ fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1.1 }}>
-              Cobrança Premium
-            </div>
-            <Link
-              href="/admin/financeiro"
-              style={{
-                textDecoration: 'none',
-                padding: '8px 14px',
-                borderRadius: 12,
-                background: 'rgba(14,165,233,0.14)',
-                border: '1px solid rgba(14,165,233,0.35)',
-                color: '#7dd3fc',
-                fontWeight: 800,
-                fontSize: 13,
-              }}
-            >
-              Financeiro →
-            </Link>
+          <div style={{ fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1.1 }}>
+            Cobrança Premium
           </div>
           <div style={{ color: '#cbd5e1', fontWeight: 600, fontSize: isMobile ? 14 : 16 }}>
             Mini painel administrativo — assinaturas {NOME_SISTEMA_COBRANCA}

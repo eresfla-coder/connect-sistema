@@ -1,21 +1,30 @@
 'use client'
 
 import { ChangeEvent, useEffect, useMemo, useState } from 'react'
+import {
+  DEFAULT_LOGO_PATH,
+  configEmpresaFromPerfil,
+  lerConfigEmpresaLocal,
+  mesclarConfigEmpresa,
+  payloadPerfilConfigEmpresa,
+  salvarConfigEmpresaLocal,
+  type ConfigEmpresaCompleta,
+} from '@/lib/connect-public'
 import { supabase } from '@/lib/supabase'
 
-type ConfiguracaoSistema = {
-  nomeEmpresa: string
-  telefone: string
-  email: string
-  endereco: string
-  cidadeUf: string
-  responsavel: string
-  logoUrl: string
-  corPrimaria: string
-  corSecundaria: string
-}
+type ConfiguracaoSistema = ConfigEmpresaCompleta
 
-const CONFIG_KEY = 'connect_configuracoes'
+const CONFIG_PADRAO: ConfiguracaoSistema = {
+  nomeEmpresa: 'LOJA CONNECT',
+  telefone: '84992181399',
+  email: 'lojaconnect@hotmail.com',
+  endereco: 'GILBERTO ROBERTO GOMES, 243',
+  cidadeUf: 'PARNAMIRIM-RN',
+  responsavel: 'ERES FAUSTINO',
+  logoUrl: DEFAULT_LOGO_PATH,
+  corPrimaria: '#f97316',
+  corSecundaria: '#e5e7eb',
+}
 
 export default function ConfiguracoesPage() {
   const [isMobile, setIsMobile] = useState(false)
@@ -26,17 +35,7 @@ export default function ConfiguracoesPage() {
   const [novaSenha, setNovaSenha] = useState('')
   const [confirmarSenha, setConfirmarSenha] = useState('')
 
-  const [config, setConfig] = useState<ConfiguracaoSistema>({
-    nomeEmpresa: 'LOJA CONNECT',
-    telefone: '84992181399',
-    email: 'lojaconnect@hotmail.com',
-    endereco: 'GILBERTO ROBERTO GOMES, 243',
-    cidadeUf: 'PARNAMIRIM-RN',
-    responsavel: 'ERES FAUSTINO',
-    logoUrl: '/logo-connect.png',
-    corPrimaria: '#f97316',
-    corSecundaria: '#e5e7eb',
-  })
+  const [config, setConfig] = useState<ConfiguracaoSistema>(CONFIG_PADRAO)
 
   useEffect(() => {
     const atualizarTela = () => setIsMobile(window.innerWidth <= 768)
@@ -46,27 +45,57 @@ export default function ConfiguracoesPage() {
   }, [])
 
   useEffect(() => {
-    const salvo = localStorage.getItem(CONFIG_KEY)
-    if (!salvo) return
+    let ativo = true
 
-    try {
-      const dados = JSON.parse(salvo)
-      setConfig((anterior) => ({
-        ...anterior,
-        nomeEmpresa: dados.nomeEmpresa || anterior.nomeEmpresa,
-        telefone: dados.telefone || anterior.telefone,
-        email: dados.email || anterior.email,
-        endereco: dados.endereco || anterior.endereco,
-        cidadeUf: dados.cidadeUf || anterior.cidadeUf,
-        responsavel: dados.responsavel || anterior.responsavel,
-        logoUrl: dados.logoUrl || anterior.logoUrl,
-        corPrimaria: dados.corPrimaria || anterior.corPrimaria,
-        corSecundaria: dados.corSecundaria || anterior.corSecundaria,
-      }))
-    } catch {}
+    async function carregarConfiguracoes() {
+      let proximo = mesclarConfigEmpresa(CONFIG_PADRAO, lerConfigEmpresaLocal())
+
+      try {
+        const { data: authData } = await supabase.auth.getUser()
+        const userId = authData?.user?.id
+
+        if (userId) {
+          const colunasComExtras =
+            'nome_empresa, telefone, email, nome, whatsapp, config_empresa'
+          let resultado = await supabase
+            .from('perfis')
+            .select(colunasComExtras)
+            .eq('id', userId)
+            .single()
+
+          if (resultado.error) {
+            resultado = await supabase
+              .from('perfis')
+              .select('nome_empresa, telefone, email, nome, whatsapp')
+              .eq('id', userId)
+              .single()
+          }
+
+          if (!resultado.error && resultado.data && ativo) {
+            proximo = mesclarConfigEmpresa(
+              proximo,
+              configEmpresaFromPerfil(resultado.data),
+            )
+          }
+        }
+      } catch {
+        // Mantém cache local quando Supabase estiver indisponível.
+      }
+
+      if (!ativo) return
+
+      setConfig(proximo)
+      salvarConfigEmpresaLocal(proximo)
+    }
+
+    carregarConfiguracoes()
+
+    return () => {
+      ativo = false
+    }
   }, [])
 
-  const previewLogo = useMemo(() => config.logoUrl || '/logo-connect.png', [config.logoUrl])
+  const previewLogo = useMemo(() => config.logoUrl || DEFAULT_LOGO_PATH, [config.logoUrl])
 
   function atualizarCampo<K extends keyof ConfiguracaoSistema>(
     campo: K,
@@ -78,20 +107,39 @@ export default function ConfiguracoesPage() {
     }))
   }
 
-  function salvarConfiguracoes() {
+  async function salvarConfiguracoes() {
     setSalvando(true)
 
-    localStorage.setItem(
-      CONFIG_KEY,
-      JSON.stringify({
-        ...config,
-      }),
-    )
+    salvarConfigEmpresaLocal(config)
 
-    setTimeout(() => {
-      setSalvando(false)
-      alert('Configurações salvas com sucesso!')
-    }, 400)
+    let avisoNuvem = ''
+
+    try {
+      const { data: authData } = await supabase.auth.getUser()
+      const userId = authData?.user?.id
+
+      if (userId) {
+        const payload = payloadPerfilConfigEmpresa(config)
+        let resultado = await supabase.from('perfis').update(payload).eq('id', userId)
+
+        if (resultado.error) {
+          const { config_empresa: _extra, ...basico } = payload
+          resultado = await supabase.from('perfis').update(basico).eq('id', userId)
+
+          if (resultado.error) {
+            avisoNuvem =
+              ' Salvas localmente; não foi possível sincronizar todos os campos no Supabase.'
+          } else {
+            avisoNuvem = ' Dados principais sincronizados no Supabase.'
+          }
+        }
+      }
+    } catch {
+      avisoNuvem = ' Salvas localmente; Supabase indisponível no momento.'
+    }
+
+    setSalvando(false)
+    alert(`Configurações salvas com sucesso!${avisoNuvem}`)
   }
 
   function lerArquivoLogo(evento: ChangeEvent<HTMLInputElement>) {
