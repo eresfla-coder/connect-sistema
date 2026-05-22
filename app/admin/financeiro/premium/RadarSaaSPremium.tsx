@@ -54,7 +54,7 @@ export default function RadarSaaSPremium({
   ]
 
   return (
-    <section style={painelGlass({ padding: isMobile ? 16 : 20, animation: 'fpFadeUp .5s ease .05s forwards' })}>
+    <section className="fp-animate-in" style={painelGlass({ padding: isMobile ? 16 : 20 })}>
       <div
         style={{
           display: 'flex',
@@ -74,6 +74,7 @@ export default function RadarSaaSPremium({
           </div>
         </div>
         <span
+          className="fp-badge-float"
           style={{
             padding: '8px 14px',
             borderRadius: 999,
@@ -81,7 +82,6 @@ export default function RadarSaaSPremium({
             border: '1px solid rgba(255,255,255,0.14)',
             fontSize: 12,
             fontWeight: 900,
-            animation: 'fpBadgeFloat 2.8s ease-in-out infinite',
           }}
         >
           Monitoramento ativo
@@ -98,13 +98,13 @@ export default function RadarSaaSPremium({
         {itens.map((item, index) => (
           <div
             key={item.label}
+            className="fp-animate-in"
             style={{
               padding: isMobile ? 14 : 18,
               borderRadius: 18,
               background: 'rgba(15,23,42,0.55)',
               border: '1px solid rgba(255,255,255,0.08)',
               boxShadow: item.glow,
-              animation: `fpFadeUp .45s ease ${index * 70}ms forwards`,
               transition: 'transform .2s ease, box-shadow .2s ease',
             }}
             onMouseEnter={(e) => {

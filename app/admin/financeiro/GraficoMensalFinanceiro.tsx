@@ -213,10 +213,10 @@ export default function GraficoMensalFinanceiro({
   if (hero) {
     return (
       <section
+        className="fp-animate-in"
         style={painelGlass({
           padding: isMobile ? 16 : 24,
           boxShadow: `${FINANCEIRO_PREMIUM.glowGreen}, 0 28px 56px rgba(0,0,0,0.35)`,
-          animation: 'fpFadeUp .55s ease .08s forwards',
         })}
       >
         <div style={{ marginBottom: 8 }}>

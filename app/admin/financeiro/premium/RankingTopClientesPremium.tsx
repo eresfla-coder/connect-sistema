@@ -22,7 +22,7 @@ export default function RankingTopClientesPremium({
   const maxValor = Math.max(1, ...ranking.map((r) => Math.max(r.valor, r.totalPago)))
 
   return (
-    <section style={painelGlass({ padding: isMobile ? 16 : 22, animation: 'fpFadeUp .55s ease .12s forwards' })}>
+    <section className="fp-animate-in" style={painelGlass({ padding: isMobile ? 16 : 22 })}>
       <div style={{ marginBottom: 18 }}>
         <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 1.3, color: '#94a3b8' }}>
           TOP CLIENTES
@@ -45,6 +45,7 @@ export default function RankingTopClientesPremium({
           return (
             <div
               key={item.resumo.perfil.id}
+              className="fp-animate-in"
               style={{
                 padding: '14px 16px',
                 borderRadius: 16,
@@ -54,7 +55,6 @@ export default function RankingTopClientesPremium({
                 border: ativo
                   ? '1px solid rgba(249,115,22,0.4)'
                   : '1px solid rgba(255,255,255,0.08)',
-                animation: `fpFadeUp .4s ease ${index * 50}ms forwards`,
                 transition: 'transform .2s ease',
               }}
               onMouseEnter={(e) => {
@@ -136,6 +136,7 @@ export default function RankingTopClientesPremium({
                 }}
               >
                 <div
+                  className="fp-bar-grow"
                   style={{
                     width: largura,
                     height: '100%',
@@ -143,7 +144,6 @@ export default function RankingTopClientesPremium({
                     background: corBarra,
                     boxShadow: '0 0 16px rgba(249,115,22,0.25)',
                     transformOrigin: 'left center',
-                    animation: 'fpBarGrow .7s ease forwards',
                   }}
                 />
               </div>

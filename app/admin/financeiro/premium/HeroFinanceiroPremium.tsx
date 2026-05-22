@@ -24,6 +24,7 @@ export default function HeroFinanceiroPremium({
 }: Props) {
   return (
     <header
+      className="fp-animate-in"
       style={{
         position: 'relative',
         overflow: 'hidden',
@@ -32,10 +33,10 @@ export default function HeroFinanceiroPremium({
         background: FINANCEIRO_PREMIUM.heroGradient,
         border: '1px solid rgba(255,255,255,0.14)',
         boxShadow: `${FINANCEIRO_PREMIUM.glowOrange}, 0 28px 60px rgba(0,0,0,0.35)`,
-        animation: 'fpFadeUp .55s ease forwards',
       }}
     >
       <div
+        className="fp-glow-pulse"
         style={{
           position: 'absolute',
           top: -80,
@@ -44,7 +45,6 @@ export default function HeroFinanceiroPremium({
           height: 280,
           borderRadius: 999,
           background: 'radial-gradient(circle, rgba(34,197,94,0.25) 0%, transparent 70%)',
-          animation: 'fpGlowPulse 5s ease-in-out infinite',
           pointerEvents: 'none',
         }}
       />
@@ -72,6 +72,7 @@ export default function HeroFinanceiroPremium({
           }}
         >
           <span
+            className="fp-badge-float"
             style={{
               padding: '6px 12px',
               borderRadius: 999,
@@ -81,12 +82,12 @@ export default function HeroFinanceiroPremium({
               fontWeight: 900,
               letterSpacing: 1.1,
               textTransform: 'uppercase',
-              animation: 'fpBadgeFloat 3s ease-in-out infinite',
             }}
           >
-            AAA Premium
+            AAA Premium v2
           </span>
           <span
+            className="fp-badge-float"
             style={{
               padding: '6px 12px',
               borderRadius: 999,
@@ -95,7 +96,6 @@ export default function HeroFinanceiroPremium({
               color: '#bbf7d0',
               fontSize: 11,
               fontWeight: 900,
-              animation: 'fpBadgeFloat 3.2s ease-in-out infinite',
             }}
           >
             SaaS Live

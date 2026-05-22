@@ -1,0 +1,104 @@
+@keyframes fpFadeUp {
+  from {
+    transform: translateY(14px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes fpShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes fpGlowPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes fpBadgeFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes fpBarGrow {
+  from {
+    transform: scaleX(0.15);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes fpSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fp-page-root {
+  color: #e2e8f0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, #1a2332 0%, #0f172a 55%, #0b1220 100%);
+  min-height: 100%;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.fp-page-inner {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  display: grid;
+  gap: 20px;
+}
+
+.fp-animate-in {
+  opacity: 1 !important;
+  animation: fpFadeUp 0.5s ease;
+}
+
+.fp-shimmer {
+  background-size: 200% 100%;
+  animation: fpShimmer 1.6s ease-in-out infinite;
+}
+
+.fp-glow-pulse {
+  animation: fpGlowPulse 5s ease-in-out infinite;
+}
+
+.fp-badge-float {
+  animation: fpBadgeFloat 3s ease-in-out infinite;
+}
+
+.fp-bar-grow {
+  transform-origin: left center;
+  animation: fpBarGrow 0.7s ease;
+}
+
+.fp-spin {
+  animation: fpSpin 1s linear infinite;
+}

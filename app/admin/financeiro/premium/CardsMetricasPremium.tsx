@@ -73,6 +73,7 @@ export default function CardsMetricasPremium({ metricas, isMobile }: Props) {
         return (
           <div
             key={card.key}
+            className="fp-animate-in"
             style={{
               position: 'relative',
               overflow: 'hidden',
@@ -84,7 +85,6 @@ export default function CardsMetricasPremium({ metricas, isMobile }: Props) {
               WebkitBackdropFilter: 'blur(12px)',
               border: '1px solid rgba(255,255,255,0.12)',
               boxShadow: `${card.glow}, 0 16px 36px rgba(0,0,0,0.28)`,
-              animation: `fpFadeUp .5s ease ${index * 60}ms forwards`,
               transition: 'transform .22s ease, box-shadow .22s ease',
             }}
             onMouseEnter={(e) => {
