@@ -77,6 +77,45 @@ function labelMes(chave: string) {
   return data.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')
 }
 
+export function gerarGraficoMensalPadrao(): PontoGraficoMensal[] {
+  const hoje = inicioDoDia()
+  const pontos: PontoGraficoMensal[] = []
+
+  for (let i = 5; i >= 0; i -= 1) {
+    const data = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1)
+    const chave = chaveMes(data)
+    pontos.push({
+      mes: chave,
+      label: labelMes(chave),
+      recebido: 0,
+      previsto: 0,
+    })
+  }
+
+  return pontos
+}
+
+export function graficoSemDadosSuficientes(pontos: PontoGraficoMensal[]) {
+  if (!pontos.length) return true
+  return pontos.every((p) => p.recebido <= 0 && p.previsto <= 0)
+}
+
+export function normalizarPontosGrafico(pontos?: PontoGraficoMensal[]) {
+  const base = pontos?.length ? [...pontos] : gerarGraficoMensalPadrao()
+  const padrao = gerarGraficoMensalPadrao()
+  const mapa = new Map(base.map((p) => [p.mes, p]))
+
+  return padrao.map((mesPadrao) => {
+    const existente = mapa.get(mesPadrao.mes)
+    return {
+      mes: mesPadrao.mes,
+      label: existente?.label || mesPadrao.label,
+      recebido: Number(existente?.recebido) || 0,
+      previsto: Number(existente?.previsto) || 0,
+    }
+  })
+}
+
 function enrichirMensalidadeComAssinaturas(
   resumos: ResumoAssinatura[],
   assinaturas: AssinaturaAdmin[],
@@ -210,7 +249,7 @@ export function calcularMetricasFinanceiras(
     clientesVencendoHoje: vencendoHoje.length,
     mrrEstimado,
     ticketMedio,
-    graficoMensal,
+    graficoMensal: normalizarPontosGrafico(graficoMensal),
     ranking,
   }
 }

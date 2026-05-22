@@ -18,6 +18,7 @@ import {
   type MetricasFinanceiras,
   type RankingCliente,
 } from '@/lib/financeiro-admin'
+import GraficoMensalFinanceiro from './GraficoMensalFinanceiro'
 
 const ESTILOS_ANIMACAO = `
 @keyframes financeiroFadeUp {
@@ -94,14 +95,6 @@ export default function AdminFinanceiroPage() {
       ativo = false
     }
   }, [])
-
-  const maxGrafico = useMemo(() => {
-    if (!metricas) return 1
-    return Math.max(
-      1,
-      ...metricas.graficoMensal.map((p) => Math.max(p.recebido, p.previsto)),
-    )
-  }, [metricas])
 
   return (
     <div
@@ -268,83 +261,17 @@ export default function AdminFinanceiroPage() {
                   background:
                     'linear-gradient(180deg, rgba(30,41,59,0.72), rgba(15,23,42,0.88))',
                   padding: 18,
-                  animation: 'financeiroFadeUp .5s ease .1s both',
+                  opacity: 1,
+                  animation: 'financeiroFadeUp .5s ease .1s forwards',
                 }}
               >
                 <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 14, color: '#f8fafc' }}>
                   Gráfico mensal
                 </div>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
-                    gap: 8,
-                    alignItems: 'end',
-                    minHeight: 180,
-                  }}
-                >
-                  {metricas.graficoMensal.map((ponto) => {
-                    const alturaRecebido = Math.max(8, (ponto.recebido / maxGrafico) * 140)
-                    const alturaPrevisto = Math.max(6, (ponto.previsto / maxGrafico) * 140)
-
-                    return (
-                      <div
-                        key={ponto.mes}
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: 'flex',
-                            gap: 4,
-                            alignItems: 'flex-end',
-                            height: 150,
-                          }}
-                        >
-                          <div
-                            title={`Previsto ${formatarMoeda(ponto.previsto)}`}
-                            style={{
-                              width: isMobile ? 8 : 12,
-                              height: alturaPrevisto,
-                              borderRadius: 8,
-                              background: 'rgba(148,163,184,0.35)',
-                            }}
-                          />
-                          <div
-                            title={`Recebido ${formatarMoeda(ponto.recebido)}`}
-                            style={{
-                              width: isMobile ? 8 : 12,
-                              height: alturaRecebido,
-                              borderRadius: 8,
-                              background: 'linear-gradient(180deg,#22c55e,#16a34a)',
-                              boxShadow: '0 8px 18px rgba(34,197,94,0.25)',
-                            }}
-                          />
-                        </div>
-                        <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8' }}>
-                          {ponto.label}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: 16,
-                    marginTop: 12,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: '#94a3b8',
-                  }}
-                >
-                  <span>▢ Previsto</span>
-                  <span>▢ Recebido</span>
-                </div>
+                <GraficoMensalFinanceiro
+                  pontos={metricas.graficoMensal}
+                  isMobile={isMobile}
+                />
               </section>
 
               <section
@@ -354,7 +281,7 @@ export default function AdminFinanceiroPage() {
                   background:
                     'linear-gradient(180deg, rgba(30,41,59,0.72), rgba(15,23,42,0.88))',
                   padding: 18,
-                  animation: 'financeiroFadeUp .5s ease .15s both',
+                  animation: 'financeiroFadeUp .5s ease .15s forwards',
                 }}
               >
                 <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 14, color: '#f8fafc' }}>
@@ -393,7 +320,7 @@ export default function AdminFinanceiroPage() {
                 background:
                   'linear-gradient(180deg, rgba(30,41,59,0.72), rgba(15,23,42,0.88))',
                 padding: 18,
-                animation: 'financeiroFadeUp .5s ease .2s both',
+                animation: 'financeiroFadeUp .5s ease .2s forwards',
               }}
             >
               <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 12, color: '#f8fafc' }}>
