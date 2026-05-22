@@ -195,7 +195,9 @@ export default function PainelShell({
   const menu: MenuItem[] = useMemo(
     () => [
       { nome: 'Dashboard Gerencial', href: '/dashboard', icone: '📊' },
-      { nome: 'Financeiro Premium', href: '/admin/financeiro', icone: '📈', badge: 'SaaS' },
+      { nome: 'Central Admin', href: '/admin', icone: '🏛️', badge: 'SaaS' },
+      { nome: 'Painel Cliente', href: '/admin/painel-cliente', icone: '👤' },
+      { nome: 'Financeiro Premium', href: '/admin/financeiro', icone: '📈' },
       { nome: 'Cobrança Premium', href: '/admin/cobranca', icone: '💎' },
       { nome: 'Orçamentos', href: '/orcamentos', icone: '💰', destaque: true, badge: orcamentosBadge },
       { nome: 'Ordem de Serviço', href: '/ordens-servico', icone: '🔧', badge: osBadge },
