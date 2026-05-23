@@ -214,7 +214,9 @@ export async function POST(request: NextRequest) {
     return jsonError('Payload final do documento publico invalido.', 400)
   }
 
-  console.error('FINAL_DB_PAYLOAD', dbPayload)
+  if (process.env.NODE_ENV === 'development') {
+    console.error('FINAL_DB_PAYLOAD', dbPayload)
+  }
 
   const { data: existing, error: selectError } = await supabase
     .from('public_documents')

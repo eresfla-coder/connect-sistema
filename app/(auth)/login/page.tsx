@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { buildAuthCallbackUrl } from '@/lib/auth-recovery'
+import { buildAuthCallbackUrl, isRecoveryFromUrl } from '@/lib/auth-recovery'
 import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
 import { supabase } from '@/lib/supabase'
 
@@ -47,6 +47,12 @@ export default function LoginPage() {
   const router = useRouter()
 
   useEffect(() => {
+    if (isRecoveryFromUrl()) {
+      const hash = window.location.hash
+      router.replace(`/redefinir-senha${hash}`)
+      return
+    }
+
     const params = new URLSearchParams(window.location.search)
     if (params.get('senha') === 'atualizada') {
       setMensagemSucesso('Senha atualizada. Entre com a nova senha.')
@@ -57,7 +63,7 @@ export default function LoginPage() {
     } else if (erro) {
       setMensagemErro('Não foi possível concluir a recuperação de senha.')
     }
-  }, [])
+  }, [router])
 
   function limparMensagens() {
     setMensagemErro('')

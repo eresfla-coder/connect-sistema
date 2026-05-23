@@ -67,6 +67,7 @@ export default function BloqueadoPage() {
 
   async function sair() {
     await supabase.auth.signOut()
+    document.cookie = 'connect_auth=; path=/; max-age=0; samesite=lax'
     router.replace('/login')
   }
 

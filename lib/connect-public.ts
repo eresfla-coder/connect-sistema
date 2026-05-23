@@ -168,7 +168,9 @@ export async function savePublicDocument<TDocument, TConfig = unknown>({
     payload,
   }
 
-  console.error('FRONTEND_PUBLIC_DOC_BODY', requestBody)
+  if (process.env.NODE_ENV === 'development') {
+    console.error('FRONTEND_PUBLIC_DOC_BODY', requestBody)
+  }
 
   const response = await fetch('/api/public-docs', {
     method: 'POST',
