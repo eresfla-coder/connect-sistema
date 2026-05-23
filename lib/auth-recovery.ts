@@ -26,9 +26,13 @@ export function isRecoveryFromUrl() {
   )
 }
 
+import { getPublicAppOrigin } from '@/lib/app-url'
+
 export function buildAuthCallbackUrl(nextPath = '/redefinir-senha') {
-  if (typeof window === 'undefined') return '/auth/callback'
-  const url = new URL('/auth/callback', window.location.origin)
+  const origin = getPublicAppOrigin() || (typeof window !== 'undefined' ? window.location.origin : '')
+  if (!origin) return `/auth/callback?next=${encodeURIComponent(nextPath)}`
+
+  const url = new URL('/auth/callback', origin)
   url.searchParams.set('next', nextPath)
   return url.toString()
 }
