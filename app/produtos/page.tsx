@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { PRODUTOS_STORAGE_KEY } from '@/lib/connect-produtos'
 
 type Categoria = {
   id: number
@@ -23,7 +24,7 @@ type Produto = {
 }
 
 const CATEGORIAS_KEY = 'connect_categorias'
-const PRODUTOS_KEY = 'connect_produtos'
+const PRODUTOS_KEY = PRODUTOS_STORAGE_KEY
 
 const campo: CSSProperties = {
   width: '100%',

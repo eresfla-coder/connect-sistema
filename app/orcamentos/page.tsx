@@ -1,6 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import {
+  importarProdutosDeItensOrcamento,
+  lerProdutosParaOrcamento,
+  PRODUTOS_STORAGE_KEY,
+  registrarProdutoNoCatalogo,
+  type ProdutoOrcamento,
+} from '@/lib/connect-produtos'
 import { marcarPassoOnboarding } from '@/lib/onboarding'
 import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
 
@@ -19,11 +26,7 @@ type Cliente = {
   nomeFantasia?: string
 }
 
-type Produto = {
-  id: number
-  nome: string
-  valor: number
-}
+type Produto = ProdutoOrcamento
 
 type TipoCalculoItem = 'unidade' | 'm2'
 type StatusOrcamento = 'Pendente' | 'Aprovado' | 'Convertido' | 'Cancelado'
@@ -104,7 +107,6 @@ const FORMAS_KEY = 'connect_formas_pagamento'
 const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
 const OS_KEY = 'connect_ordens_servico_salvas'
 const VENDAS_KEY = 'connect_vendas_salvas'
-const PRODUTOS_KEY = 'connect_produtos'
 const CLIENTES_KEY = 'connect_clientes'
 
 const NOVO_CLIENTE_INICIAL = {
@@ -161,13 +163,6 @@ export default function OrcamentoPage() {
     { id: 2, nome: 'MARIA SOUZA', telefone: '84999998888', email: 'maria@email.com', endereco: 'RUA DAS FLORES,120' },
   ]
 
-  const produtosMock: Produto[] = [
-    { id: 1, nome: 'FORMATAÇÃO PC', valor: 100 },
-    { id: 2, nome: 'TROCA DE TELA', valor: 250 },
-    { id: 3, nome: 'LIMPEZA TÉCNICA', valor: 80 },
-    { id: 4, nome: 'FONTE PC 200W GOLDEN', valor: 129.9 },
-  ]
-
   const [isMobile, setIsMobile] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
   const [darkMode, setDarkMode] = useState(false)
@@ -193,10 +188,11 @@ export default function OrcamentoPage() {
 
   const [formasPagamento, setFormasPagamento] = useState<string[]>(['PIX', 'DINHEIRO', 'CARTAO 1X'])
   const [clientes, setClientes] = useState<Cliente[]>(clientesMock)
-  const [produtos, setProdutos] = useState<Produto[]>(produtosMock)
+  const [produtos, setProdutos] = useState<Produto[]>([])
 
   const [clienteBusca, setClienteBusca] = useState('')
   const [produtoBusca, setProdutoBusca] = useState('')
+  const [precoRapido, setPrecoRapido] = useState('')
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
   const [quantidade, setQuantidade] = useState(1)
 
@@ -229,6 +225,15 @@ export default function OrcamentoPage() {
     verificar()
     window.addEventListener('resize', verificar)
     return () => window.removeEventListener('resize', verificar)
+  }, [])
+
+  useEffect(() => {
+    const atualizar = () => setProdutos(lerProdutosParaOrcamento())
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PRODUTOS_STORAGE_KEY) atualizar()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
   }, [])
 
   useEffect(() => {
@@ -281,35 +286,24 @@ export default function OrcamentoPage() {
       } catch {}
     }
 
+    let listaOrcamentos: OrcamentoSalvo[] = []
     const salvos = localStorage.getItem(ORCAMENTOS_KEY)
     if (salvos) {
       try {
         const lista = JSON.parse(salvos)
         if (Array.isArray(lista)) {
-          setOrcamentosSalvos(
-            lista.map((item) => ({ ...item, status: normalizarStatus(item.status) }))
-          )
+          listaOrcamentos = lista.map((item) => ({
+            ...item,
+            status: normalizarStatus(item.status),
+          }))
+          setOrcamentosSalvos(listaOrcamentos)
         }
       } catch {}
     }
 
-    const salvosProdutos = localStorage.getItem(PRODUTOS_KEY)
-    if (salvosProdutos) {
-      try {
-        const lista = JSON.parse(salvosProdutos)
-        if (Array.isArray(lista) && lista.length > 0) {
-          const normalizados = lista
-            .map((produto: any, index: number) => ({
-              id: Number(produto?.id ?? index + 1),
-              nome: String(produto?.nome ?? produto?.descricao ?? '').trim(),
-              valor: Number(produto?.valor ?? produto?.preco ?? 0),
-            }))
-            .filter((produto: Produto) => produto.nome)
-
-          if (normalizados.length > 0) setProdutos(normalizados)
-        }
-      } catch {}
-    }
+    const itensHistorico = listaOrcamentos.flatMap((orcamento) => orcamento.itens || [])
+    importarProdutosDeItensOrcamento(itensHistorico)
+    setProdutos(lerProdutosParaOrcamento())
 
     const salvosClientes = localStorage.getItem(CLIENTES_KEY)
     if (salvosClientes) {
@@ -492,8 +486,49 @@ export default function OrcamentoPage() {
     return `${window.location.origin}/impressao-orcamento/${id}`
   }
 
+  function atualizarListaProdutosSalvos() {
+    setProdutos(lerProdutosParaOrcamento())
+  }
+
+  function gravarProdutoNaLista(produto: Produto, tipoCalculo: TipoCalculoItem) {
+    registrarProdutoNoCatalogo({
+      nome: produto.nome,
+      valor: produto.valor,
+      tipoCalculo,
+    })
+    atualizarListaProdutosSalvos()
+  }
+
+  function cadastrarProdutoRapido() {
+    const nome = produtoBusca.trim()
+    if (!nome) {
+      notificar('Digite o nome do produto.', 'error')
+      return
+    }
+
+    const valor = Number(String(precoRapido).replace(',', '.')) || 0
+    if (valor <= 0) {
+      notificar('Informe o valor do produto.', 'error')
+      return
+    }
+
+    const salvo = registrarProdutoNoCatalogo({
+      nome,
+      valor,
+      tipoCalculo: modoItem,
+    })
+    atualizarListaProdutosSalvos()
+    adicionarOuAtualizarProduto({
+      id: salvo.id,
+      nome: salvo.nome,
+      valor: salvo.preco,
+      tipoCalculo: modoItem,
+    })
+  }
+
   function limparCamposItem() {
     setProdutoBusca('')
+    setPrecoRapido('')
     setQuantidade(1)
     setModoItem('unidade')
     setLarguraItem(0)
@@ -564,6 +599,7 @@ export default function OrcamentoPage() {
         notificar('Item adicionado.')
       }
 
+      gravarProdutoNaLista(produto, 'unidade')
       limparCamposItem()
       return
     }
@@ -620,6 +656,7 @@ export default function OrcamentoPage() {
       notificar('Item por m² adicionado.')
     }
 
+    gravarProdutoNaLista(produto, 'm2')
     limparCamposItem()
   }
 
@@ -1450,8 +1487,11 @@ export default function OrcamentoPage() {
                       setProdutoBusca(e.target.value)
                       setMostrarBuscaProduto(true)
                     }}
-                    onFocus={() => setMostrarBuscaProduto(true)}
-                    placeholder="Pesquisar produto..."
+                    onFocus={() => {
+                      setMostrarBuscaProduto(true)
+                      atualizarListaProdutosSalvos()
+                    }}
+                    placeholder="Escolha ou pesquise um produto salvo..."
                     style={inputStyle}
                   />
 
@@ -1501,24 +1541,81 @@ export default function OrcamentoPage() {
 
                 {mostrarBuscaProduto && (
                   <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-                    {produtosFiltrados.map((produto) => (
-                      <button
-                        key={produto.id}
-                        onClick={() => adicionarOuAtualizarProduto(produto)}
+                    {produtos.length > 0 && (
+                      <div style={{ fontSize: 12, fontWeight: 800, color: colors.muted }}>
+                        {produtos.length} produto(s) salvos — toque para escolher sem digitar de novo
+                      </div>
+                    )}
+
+                    {produtos.length === 0 && !produtoBusca.trim() && (
+                      <div style={{ fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>
+                        Nenhum produto salvo ainda. Cadastre em Produtos ou use o cadastro rápido abaixo ao digitar o nome.
+                      </div>
+                    )}
+
+                    <div style={{ maxHeight: 220, overflowY: 'auto', display: 'grid', gap: 8 }}>
+                      {produtosFiltrados.map((produto) => (
+                        <button
+                          key={produto.id}
+                          type="button"
+                          onClick={() => {
+                            if (produto.tipoCalculo === 'm2') setModoItem('m2')
+                            else if (produto.tipoCalculo === 'unidade') setModoItem('unidade')
+                            adicionarOuAtualizarProduto(produto)
+                          }}
+                          style={{
+                            textAlign: 'left',
+                            border: `1px solid ${colors.inputBorder}`,
+                            background: colors.inputBg,
+                            color: colors.text,
+                            borderRadius: 10,
+                            padding: 10,
+                            cursor: 'pointer',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {produto.nome} •{' '}
+                          {modoItem === 'm2' || produto.tipoCalculo === 'm2'
+                            ? `${moeda(produto.valor)} / m²`
+                            : moeda(produto.valor)}
+                        </button>
+                      ))}
+                    </div>
+
+                    {produtoBusca.trim() && produtosFiltrados.length === 0 && (
+                      <div
                         style={{
-                          textAlign: 'left',
-                          border: `1px solid ${colors.inputBorder}`,
-                          background: colors.inputBg,
-                          color: colors.text,
-                          borderRadius: 10,
-                          padding: 10,
-                          cursor: 'pointer',
-                          fontWeight: 700,
+                          border: `1px dashed ${colors.inputBorder}`,
+                          borderRadius: 12,
+                          padding: 12,
+                          display: 'grid',
+                          gap: 10,
                         }}
                       >
-                        {produto.nome} • {modoItem === 'm2' ? `${moeda(produto.valor)} / m²` : moeda(produto.valor)}
-                      </button>
-                    ))}
+                        <div style={{ fontSize: 13, fontWeight: 800, color: colors.text }}>
+                          Salvar &quot;{produtoBusca.trim()}&quot; na lista para usar depois
+                        </div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={precoRapido}
+                          onChange={(e) => setPrecoRapido(e.target.value)}
+                          placeholder={modoItem === 'm2' ? 'Valor por m²' : 'Valor unitário'}
+                          style={inputStyle}
+                        />
+                        <button
+                          type="button"
+                          onClick={cadastrarProdutoRapido}
+                          style={{
+                            ...buttonBase,
+                            background: '#16a34a',
+                            color: '#fff',
+                          }}
+                        >
+                          Salvar na lista e adicionar ao orçamento
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
