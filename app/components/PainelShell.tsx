@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
+import {
+  isPasswordRecoveryPending,
+  isRecoveryFromUrl,
+  markPasswordRecoveryPending,
+} from '@/lib/auth-recovery'
 import { supabase } from '@/lib/supabase'
 
 type MenuItem = {
@@ -42,6 +47,7 @@ export default function PainelShell({
     const path = pathname || ''
     return (
       path === '/login' ||
+      path === '/redefinir-senha' ||
       path === '/bloqueado' ||
       path.startsWith('/publico') ||
       path.startsWith('/view') ||
@@ -103,10 +109,21 @@ export default function PainelShell({
       return
     }
 
+    if (isRecoveryFromUrl()) {
+      markPasswordRecoveryPending()
+      router.replace('/redefinir-senha')
+      return
+    }
+
     let componenteAtivo = true
 
     async function verificarAcesso() {
       try {
+        if (isPasswordRecoveryPending()) {
+          router.replace('/redefinir-senha')
+          return
+        }
+
         const { data: authData, error: authError } = await supabase.auth.getUser()
 
         if (!componenteAtivo) return
@@ -158,8 +175,14 @@ export default function PainelShell({
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       if (!componenteAtivo) return
+
+      if (event === 'PASSWORD_RECOVERY') {
+        markPasswordRecoveryPending()
+        router.replace('/redefinir-senha')
+        return
+      }
 
       if (!session?.user) {
         setPerfil(null)

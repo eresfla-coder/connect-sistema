@@ -1,7 +1,8 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { buildAuthCallbackUrl } from '@/lib/auth-recovery'
 import { DEFAULT_LOGO_PATH } from '@/lib/connect-public'
 import { supabase } from '@/lib/supabase'
 
@@ -15,7 +16,7 @@ function venceuPerfil(vencimento?: string | null) {
 }
 
 export default function LoginPage() {
-  const [modo, setModo] = useState<'entrar' | 'criar'>('entrar')
+  const [modo, setModo] = useState<'entrar' | 'criar' | 'esqueci'>('entrar')
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [confirmarSenha, setConfirmarSenha] = useState('')
@@ -23,6 +24,19 @@ export default function LoginPage() {
   const [mensagemErro, setMensagemErro] = useState('')
   const [mensagemSucesso, setMensagemSucesso] = useState('')
   const router = useRouter()
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('senha') === 'atualizada') {
+      setMensagemSucesso('Senha atualizada. Entre com a nova senha.')
+    }
+    const erro = params.get('erro')
+    if (erro === 'link-invalido' || erro === 'sessao-recuperacao') {
+      setMensagemErro('Link de recuperação inválido ou expirado. Solicite um novo e-mail.')
+    } else if (erro) {
+      setMensagemErro('Não foi possível concluir a recuperação de senha.')
+    }
+  }, [])
 
   function limparMensagens() {
     setMensagemErro('')
@@ -95,6 +109,40 @@ export default function LoginPage() {
       router.push(redirectTo?.startsWith('/') ? redirectTo : '/dashboard')
     } catch (err) {
       setMensagemErro('Ocorreu um erro ao validar seu acesso.')
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleEsqueciSenha(e: FormEvent) {
+    e.preventDefault()
+    limparMensagens()
+
+    if (!email.trim()) {
+      setMensagemErro('Digite o e-mail cadastrado.')
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: buildAuthCallbackUrl('/redefinir-senha'),
+      })
+
+      if (error) {
+        setMensagemErro(error.message || 'Não foi possível enviar o e-mail de recuperação.')
+        return
+      }
+
+      setMensagemSucesso(
+        'Enviamos um link para seu e-mail. Abra o link e defina a nova senha antes de entrar no painel.'
+      )
+      setModo('entrar')
+      setSenha('')
+    } catch (err) {
+      setMensagemErro('Erro ao solicitar recuperação de senha.')
       console.error(err)
     } finally {
       setLoading(false)
@@ -329,35 +377,50 @@ export default function LoginPage() {
                 letterSpacing: 3,
               }}
             >
-              {modo === 'entrar' ? 'Autenticação de Sistema' : 'Cadastro de Usuário'}
+              {modo === 'entrar'
+                ? 'Autenticação de Sistema'
+                : modo === 'criar'
+                ? 'Cadastro de Usuário'
+                : 'Recuperação de Senha'}
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-            <button
-              type="button"
-              onClick={() => {
-                limparMensagens()
-                setModo('entrar')
-              }}
-              style={toggleStyle(modo === 'entrar')}
-            >
-              ENTRAR
-            </button>
+          {modo !== 'esqueci' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  limparMensagens()
+                  setModo('entrar')
+                }}
+                style={toggleStyle(modo === 'entrar')}
+              >
+                ENTRAR
+              </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                limparMensagens()
-                setModo('criar')
-              }}
-              style={toggleStyle(modo === 'criar')}
-            >
-              CRIAR CONTA
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => {
+                  limparMensagens()
+                  setModo('criar')
+                }}
+                style={toggleStyle(modo === 'criar')}
+              >
+                CRIAR CONTA
+              </button>
+            </div>
+          ) : null}
 
-          <form onSubmit={modo === 'entrar' ? handleEntrar : handleCriarConta} style={{ display: 'grid', gap: 16 }}>
+          <form
+            onSubmit={
+              modo === 'entrar'
+                ? handleEntrar
+                : modo === 'criar'
+                ? handleCriarConta
+                : handleEsqueciSenha
+            }
+            style={{ display: 'grid', gap: 16 }}
+          >
             <div>
               <label style={{ display: 'block', marginBottom: 8, color: '#cbd5e1', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.4 }}>
                 E-mail de acesso
@@ -372,19 +435,44 @@ export default function LoginPage() {
               />
             </div>
 
-            <div>
-              <label style={{ display: 'block', marginBottom: 8, color: '#cbd5e1', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.4 }}>
-                Senha
-              </label>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                style={inputStyle}
-              />
-            </div>
+            {modo !== 'esqueci' ? (
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, color: '#cbd5e1', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.4 }}>
+                  Senha
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+            ) : null}
+
+            {modo === 'entrar' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  limparMensagens()
+                  setModo('esqueci')
+                }}
+                style={{
+                  width: '100%',
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#f97316',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  padding: 0,
+                }}
+              >
+                Esqueci minha senha
+              </button>
+            ) : null}
 
             {modo === 'criar' && (
               <div>
@@ -438,11 +526,39 @@ export default function LoginPage() {
               {loading
                 ? modo === 'entrar'
                   ? 'VALIDANDO ACESSO...'
-                  : 'CRIANDO CONTA...'
+                  : modo === 'criar'
+                  ? 'CRIANDO CONTA...'
+                  : 'ENVIANDO E-MAIL...'
                 : modo === 'entrar'
                 ? 'ENTRAR NO PAINEL'
-                : 'CRIAR CONTA'}
+                : modo === 'criar'
+                ? 'CRIAR CONTA'
+                : 'ENVIAR LINK DE RECUPERAÇÃO'}
             </button>
+
+            {modo === 'esqueci' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  limparMensagens()
+                  setModo('entrar')
+                }}
+                style={{
+                  width: '100%',
+                  height: 48,
+                  borderRadius: 14,
+                  border: '1px solid rgba(255,255,255,0.10)',
+                  background: 'rgba(255,255,255,0.05)',
+                  color: '#e5e7eb',
+                  fontSize: 12,
+                  fontWeight: 900,
+                  letterSpacing: 1.4,
+                  cursor: 'pointer',
+                }}
+              >
+                VOLTAR PARA ENTRAR
+              </button>
+            ) : null}
 
             <button
               type="button"

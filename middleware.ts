@@ -6,6 +6,8 @@ export function middleware(request: NextRequest) {
 
   const rotasPublicas = [
     '/login',
+    '/redefinir-senha',
+    '/auth/callback',
     '/bloqueado',
     '/favicon.ico',
     '/logo-connect.png',
