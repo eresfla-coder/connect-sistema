@@ -13,6 +13,7 @@ import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
 import { supabase } from '@/lib/supabase'
 import OnboardingPremium from './OnboardingPremium'
 import TrialBanner from './TrialBanner'
+import TransicaoSuave from './TransicaoSuave'
 
 type MenuItem = {
   nome: string
@@ -569,7 +570,7 @@ export default function PainelShell({
 
         <main style={{ flex: 1, padding: 20 }}>
           <TrialBanner info={infoTrial} isMobile={isMobile} />
-          {children}
+          <TransicaoSuave>{children}</TransicaoSuave>
         </main>
       </div>
       <OnboardingPremium />

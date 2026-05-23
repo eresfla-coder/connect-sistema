@@ -10,7 +10,13 @@ import {
   executarAutomacao,
   executarTodasAutomacoes,
   listarAutomacoesPendentes,
+  ROTULO_AUTOMACAO,
 } from '@/lib/growth-automacao'
+import {
+  adicionarHistoricoCrm,
+  lerMetaCrm,
+  salvarMetaCrm,
+} from '@/lib/growth-crm-meta'
 import {
   lerConfigGrowth,
   lerLeads,
@@ -81,9 +87,30 @@ export default function AdminGrowthPage() {
       <div style={{ fontSize: 12, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2 }}>
         GROWTH · CONVERSÃO
       </div>
-      <h1 style={{ fontSize: 36, fontWeight: 900, margin: '8px 0 20px' }}>
-        Máquina de captação e retenção
+      <h1 style={{ fontSize: 36, fontWeight: 900, margin: '8px 0 12px' }}>
+        Painel master · Comercial SaaS
       </h1>
+      <p style={{ color: '#94a3b8', marginBottom: 20, maxWidth: 720 }}>
+        Captação, retenção e receita em um só lugar — integrado à cobrança admin existente.
+      </p>
+
+      {!carregando ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+            gap: 10,
+            marginBottom: 20,
+          }}
+        >
+          <MetricaCard titulo="MRR" valor={formatarMoeda(analytics.mrrReal)} />
+          <MetricaCard titulo="ARR" valor={formatarMoeda(analytics.arr)} />
+          <MetricaCard titulo="Retenção" valor={`${analytics.retencaoPct}%`} />
+          <MetricaCard titulo="Churn" valor={`${analytics.churnRate}%`} />
+          <MetricaCard titulo="Leads" valor={String(crm.totaisComercial.lead)} />
+          <MetricaCard titulo="Trials" valor={String(crm.totaisComercial.trial)} />
+        </div>
+      ) : null}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
         {(
@@ -136,9 +163,11 @@ export default function AdminGrowthPage() {
           </div>
           <BarraFunil
             etapas={[
-              { nome: 'Leads', qtd: crm.totais.lead },
-              { nome: 'Trials', qtd: crm.totais.trial },
-              { nome: 'Clientes', qtd: crm.totais.convertido },
+              { nome: 'Leads', qtd: crm.totaisComercial.lead },
+              { nome: 'Trials', qtd: crm.totaisComercial.trial },
+              { nome: 'Ativos', qtd: crm.totaisComercial.ativo },
+              { nome: 'Atrasados', qtd: crm.totaisComercial.atrasado },
+              { nome: 'Cancelados', qtd: crm.totaisComercial.cancelado },
             ]}
           />
         </section>
@@ -146,11 +175,11 @@ export default function AdminGrowthPage() {
 
       {!carregando && aba === 'crm' ? (
         <section style={{ display: 'grid', gap: 16 }}>
-          <CrmBloco titulo="Leads" itens={crm.leads} />
-          <CrmBloco titulo="Trials" itens={crm.trials} />
-          <CrmBloco titulo="Convertidos" itens={crm.convertidos} />
-          <CrmBloco titulo="Cancelados" itens={crm.cancelados} />
-          <CrmBloco titulo="Recuperação" itens={crm.recuperacao} />
+          <CrmBloco titulo="Leads" itens={crm.leads} onRefresh={carregar} />
+          <CrmBloco titulo="Trials" itens={crm.trials} onRefresh={carregar} />
+          <CrmBloco titulo="Ativos" itens={crm.ativos} onRefresh={carregar} />
+          <CrmBloco titulo="Atrasados" itens={crm.atrasados} onRefresh={carregar} />
+          <CrmBloco titulo="Cancelados" itens={crm.cancelados} onRefresh={carregar} />
         </section>
       ) : null}
 
@@ -165,17 +194,35 @@ export default function AdminGrowthPage() {
             }}
           >
             <MetricaCard titulo="MRR real" valor={formatarMoeda(analytics.mrrReal)} />
-            <MetricaCard titulo="MRR estimado" valor={formatarMoeda(analytics.mrrEstimado)} />
+            <MetricaCard titulo="ARR" valor={formatarMoeda(analytics.arr)} />
             <MetricaCard titulo="Churn" valor={`${analytics.churnRate}%`} />
+            <MetricaCard titulo="Retenção" valor={`${analytics.retencaoPct}%`} />
             <MetricaCard titulo="ARPA" valor={formatarMoeda(analytics.arpa)} />
-            <MetricaCard
-              titulo="Crescimento mensal"
-              valor={`${analytics.crescimentoMensalPct}%`}
-            />
-            <MetricaCard
-              titulo="Receita prevista"
-              valor={formatarMoeda(analytics.receitaPrevista)}
-            />
+            <MetricaCard titulo="Crescimento" valor={`${analytics.crescimentoMensalPct}%`} />
+            <MetricaCard titulo="Receita prevista" valor={formatarMoeda(analytics.receitaPrevista)} />
+            <MetricaCard titulo="Teste" valor={String(analytics.clientesPorPlano.teste)} />
+            <MetricaCard titulo="Profissional" valor={String(analytics.clientesPorPlano.profissional)} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
+            <Card titulo="Top clientes">
+              {analytics.topClientes.map((c) => (
+                <div key={c.nome} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                  <span>{c.nome}</span>
+                  <strong>{formatarMoeda(c.valor)}</strong>
+                </div>
+              ))}
+            </Card>
+            <Card titulo="Previsão de conversão (média trials)">
+              <div style={{ fontSize: 32, fontWeight: 900 }}>
+                {crm.trials.length
+                  ? Math.round(
+                      crm.trials.reduce((t, i) => t + i.previsaoConversao, 0) / crm.trials.length,
+                    )
+                  : 0}
+                %
+              </div>
+              <div style={{ color: '#94a3b8', fontSize: 13 }}>Baseado em engajamento e vencimento</div>
+            </Card>
           </div>
           <div
             style={{
@@ -208,7 +255,14 @@ export default function AdminGrowthPage() {
               Salvar parâmetros
             </button>
           </div>
-          <GraficoBarras pontos={analytics.metricas.graficoMensal} />
+          <GraficoBarras titulo="Receita mensal" pontos={analytics.metricas.graficoMensal} />
+          <GraficoBarras
+            titulo="Crescimento (previsto vs base)"
+            pontos={analytics.metricas.graficoMensal.map((p) => ({
+              ...p,
+              recebido: p.previsto,
+            }))}
+          />
         </section>
       ) : null}
 
@@ -239,7 +293,7 @@ export default function AdminGrowthPage() {
             </button>
           </div>
           <p style={{ color: '#94a3b8', marginBottom: 12 }}>
-            Trial vencendo → WhatsApp · Cobrança atrasada → lembrete · Renovação → mensagem
+            Trial iniciado · 3 dias · vencido · cobrança · renovação · boas-vindas — sempre em nova aba (PWA/ mobile).
           </p>
           <div style={{ display: 'grid', gap: 8 }}>
             {automacoes.length === 0 ? (
@@ -261,7 +315,9 @@ export default function AdminGrowthPage() {
                 >
                   <div>
                     <strong>{a.cliente}</strong>
-                    <div style={{ fontSize: 12, color: '#94a3b8' }}>{a.tipo}</div>
+                    <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                      {ROTULO_AUTOMACAO[a.tipo] || a.tipo}
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -324,7 +380,23 @@ function BarraFunil({
   )
 }
 
-function CrmBloco({ titulo, itens }: { titulo: string; itens: ItemCrm[] }) {
+function CrmBloco({
+  titulo,
+  itens,
+  onRefresh,
+}: {
+  titulo: string
+  itens: ItemCrm[]
+  onRefresh: () => void
+}) {
+  const [selecionado, setSelecionado] = useState<string | null>(null)
+  const item = itens.find((i) => i.id === selecionado)
+  const [obs, setObs] = useState('')
+
+  useEffect(() => {
+    if (item) setObs(item.observacoes || lerMetaCrm(item.id).observacoes)
+  }, [item])
+
   return (
     <div
       style={{
@@ -340,23 +412,92 @@ function CrmBloco({ titulo, itens }: { titulo: string; itens: ItemCrm[] }) {
       {itens.length === 0 ? (
         <div style={{ color: '#64748b', fontSize: 13 }}>Vazio</div>
       ) : (
-        <div style={{ display: 'grid', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
-          {itens.slice(0, 20).map((item) => (
-            <div
-              key={item.id}
+        <div style={{ display: 'grid', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+          {itens.slice(0, 25).map((row) => (
+            <button
+              key={row.id}
+              type="button"
+              onClick={() => setSelecionado(row.id)}
               style={{
+                textAlign: 'left',
                 fontSize: 13,
-                padding: 8,
+                padding: 10,
                 borderRadius: 8,
-                background: 'rgba(255,255,255,0.04)',
+                border:
+                  selecionado === row.id
+                    ? '1px solid rgba(249,115,22,0.5)'
+                    : '1px solid rgba(255,255,255,0.06)',
+                background:
+                  selecionado === row.id ? 'rgba(249,115,22,0.12)' : 'rgba(255,255,255,0.04)',
+                color: '#fff',
+                cursor: 'pointer',
               }}
             >
-              <strong>{item.nome}</strong> · {item.email}
-              {item.valor > 0 ? ` · ${formatarMoeda(item.valor)}` : ''}
-            </div>
+              <strong>{row.nome}</strong>
+              <div style={{ color: '#94a3b8', fontSize: 12 }}>
+                {row.origem} · {row.statusComercial} · conv. {row.previsaoConversao}%
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                {row.tags.map((t) => (
+                  <span
+                    key={t}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      background: 'rgba(59,130,246,0.2)',
+                    }}
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </button>
           ))}
         </div>
       )}
+      {item ? (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Observações internas</div>
+          <textarea
+            value={obs}
+            onChange={(e) => setObs(e.target.value)}
+            rows={3}
+            style={{ ...inputAdmin, width: '100%', resize: 'vertical' }}
+          />
+          <button
+            type="button"
+            style={{ ...btnAcao, marginTop: 8 }}
+            onClick={() => {
+              const meta = lerMetaCrm(item.id)
+              meta.observacoes = obs
+              salvarMetaCrm(item.id, meta)
+              adicionarHistoricoCrm(item.id, 'Observação atualizada pelo admin')
+              onRefresh()
+              alert('Salvo.')
+            }}
+          >
+            Salvar observação
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function Card({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        padding: 16,
+        borderRadius: 14,
+        background: 'rgba(255,255,255,0.05)',
+        border: '1px solid rgba(255,255,255,0.08)',
+      }}
+    >
+      <div style={{ fontWeight: 900, marginBottom: 10 }}>{titulo}</div>
+      {children}
     </div>
   )
 }
@@ -378,14 +519,16 @@ function MetricaCard({ titulo, valor }: { titulo: string; valor: string }) {
 }
 
 function GraficoBarras({
+  titulo,
   pontos,
 }: {
+  titulo: string
   pontos: { label: string; recebido: number; previsto: number }[]
 }) {
   const max = Math.max(...pontos.map((p) => Math.max(p.recebido, p.previsto)), 1)
   return (
     <div style={{ marginTop: 20, display: 'grid', gap: 10 }}>
-      <div style={{ fontWeight: 900 }}>Crescimento mensal (recebido)</div>
+      <div style={{ fontWeight: 900 }}>{titulo}</div>
       <div
         style={{
           display: 'flex',

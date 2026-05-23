@@ -75,6 +75,27 @@ const DEPOIMENTOS = [
 const SUPORTE_WA =
   process.env.NEXT_PUBLIC_CONNECT_SUPORTE_WHATSAPP || '5584992181399'
 
+const BADGES = [
+  'WhatsApp integrado',
+  'OS automática',
+  'Aprovação online',
+  'PDF premium',
+  'Multiempresa',
+]
+
+const PASSOS = [
+  { n: '1', t: 'Cadastre sua empresa', d: 'Logo, cores e dados em minutos.' },
+  { n: '2', t: 'Crie orçamentos', d: 'Envie pelo WhatsApp com um clique.' },
+  { n: '3', t: 'Converta em OS', d: 'Fluxo técnico e recibos no mesmo painel.' },
+  { n: '4', t: 'Cobre e renove', d: 'Trial, CRM e automação SaaS integrados.' },
+]
+
+const PRINTS = [
+  { titulo: 'Orçamentos', cor: '#f97316', linhas: ['Cliente: Maria', 'Total: R$ 1.240', 'Status: Enviado WA'] },
+  { titulo: 'Ordem de Serviço', cor: '#3b82f6', linhas: ['OS #1042', 'Técnico: João', 'Checklist OK'] },
+  { titulo: 'Painel SaaS', cor: '#22c55e', linhas: ['MRR: R$ 4.850', 'Trials: 12', 'Churn: 4%'] },
+]
+
 export default function LandingGrowthPage() {
   const router = useRouter()
   const [isMobile, setIsMobile] = useState(false)
@@ -199,13 +220,13 @@ export default function LandingGrowthPage() {
             </div>
             <h1
               style={{
-                fontSize: isMobile ? 34 : 52,
+                fontSize: isMobile ? 34 : 56,
                 fontWeight: 900,
                 lineHeight: 1.05,
                 margin: '0 0 16px',
               }}
             >
-              Orçamento, OS e cobrança no{' '}
+              Venda mais com o SaaS que une{' '}
               <span
                 style={{
                   background: 'linear-gradient(90deg,#f97316,#22c55e)',
@@ -213,13 +234,20 @@ export default function LandingGrowthPage() {
                   WebkitTextFillColor: 'transparent',
                 }}
               >
-                mesmo painel
+                orçamento, OS e cobrança
               </span>
             </h1>
-            <p style={{ color: '#cbd5e1', fontSize: 17, lineHeight: 1.6, maxWidth: 520 }}>
-              Máquina de captação e retenção: trial automático, CRM SaaS, analytics
-              e automação WhatsApp — sem planilha.
+            <p style={{ color: '#cbd5e1', fontSize: 18, lineHeight: 1.6, maxWidth: 540, fontWeight: 600 }}>
+              Headline de conversão: teste grátis em 2 minutos, cliente recebe no WhatsApp,
+              você acompanha trial e renovação no painel Growth.
             </p>
+            <div className="lg-badges">
+              {BADGES.map((b) => (
+                <span key={b} className="lg-badge">
+                  ✓ {b}
+                </span>
+              ))}
+            </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 22 }}>
               <Link href="/login?criar=1" style={{ ...linkCta, padding: '14px 22px', fontSize: 15 }}>
                 Começar teste grátis →
@@ -306,6 +334,19 @@ export default function LandingGrowthPage() {
         </div>
       </section>
 
+      <section className="lg-section lg-animate-in">
+        <h2 style={tituloSecao}>Como funciona</h2>
+        <div className="lg-steps">
+          {PASSOS.map((p) => (
+            <div key={p.n} className="lg-step">
+              <div style={{ fontSize: 28, fontWeight: 900, color: '#f97316' }}>{p.n}</div>
+              <div style={{ fontWeight: 900, marginTop: 8 }}>{p.t}</div>
+              <div style={{ color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>{p.d}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="lg-section">
         <h2 style={tituloSecao}>Prints do sistema</h2>
         <div
@@ -315,29 +356,31 @@ export default function LandingGrowthPage() {
             gap: 14,
           }}
         >
-          {[
-            { t: 'Orçamentos + WhatsApp', c: 'linear-gradient(135deg,#f97316,#ea580c)' },
-            { t: 'Ordem de Serviço', c: 'linear-gradient(135deg,#3b82f6,#2563eb)' },
-            { t: 'Painel SaaS / Cobrança', c: 'linear-gradient(135deg,#22c55e,#16a34a)' },
-          ].map((card) => (
-            <div
-              key={card.t}
-              className="lg-animate-in"
-              style={{
-                borderRadius: 18,
-                padding: 20,
-                minHeight: 160,
-                background: card.c,
-                display: 'grid',
-                placeItems: 'center',
-                fontWeight: 900,
-                textAlign: 'center',
-                boxShadow: '0 16px 36px rgba(0,0,0,0.25)',
-              }}
-            >
-              {card.t}
-              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 8 }}>
-                preview premium
+          {PRINTS.map((card) => (
+            <div key={card.titulo} className="lg-print-mock lg-animate-in">
+              <div className="lg-print-bar">
+                <span className="lg-dot" />
+                <span className="lg-dot" />
+                <span className="lg-dot" />
+                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 800 }}>{card.titulo}</span>
+              </div>
+              <div style={{ padding: 16 }}>
+                {card.linhas.map((linha) => (
+                  <div
+                    key={linha}
+                    style={{
+                      marginBottom: 10,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      background: 'rgba(255,255,255,0.05)',
+                      borderLeft: `3px solid ${card.cor}`,
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {linha}
+                  </div>
+                ))}
               </div>
             </div>
           ))}
@@ -345,7 +388,36 @@ export default function LandingGrowthPage() {
       </section>
 
       <section className="lg-section">
-        <h2 style={tituloSecao}>Planos</h2>
+        <h2 style={tituloSecao}>Compare os planos</h2>
+        <div className="lg-compare-wrap" style={{ marginBottom: 28 }}>
+          <table className="lg-compare-table">
+            <thead>
+              <tr>
+                <th>Recurso</th>
+                <th>Teste</th>
+                <th>Profissional</th>
+                <th>Empresa</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                ['Orçamentos + WhatsApp', '✓', '✓', '✓'],
+                ['OS + recibos', '✓', '✓', '✓'],
+                ['CRM Growth', '—', '✓', '✓'],
+                ['Automação WA', 'Básica', '✓', '✓'],
+                ['Analytics MRR', '—', '✓', 'Premium'],
+              ].map((row) => (
+                <tr key={row[0]}>
+                  <td>{row[0]}</td>
+                  <td>{row[1]}</td>
+                  <td>{row[2]}</td>
+                  <td>{row[3]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <h2 style={{ ...tituloSecao, fontSize: 24 }}>Escolha seu plano</h2>
         <div className="lg-grid-plans">
           {PLANOS.map((plano) => (
             <div

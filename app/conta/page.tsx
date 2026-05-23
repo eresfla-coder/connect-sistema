@@ -11,6 +11,13 @@ import {
 import { lerConfigEmpresaLocal, type ConfigEmpresaCompleta } from '@/lib/connect-public'
 import { montarMensagemRenovacao } from '@/lib/financeiro-admin'
 import { carregarPerfilUsuario } from '@/lib/sync-perfil'
+import {
+  lerConsumoPlano,
+  limitesDoPlano,
+  percentualUso,
+  planoDoStatus,
+  rotuloPlano,
+} from '@/lib/growth-plano'
 import { abrirWhatsAppComTelefone } from '@/lib/whatsapp-abrir'
 import { supabase } from '@/lib/supabase'
 
@@ -168,6 +175,38 @@ export default function ContaClientePage() {
   }
 
   const bloqueado = perfilAcessoBloqueado(perfil)
+  const plano = planoDoStatus(perfil.status)
+  const limites = limitesDoPlano(plano)
+  const consumo = lerConsumoPlano()
+
+  const usoItens = [
+    { nome: 'Orçamentos', usado: consumo.orcamentos, limite: limites.orcamentos },
+    { nome: 'Ordens de serviço', usado: consumo.ordensServico, limite: limites.ordensServico },
+    { nome: 'Clientes', usado: consumo.clientes, limite: limites.clientes },
+    { nome: 'Recibos', usado: consumo.recibos, limite: limites.recibos },
+  ]
+
+  function msgPlano(acao: string) {
+    const nome = resumo?.nomeCliente || 'cliente'
+    return `Olá! Sou ${nome} (${perfil?.email}). Quero ${acao} no Connect Sistema. Plano atual: ${rotuloPlano(plano)}.`
+  }
+
+  function trocarPlano() {
+    if (!telefoneSuporte) {
+      alert('Configure o suporte em Configurações.')
+      return
+    }
+    abrirWhatsAppComTelefone(telefoneSuporte, msgPlano('trocar de plano'))
+  }
+
+  function cancelarAssinatura() {
+    if (!confirm('Deseja solicitar o cancelamento da assinatura?')) return
+    if (!telefoneSuporte) {
+      alert('Configure o suporte em Configurações.')
+      return
+    }
+    abrirWhatsAppComTelefone(telefoneSuporte, msgPlano('cancelar minha assinatura'))
+  }
 
   return (
     <div style={{ color: '#fff', maxWidth: 900, margin: '0 auto' }}>
@@ -192,6 +231,58 @@ export default function ContaClientePage() {
           {trial.textoBanner}
         </div>
       ) : null}
+
+      <Card titulo={`Consumo do plano · ${rotuloPlano(plano)}`}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          {usoItens.map((item) => {
+            const pct = percentualUso(item.usado, item.limite)
+            return (
+              <div key={item.nome}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700 }}>
+                  <span>{item.nome}</span>
+                  <span>
+                    {item.usado} / {item.limite}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    marginTop: 6,
+                    height: 10,
+                    borderRadius: 999,
+                    background: 'rgba(255,255,255,0.08)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${pct}%`,
+                      height: '100%',
+                      background:
+                        pct >= 90
+                          ? 'linear-gradient(90deg,#ef4444,#f97316)'
+                          : 'linear-gradient(90deg,#22c55e,#16a34a)',
+                      transition: 'width .3s ease',
+                    }}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <button type="button" onClick={trocarPlano} style={btnSecundario}>
+            Trocar plano
+          </button>
+          <button type="button" onClick={renovarSistema} style={btnVerde}>
+            Renovar assinatura
+          </button>
+          <button type="button" onClick={cancelarAssinatura} style={btnOutline}>
+            Cancelar assinatura
+          </button>
+        </div>
+      </Card>
+
+      <div style={{ height: 14 }} />
 
       <div
         style={{
@@ -232,7 +323,8 @@ export default function ContaClientePage() {
         </Card>
       </div>
 
-      <Card titulo="Pagamentos recentes">
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14, marginBottom: 16 }}>
+        <Card titulo="Pagamentos">
         {pagamentos.length === 0 ? (
           <div style={{ color: '#94a3b8' }}>Nenhum pagamento registrado ainda.</div>
         ) : (
@@ -257,7 +349,20 @@ export default function ContaClientePage() {
             ))}
           </div>
         )}
-      </Card>
+        </Card>
+
+        <Card titulo="Recibos e documentos">
+          <p style={{ color: '#94a3b8', fontSize: 14, lineHeight: 1.5, margin: '0 0 12px' }}>
+            Acesse recibos emitidos e comprovantes sem sair do ecossistema Connect.
+          </p>
+          <Link href="/recibos" style={linkStyle}>
+            Ver recibos →
+          </Link>
+          <Link href="/recibo-avulso" style={{ ...linkStyle, display: 'block', marginTop: 8 }}>
+            Recibo avulso →
+          </Link>
+        </Card>
+      </div>
 
       <div
         style={{
@@ -267,7 +372,7 @@ export default function ContaClientePage() {
           marginTop: 16,
         }}
       >
-        <Card titulo="Ações rápidas">
+        <Card titulo="Suporte premium">
           <button type="button" onClick={suporteWhatsApp} style={btnVerde}>
             💬 Suporte WhatsApp
           </button>
@@ -381,5 +486,27 @@ const btnVerde: React.CSSProperties = {
   background: 'linear-gradient(135deg,#22c55e,#16a34a)',
   color: '#fff',
   fontWeight: 900,
+  cursor: 'pointer',
+}
+
+const btnSecundario: React.CSSProperties = {
+  minHeight: 42,
+  border: 'none',
+  borderRadius: 12,
+  padding: '0 14px',
+  background: 'linear-gradient(135deg,#3b82f6,#2563eb)',
+  color: '#fff',
+  fontWeight: 800,
+  cursor: 'pointer',
+}
+
+const btnOutline: React.CSSProperties = {
+  minHeight: 42,
+  border: '1px solid rgba(255,255,255,0.18)',
+  borderRadius: 12,
+  padding: '0 14px',
+  background: 'transparent',
+  color: '#fecaca',
+  fontWeight: 800,
   cursor: 'pointer',
 }

@@ -1,4 +1,4 @@
-const CACHE = 'connect-static-v1'
+const CACHE = 'connect-static-v2'
 const ASSETS = ['/manifest.json', '/logo-connect.png']
 
 self.addEventListener('install', (event) => {

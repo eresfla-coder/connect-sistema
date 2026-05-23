@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { dataIsoVencimentoTrial, perfilAcessoBloqueado } from '@/lib/acesso-saas'
+import { adicionarHistoricoCrm } from '@/lib/growth-crm-meta'
 import { lerLeadPendente, marcarLeadConvertido } from '@/lib/growth-store'
 import { supabase } from '@/lib/supabase'
 
@@ -158,6 +159,9 @@ export default function LoginPage() {
       }
 
       marcarLeadConvertido(email)
+      if (userId) {
+        adicionarHistoricoCrm(userId, `Trial iniciado — origem: ${lead?.origem || 'cadastro'}`)
+      }
       setMensagemSucesso(
         'Conta criada com teste grátis ativo. Faça login e comece o onboarding.',
       )

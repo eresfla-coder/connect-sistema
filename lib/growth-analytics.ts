@@ -10,7 +10,9 @@ import type { PainelCrm } from '@/lib/growth-crm'
 export type AnalyticsSaaS = {
   mrrReal: number
   mrrEstimado: number
+  arr: number
   churnRate: number
+  retencaoPct: number
   arpa: number
   cacManual: number
   ltvCacRatio: number
@@ -18,6 +20,8 @@ export type AnalyticsSaaS = {
   receitaPrevista: number
   clientesAtivos: number
   clientesPerdidos: number
+  clientesPorPlano: { teste: number; profissional: number; empresa: number }
+  topClientes: { nome: string; valor: number }[]
   metricas: MetricasFinanceiras
 }
 
@@ -58,10 +62,28 @@ export function calcularAnalyticsSaaS(
   const receitaPrevista =
     config.metaMrr > 0 ? config.metaMrr : metricas.faturamentoPrevistoMes
 
+  const arr = mrrReal * 12
+  const retencaoPct = Math.max(0, 100 - churnRate)
+
+  const clientesPorPlano = { teste: 0, profissional: 0, empresa: 0 }
+  for (const r of resumos) {
+    const s = String(r.perfil.status || '').toLowerCase()
+    if (s === 'teste') clientesPorPlano.teste += 1
+    else if (s === 'empresa') clientesPorPlano.empresa += 1
+    else clientesPorPlano.profissional += 1
+  }
+
+  const topClientes = [...resumos]
+    .sort((a, b) => b.valorMensalidade - a.valorMensalidade)
+    .slice(0, 5)
+    .map((r) => ({ nome: r.nomeCliente, valor: r.valorMensalidade }))
+
   return {
     mrrReal,
     mrrEstimado,
+    arr,
     churnRate,
+    retencaoPct,
     arpa,
     cacManual,
     ltvCacRatio,
@@ -69,6 +91,8 @@ export function calcularAnalyticsSaaS(
     receitaPrevista,
     clientesAtivos,
     clientesPerdidos,
+    clientesPorPlano,
+    topClientes,
     metricas,
   }
 }
