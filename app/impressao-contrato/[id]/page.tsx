@@ -1,20 +1,23 @@
-'use client'
+import type { Metadata } from 'next'
+import { buildMetadataContratoPublico } from '@/lib/metadataDocumentoPublico'
+import ImpressaoContratoClient from './ImpressaoContratoClient'
 
-import { Suspense } from 'react'
-import { Loader2 } from 'lucide-react'
+type PageProps = {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ token?: string; v?: string }>
+}
 
-import ContratoDocumentoPage from '@/components/documentos/ContratoDocumentoPage'
+export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
+  const { id } = await params
+  const sp = await searchParams
+  return buildMetadataContratoPublico({
+    documentoId: id,
+    token: sp.token || null,
+    pathPrefix: '/impressao-contrato',
+    versaoUrl: sp.v || null,
+  })
+}
 
 export default function Page() {
-  return (
-    <Suspense
-      fallback={
-        <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#fff' }}>
-          <Loader2 className="animate-spin" size={32} />
-        </div>
-      }
-    >
-      <ContratoDocumentoPage />
-    </Suspense>
-  )
+  return <ImpressaoContratoClient />
 }

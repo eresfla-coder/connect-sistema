@@ -108,7 +108,10 @@ function ReciboPublicoInner() {
       onVoltar={() => {}}
       onNovo={() => {}}
       onEnviarLink={() => {}}
-      onPdf={() => abrirReciboPdfEmNovaJanela(dados)}
+      onPdf={() => {
+        const ok = abrirReciboPdfEmNovaJanela(dados)
+        if (!ok) alert('Não foi possível abrir o PDF. Verifique se pop-ups estão liberados.')
+      }}
     />
   )
 }

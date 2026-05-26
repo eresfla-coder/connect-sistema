@@ -177,6 +177,13 @@ export default function FinanceiroModule({ embedded = false }: Props) {
     }
   }, [])
 
+  useEffect(() => {
+    try {
+      const buscaOs = new URLSearchParams(window.location.search).get('busca')
+      if (buscaOs) setBusca(buscaOs)
+    } catch {}
+  }, [])
+
   async function atualizarLista(lista: FinanceiroTitulo[]) {
     salvarTitulosFinanceiros(lista)
     const atualizados = lerTitulosFinanceiros()

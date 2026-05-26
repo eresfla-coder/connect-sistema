@@ -17,6 +17,11 @@ export default function PagamentoPage() {
               <div style={{ marginTop: 8, fontSize: 38, fontWeight: 950 }}>R$ 49,90</div>
               <div style={{ color: '#cbd5e1', marginTop: 6 }}>por mês</div>
             </div>
+            <div style={{ padding: 20, borderRadius: 24, background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(147,197,253,0.24)' }}>
+              <div style={{ color: '#bfdbfe', fontWeight: 900, fontSize: 12, letterSpacing: 1.2, textTransform: 'uppercase' }}>Plano anual • melhor custo-benefício</div>
+              <div style={{ marginTop: 8, fontSize: 38, fontWeight: 950 }}>R$ 479,00</div>
+              <div style={{ color: '#cbd5e1', marginTop: 6 }}>por ano</div>
+            </div>
             <div style={{ padding: 20, borderRadius: 24, background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.22)' }}>
               <div style={{ color: '#86efac', fontWeight: 900, fontSize: 12, letterSpacing: 1.2, textTransform: 'uppercase' }}>Incluso</div>
               <ul style={{ margin: '10px 0 0', paddingLeft: 18, color: '#dcfce7', lineHeight: 1.8 }}>

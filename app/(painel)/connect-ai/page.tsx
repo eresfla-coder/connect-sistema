@@ -1,6 +1,10 @@
 'use client'
 
 import { CSSProperties, useEffect, useMemo, useState } from 'react'
+import ModuloPremiumGate from '@/components/assinatura/ModuloPremiumGate'
+import { SeletorClienteCadastrado } from '@/components/clientes/SeletorClienteCadastrado'
+import { abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
+import { enderecoClienteCompleto, type ClienteCadastro } from '@/lib/clientesCadastro'
 
 const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
 const OS_KEY = 'connect_ordens_servico_salvas'
@@ -63,15 +67,13 @@ function copiar(texto: string) {
 }
 
 function abrirWhatsApp(telefone: string, texto: string) {
-  const tel = normalizarTelefone(telefone)
-  const url = tel
-    ? `https://wa.me/${tel}?text=${encodeURIComponent(texto)}`
-    : `https://wa.me/?text=${encodeURIComponent(texto)}`
-  window.open(url, '_blank', 'noopener,noreferrer')
+  abrirWhatsappUrl(montarUrlWhatsapp(normalizarTelefone(telefone), texto))
 }
 
 export default function ConnectAIPage() {
   const [tipo, setTipo] = useState<TipoFerramenta>('whatsapp')
+  const [clienteId, setClienteId] = useState('')
+  const [clienteSelecionado, setClienteSelecionado] = useState<ClienteCadastro | null>(null)
   const [cliente, setCliente] = useState('')
   const [telefone, setTelefone] = useState('')
   const [contexto, setContexto] = useState('')
@@ -110,13 +112,36 @@ export default function ConnectAIPage() {
     return lista
   }, [metricas])
 
+  function preencherClienteIA(cad: ClienteCadastro | null) {
+    setClienteSelecionado(cad)
+    if (!cad) {
+      setClienteId('')
+      return
+    }
+    setClienteId(String(cad.id))
+    setCliente(cad.nome)
+    setTelefone(cad.telefone)
+    const partes: string[] = []
+    if (cad.cpfCnpj) partes.push(`Documento: ${cad.cpfCnpj}`)
+    if (cad.email) partes.push(`E-mail: ${cad.email}`)
+    const end = enderecoClienteCompleto(cad)
+    if (end) partes.push(`Endereço: ${end}`)
+    const nomeBusca = cad.nome.toLowerCase()
+    const osRel = dados.os.filter((o) => String(o?.cliente || '').toLowerCase().includes(nomeBusca)).slice(0, 2)
+    const orcRel = dados.orcamentos.filter((o) => String(o?.cliente?.nome || o?.cliente || '').toLowerCase().includes(nomeBusca)).slice(0, 2)
+    if (osRel.length) partes.push(`OS recentes: ${osRel.map((o) => `${o?.numero || o?.id || ''} (${o?.status || 'aberta'})`).join(', ')}`)
+    if (orcRel.length) partes.push(`Orçamentos: ${orcRel.map((o) => `${o?.numero || o?.id || ''}`).join(', ')}`)
+    if (partes.length) setContexto(partes.join('\n'))
+  }
+
   function gerarTexto() {
     const nome = cliente.trim() || 'cliente'
     const extra = contexto.trim()
+    const docCliente = clienteSelecionado?.cpfCnpj ? `\nDocumento: ${clienteSelecionado.cpfCnpj}` : ''
     let texto = ''
 
     if (tipo === 'whatsapp') {
-      texto = `Olá ${nome}, tudo bem?\n\nPassando para te atualizar sobre seu atendimento aqui na Connect. ${extra || 'Se precisar, posso te enviar mais detalhes por aqui.'}\n\nFico à disposição.`
+      texto = `Olá ${nome}, tudo bem?${docCliente}\n\nPassando para te atualizar sobre seu atendimento aqui na Connect. ${extra || 'Se precisar, posso te enviar mais detalhes por aqui.'}\n\nFico à disposição.`
     }
 
     if (tipo === 'os') {
@@ -161,6 +186,7 @@ export default function ConnectAIPage() {
   }
 
   return (
+    <ModuloPremiumGate modulo="connect_ai">
     <div style={{ display: 'grid', gap: 18, paddingBottom: 40 }}>
       <section style={{ borderRadius: 26, padding: 22, color: '#fff', background: 'linear-gradient(135deg,#0f172a 0%,#1d4ed8 54%,#06b6d4 100%)', boxShadow: '0 20px 45px rgba(37,99,235,.22)', overflow: 'hidden', position: 'relative' }}>
         <div style={{ position: 'absolute', right: -80, top: -80, width: 240, height: 240, borderRadius: 999, background: 'rgba(255,255,255,.12)' }} />
@@ -212,9 +238,15 @@ export default function ConnectAIPage() {
             ))}
           </div>
 
+          <SeletorClienteCadastrado
+            valueId={clienteId}
+            onSelecionar={preencherClienteIA}
+            label="Cliente cadastrado"
+          />
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10 }}>
-            <label style={{ display: 'grid', gap: 6, fontWeight: 900, color: '#334155', fontSize: 13 }}>Cliente
-              <input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Nome do cliente" style={inputStyle} />
+            <label style={{ display: 'grid', gap: 6, fontWeight: 900, color: '#334155', fontSize: 13 }}>Cliente (manual)
+              <input value={cliente} onChange={(e) => { setClienteId(''); setClienteSelecionado(null); setCliente(e.target.value) }} placeholder="Nome do cliente" style={inputStyle} />
             </label>
             <label style={{ display: 'grid', gap: 6, fontWeight: 900, color: '#334155', fontSize: 13 }}>Telefone / WhatsApp
               <input value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="84999999999" style={inputStyle} />
@@ -282,6 +314,7 @@ export default function ConnectAIPage() {
         }
       `}</style>
     </div>
+    </ModuloPremiumGate>
   )
 }
 

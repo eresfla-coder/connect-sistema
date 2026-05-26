@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 
 type LeadStatus = 'quente' | 'acompanhar' | 'aguardando' | 'cobrar' | 'concluido'
 
@@ -79,7 +80,7 @@ function abrirWhatsApp(telefone: string, mensagem: string) {
     alert('Este cliente não tem telefone cadastrado.')
     return
   }
-  window.open(`https://wa.me/${tel}?text=${encodeURIComponent(mensagem)}`, '_blank', 'noopener,noreferrer')
+  abrirWhatsappUrl(montarUrlWhatsapp(tel, mensagem))
 }
 
 function lerLista(chave: string) {

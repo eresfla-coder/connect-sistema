@@ -4,9 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
-import { emailDoUsuarioAuth, isAdminEmail } from "@/lib/access";
+import { emailDoUsuarioAuth, isAdminMaster } from "@/lib/access";
 import { readLocalCloudPayload } from "@/lib/connect-cloud-storage";
 import { installDemoGuard, isDemoMode, sairDemoMode } from "@/lib/connect-demo";
+import dynamic from "next/dynamic";
+import ConnectToastProvider from "@/components/ui/ConnectToast";
+import WhatsAppFallbackBar from "@/components/WhatsAppFallbackBar";
+import { WHATSAPP_FALLBACK_EVENT } from "@/lib/abrirExterno";
+
+const TrialBanner = dynamic(() => import("@/components/assinatura/TrialBanner"), { ssr: false });
+
+const OnboardingChecklistPanel = dynamic(
+  () => import("@/components/onboarding/OnboardingChecklistPanel"),
+  { ssr: false },
+);
 
 type MenuItem = {
   nome: string;
@@ -21,6 +32,36 @@ const OS_KEY = "connect_ordens_servico_salvas";
 const FINANCEIRO_KEY = "connect_financeiro_titulos";
 const WHATSAPP_SUPORTE = "5584992181399";
 const THEME_KEY = "connect_theme";
+
+async function obterEmailLogadoPainel(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const userSessao = session?.user ?? null;
+
+  let email =
+    String(userSessao?.email || "").trim().toLowerCase() ||
+    emailDoUsuarioAuth(userSessao);
+
+  if (!email) {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (!error && user) {
+      email =
+        String(user.email || "").trim().toLowerCase() ||
+        emailDoUsuarioAuth(user);
+    }
+  }
+
+  if (!email && userSessao?.id) {
+    const { data: perfil } = await supabase
+      .from("perfis")
+      .select("email")
+      .eq("id", userSessao.id)
+      .maybeSingle<{ email?: string | null }>();
+
+    email = String(perfil?.email || "").trim().toLowerCase();
+  }
+
+  return email;
+}
 
 export default function PainelLayout({
   children,
@@ -43,6 +84,7 @@ export default function PainelLayout({
   const [saindo, setSaindo] = useState(false);
   const [adminLogado, setAdminLogado] = useState(false);
   const [demoAtivo, setDemoAtivo] = useState(false);
+  const [whatsappFallbackUrl, setWhatsappFallbackUrl] = useState<string | null>(null);
 
 
   useEffect(() => {
@@ -60,25 +102,37 @@ export default function PainelLayout({
   useEffect(() => {
     let ativo = true;
 
-    async function resolverAdmin() {
+    async function aplicarAdminDetectado(email: string) {
+      const adminMaster = isAdminMaster(email);
+      if (adminMaster) {
+        console.log("[PainelShell] email admin detectado, adminMaster", {
+          email: email || "(vazio)",
+          adminMaster,
+        });
+      }
+      if (!ativo) return;
+      setAdminLogado(adminMaster);
+    }
+
+    async function resolverAdmin(tentativas = 5) {
       try {
         if (isDemoMode()) {
           if (ativo) setAdminLogado(false);
           return;
         }
 
-        const { data: { session } } = await supabase.auth.getSession();
-        let email = emailDoUsuarioAuth(session?.user ?? null);
-
-        if (!email) {
-          const { data: { user }, error } = await supabase.auth.getUser();
-          if (!error && user) {
-            email = emailDoUsuarioAuth(user);
+        for (let i = 1; i <= tentativas; i += 1) {
+          const email = await obterEmailLogadoPainel();
+          if (email && isAdminMaster(email)) {
+            await aplicarAdminDetectado(email);
+            return;
+          }
+          if (i < tentativas) {
+            await new Promise((resolve) => setTimeout(resolve, 180 + i * 120));
+          } else if (ativo) {
+            setAdminLogado(isAdminMaster(email));
           }
         }
-
-        if (!ativo) return;
-        setAdminLogado(isAdminEmail(email));
       } catch {
         if (ativo) setAdminLogado(false);
       }
@@ -92,8 +146,15 @@ export default function PainelLayout({
         setAdminLogado(false);
         return;
       }
-      const email = emailDoUsuarioAuth(session?.user ?? null);
-      setAdminLogado(isAdminEmail(email));
+      const email =
+        String(session?.user?.email || "").trim().toLowerCase() ||
+        emailDoUsuarioAuth(session?.user ?? null);
+      if (isAdminMaster(email)) {
+        void aplicarAdminDetectado(email);
+        return;
+      }
+
+      void resolverAdmin(3);
     });
 
     const onFocus = () => {
@@ -193,6 +254,15 @@ export default function PainelLayout({
       setAvisoTrial(aviso);
     } catch {}
   }, [pathname]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const url = String((event as CustomEvent<{ url?: string }>).detail?.url || "").trim();
+      if (url) setWhatsappFallbackUrl(url);
+    };
+    window.addEventListener(WHATSAPP_FALLBACK_EVENT, handler);
+    return () => window.removeEventListener(WHATSAPP_FALLBACK_EVENT, handler);
+  }, []);
 
   useEffect(() => {
     function atualizarRelogio() {
@@ -304,7 +374,7 @@ export default function PainelLayout({
     () => [
       { nome: "Dashboard", href: "/dashboard", icone: "📊" },
       ...(adminLogado
-        ? [{ nome: "Admin SaaS", href: "/admin", icone: "🛡️", destaque: true } as MenuItem]
+        ? [{ nome: "Painel Admin", href: "/admin", icone: "🛡️", destaque: true } as MenuItem]
         : []),
       {
         nome: "Orçamentos",
@@ -325,7 +395,7 @@ export default function PainelLayout({
       { nome: "Connect AI", href: "/connect-ai", icone: "✨", destaque: true },
       { nome: "Produtos", href: "/produtos", icone: "📦" },
       { nome: "Financeiro", href: "/financeiro", icone: "💸" },
-      { nome: "Planos", href: "/planos", icone: "👑", destaque: true },
+      { nome: "Assinatura", href: "/assinatura", icone: "💳" },
       { nome: "Config", href: "/configuracoes", icone: "⚙️" },
     ],
     [orcamentosBadge, osBadge, resumoCRMBadge, adminLogado],
@@ -374,12 +444,12 @@ export default function PainelLayout({
           shadow: "0 14px 30px rgba(34,197,94,.22)",
           border: "1px solid rgba(190,242,100,.35)",
         },
-        Planos: {
+        Assinatura: {
           bg: "linear-gradient(135deg,#f59e0b 0%,#2563eb 52%,#1e1b4b 100%)",
           shadow: "0 14px 30px rgba(245,158,11,.22)",
           border: "1px solid rgba(251,191,36,.38)",
         },
-        "Admin SaaS": {
+        "Painel Admin": {
           bg: "linear-gradient(135deg,#111827 0%,#7c3aed 52%,#0f172a 100%)",
           shadow: "0 14px 30px rgba(124,58,237,.26)",
           border: "1px solid rgba(196,181,253,.38)",
@@ -491,7 +561,7 @@ export default function PainelLayout({
             boxShadow: "0 10px 22px rgba(124,58,237,.22)",
           }}
         >
-          🛡️ Admin
+          🛡️ Painel Admin
         </Link>
       ) : null}
 
@@ -943,7 +1013,7 @@ export default function PainelLayout({
                     boxShadow: "0 10px 22px rgba(124,58,237,.22)",
                   }}
                 >
-                  🛡️ Admin SaaS
+                  🛡️ Painel Admin
                 </Link>
               ) : null}
               <div style={{ textAlign: "right" }}>
@@ -1008,9 +1078,13 @@ export default function PainelLayout({
             </div>
           )}
 
+          {!adminLogado && <TrialBanner />}
           <div className="connect-page-transition-shell">{children}</div>
         </main>
       </div>
+      <WhatsAppFallbackBar url={whatsappFallbackUrl} onFechar={() => setWhatsappFallbackUrl(null)} />
+      <ConnectToastProvider />
+      <OnboardingChecklistPanel />
     </div>
   );
 }

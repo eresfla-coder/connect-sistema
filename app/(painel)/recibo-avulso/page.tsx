@@ -6,122 +6,26 @@ import extenso from 'extenso'
 
 import { ReciboEmitidoView, type DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
 import { abrirReciboPdfEmNovaJanela } from '@/lib/recibo-print-html'
+import { abrirWhatsappAposPrepararLink } from '@/lib/abrirExterno'
+import { SeletorClienteCadastrado } from '@/components/clientes/SeletorClienteCadastrado'
+import type { ClienteCadastro } from '@/lib/clientesCadastro'
+import {
+  gerarLinkPublicoRecibo,
+  montarMensagemWhatsappRecibo,
+  normalizarTelefoneWhatsapp,
+  RECIBO_VISUALIZACAO_KEY,
+} from '@/lib/recibo-publico'
 
 type DadosRecibo = DadosReciboEmitido
 
-const RECIBO_KEY = 'connect_recibo_visualizacao'
+const RECIBO_KEY = RECIBO_VISUALIZACAO_KEY
 const CONFIG_KEY = 'connect_configuracoes'
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://painel.appconnectpro.com.br').replace(/\/$/, '')
 
 function moeda(valor?: number) {
   return Number(valor || 0).toLocaleString('pt-BR', {
     style: 'currency',
     currency: 'BRL',
   })
-}
-
-function normalizarTelefoneWhatsapp(valor?: string) {
-  let telefone = String(valor || '').replace(/\D/g, '')
-
-  if (!telefone) return ''
-
-  while (telefone.startsWith('00')) {
-    telefone = telefone.slice(2)
-  }
-
-  if (telefone.startsWith('55')) {
-    telefone = telefone.slice(2)
-  }
-
-  telefone = telefone.replace(/^0+/, '')
-
-  if (telefone.length > 11) {
-    telefone = telefone.slice(-11)
-  }
-
-  if (telefone.length < 10) return ''
-
-  return `55${telefone}`
-}
-
-function gerarToken() {
-  try {
-    return crypto.randomUUID().replace(/-/g, '')
-  } catch {
-    return `${Date.now()}${Math.random().toString(36).slice(2)}`
-  }
-}
-
-function prepararPayloadReciboPublico(dados: DadosRecibo) {
-  try {
-    const payload = JSON.parse(JSON.stringify(dados)) as DadosRecibo
-    const logoUrl = payload.config?.logoUrl
-    if (typeof logoUrl === 'string' && logoUrl.startsWith('data:') && logoUrl.length > 120_000) {
-      payload.config = { ...payload.config, logoUrl: '' }
-    }
-    return payload
-  } catch (error) {
-    console.error('[RECIBO_PUBLICO] Payload inválido para serialização:', error)
-    return dados
-  }
-}
-
-async function gerarLinkPublicoRecibo(dados: DadosRecibo): Promise<string> {
-  const documentId = String(Date.now())
-  const token = gerarToken()
-  const snapshotDoRecibo = prepararPayloadReciboPublico(dados)
-
-  const body = {
-    document_type: 'recibo',
-    document_id: documentId,
-    token,
-    payload: snapshotDoRecibo,
-  }
-
-  if (process.env.NODE_ENV === 'development') {
-    console.error('[RECIBO_PUBLICO] POST /api/public-docs body', body)
-  }
-
-  try {
-    const response = await fetch('/api/public-docs', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    })
-
-    const raw = await response.text()
-    let json: { success?: boolean; error?: string; token?: string; document_id?: string } | null = null
-    try {
-      json = raw ? JSON.parse(raw) : null
-    } catch {
-      json = null
-    }
-
-    if (response.ok && json?.success !== false) {
-      return `${SITE_URL}/visualizar/recibo/${documentId}?token=${encodeURIComponent(token)}`
-    }
-
-    console.error('[RECIBO_PUBLICO] Falha POST /api/public-docs', {
-      status: response.status,
-      statusText: response.statusText,
-      body: json ?? raw,
-      request: { document_type: 'recibo', document_id: documentId, token },
-    })
-
-    const msgApi = String(json?.error || '').trim()
-    alert(
-      msgApi
-        ? `Não foi possível gerar o link público do recibo.\n\n${msgApi}`
-        : 'Não foi possível gerar o link público do recibo. Verifique sua conexão e tente novamente.',
-    )
-  } catch (error) {
-    console.error('[RECIBO_PUBLICO] Erro de rede ao salvar documento público:', error)
-    alert('Não foi possível gerar o link público do recibo. Verifique sua conexão e tente novamente.')
-  }
-
-  return ''
 }
 
 function hojeInput() {
@@ -187,6 +91,9 @@ export default function ReciboAvulsoPage() {
   const router = useRouter()
   const [dados, setDados] = useState<DadosRecibo | null>(null)
   const [isMobile, setIsMobile] = useState(false)
+  const [loadingWhatsapp, setLoadingWhatsapp] = useState(false)
+  const [loadingPdf, setLoadingPdf] = useState(false)
+  const [clienteId, setClienteId] = useState('')
   const [form, setForm] = useState<DadosRecibo>({
     nomeCliente: '',
     clienteTelefone: '',
@@ -226,6 +133,26 @@ export default function ReciboAvulsoPage() {
 
   useEffect(() => {
     try {
+      const raw = sessionStorage.getItem('connect_recibo_prefill')
+      if (!raw) return
+      const pre = JSON.parse(raw)
+      sessionStorage.removeItem('connect_recibo_prefill')
+      setForm((old) => ({
+        ...old,
+        nomeCliente: pre?.nomeCliente || old.nomeCliente,
+        clienteTelefone: pre?.clienteTelefone || old.clienteTelefone,
+        referente: pre?.referente || old.referente,
+        valorNumero: pre?.valorNumero != null ? String(pre.valorNumero) : old.valorNumero,
+        dataRecibo: pre?.dataRecibo || old.dataRecibo,
+        formaPagamento: pre?.formaPagamento || old.formaPagamento,
+        observacao: pre?.observacao || old.observacao,
+        config: { ...old.config, ...(pre?.config || {}) },
+      }))
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
       const paramsRecibo = new URLSearchParams(window.location.search)
       if (paramsRecibo.get('preview') !== '1') return
       const payload = paramsRecibo.get('d')
@@ -256,6 +183,19 @@ export default function ReciboAvulsoPage() {
 
   function atualizar<K extends keyof DadosRecibo>(campo: K, valor: DadosRecibo[K]) {
     setForm((old) => ({ ...old, [campo]: valor }))
+  }
+
+  function preencherClienteCadastro(cliente: ClienteCadastro | null) {
+    if (!cliente) {
+      setClienteId('')
+      return
+    }
+    setClienteId(String(cliente.id))
+    setForm((old) => ({
+      ...old,
+      nomeCliente: cliente.nome,
+      clienteTelefone: cliente.telefone,
+    }))
   }
 
   function selecionarPaleta(primaria: string, secundaria: string) {
@@ -337,63 +277,40 @@ export default function ReciboAvulsoPage() {
   const formaPagamento = dados?.formaPagamento || form.formaPagamento || 'Pix'
 
   async function enviarWhatsApp() {
-    if (!dados) return
+    if (!dados || loadingWhatsapp) return
 
     const telefone = normalizarTelefoneWhatsapp(dados?.clienteTelefone)
-    const link = await gerarLinkPublicoRecibo(dados)
-    if (!link) return
-
-    let mensagem = `Olá ${dados?.nomeCliente || 'cliente'}!\n\n`
-    mensagem += `Segue seu recibo.\n`
-    mensagem += `Referente a: ${dados?.referente || 'pagamento'}.\n`
-    mensagem += `\n🔗 Acesse aqui:\n${link}`
-
-    const texto = encodeURIComponent(mensagem)
-
-    const url = isMobile
-      ? telefone
-        ? `whatsapp://send?phone=${telefone}&text=${texto}`
-        : `whatsapp://send?text=${texto}`
-      : telefone
-        ? `https://wa.me/${telefone}?text=${texto}`
-        : `https://wa.me/?text=${texto}`
-
-    if (isMobile) {
-      window.location.href = url
-      return
+    setLoadingWhatsapp(true)
+    try {
+      await abrirWhatsappAposPrepararLink({
+        telefone,
+        linkRapido: '',
+        prepararLinkCompleto: async () => gerarLinkPublicoRecibo(dados),
+        montarMensagem: (link) => montarMensagemWhatsappRecibo(dados, link),
+      })
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Não foi possível enviar pelo WhatsApp.'
+      alert(msg)
+    } finally {
+      setLoadingWhatsapp(false)
     }
-
-    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   function fecharRecibo() {
-    window.close()
-
-    setTimeout(() => {
-      document.body.innerHTML = `
-        <div style="
-          min-height:100vh;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          font-family:Arial, sans-serif;
-          background:#f8fafc;
-          color:#111827;
-          flex-direction:column;
-          gap:12px;
-          text-align:center;
-          padding:24px;
-        ">
-          <h2 style="margin:0;font-size:28px;">Recibo finalizado</h2>
-          <p style="margin:0;color:#475569;font-size:16px;">Você já pode fechar esta aba.</p>
-        </div>
-      `
-    }, 300)
+    try {
+      window.close()
+    } catch {}
+    router.push('/ordens-servico')
   }
 
   function abrirVisualizacaoPDF() {
-    if (!dados) return
-    abrirReciboPdfEmNovaJanela(dados)
+    if (!dados || loadingPdf) return
+    setLoadingPdf(true)
+    window.setTimeout(() => {
+      const ok = abrirReciboPdfEmNovaJanela(dados)
+      setLoadingPdf(false)
+      if (!ok) alert('Não foi possível abrir o PDF. Verifique se pop-ups estão liberados ou tente novamente.')
+    }, 80)
   }
 
   if (!dados) {
@@ -457,8 +374,10 @@ export default function ReciboAvulsoPage() {
               </div>
             </div>
 
+            <SeletorClienteCadastrado valueId={clienteId} onSelecionar={preencherClienteCadastro} />
+
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
-              <Campo label="Cliente" value={form.nomeCliente || ''} onChange={(v) => atualizar('nomeCliente', v)} placeholder="Nome do cliente" />
+              <Campo label="Cliente" value={form.nomeCliente || ''} onChange={(v) => { setClienteId(''); atualizar('nomeCliente', v) }} placeholder="Nome do cliente" />
               <Campo label="Telefone / WhatsApp" value={form.clienteTelefone || ''} onChange={(v) => atualizar('clienteTelefone', v)} placeholder="84999999999" />
               <Campo label="Referente" value={form.referente || ''} onChange={(v) => atualizar('referente', v)} placeholder="Serviço, venda, entrada, parcela..." />
               <Campo label="Valor" value={String(form.valorNumero || '')} onChange={(v) => atualizar('valorNumero', v)} placeholder="150,00" />
@@ -504,6 +423,8 @@ export default function ReciboAvulsoPage() {
       onNovo={novoRecibo}
       onEnviarLink={enviarWhatsApp}
       onPdf={abrirVisualizacaoPDF}
+      loadingWhatsapp={loadingWhatsapp}
+      loadingPdf={loadingPdf}
     />
   )
 }

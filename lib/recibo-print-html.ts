@@ -1,5 +1,6 @@
 import extenso from 'extenso'
 import type { DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
+import { abrirNovaAbaOuMesma } from '@/lib/abrirExterno'
 
 function escapeHtml(valor: string) {
   return String(valor || '')
@@ -41,7 +42,7 @@ function emojiPagamento(forma?: string) {
   return '💵'
 }
 
-export function abrirReciboPdfEmNovaJanela(dados: DadosReciboEmitido) {
+export function abrirReciboPdfEmNovaJanela(dados: DadosReciboEmitido): boolean {
   const valorNumerico = (() => {
     const valor = parseFloat(String(dados?.valorNumero || 0).replace(',', '.'))
     return Number.isNaN(valor) ? 0 : valor
@@ -190,9 +191,29 @@ export function abrirReciboPdfEmNovaJanela(dados: DadosReciboEmitido) {
       </html>
     `
 
-  const janela = window.open('', '_blank')
-  if (!janela) return
-  janela.document.open()
-  janela.document.write(html)
-  janela.document.close()
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const blobUrl = URL.createObjectURL(blob)
+
+  const abriu = abrirNovaAbaOuMesma(blobUrl)
+  if (abriu) {
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
+    return true
+  }
+
+  const janela = window.open('', '_blank', 'noopener,noreferrer')
+  if (!janela) {
+    URL.revokeObjectURL(blobUrl)
+    return false
+  }
+
+  try {
+    janela.document.open()
+    janela.document.write(html)
+    janela.document.close()
+    URL.revokeObjectURL(blobUrl)
+    return true
+  } catch {
+    URL.revokeObjectURL(blobUrl)
+    return false
+  }
 }

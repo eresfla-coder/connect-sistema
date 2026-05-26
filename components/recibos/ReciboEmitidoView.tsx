@@ -3,6 +3,17 @@
 import { useMemo, useState } from 'react'
 import extenso from 'extenso'
 
+const reciboPrintCss = `
+@media print {
+  body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .recibo-toolbar { display: none !important; }
+  .recibo-outer { padding: 0 !important; background: #fff !important; min-height: auto !important; }
+  .recibo-frame { box-shadow: none !important; border: 0 !important; padding: 0 !important; background: #fff !important; }
+  .recibo-sheet { border-radius: 0 !important; border: 0 !important; box-shadow: none !important; page-break-inside: avoid; }
+  @page { size: A4 portrait; margin: 10mm; }
+}
+`
+
 export type DadosReciboEmitido = {
   nomeCliente?: string
   clienteTelefone?: string
@@ -79,6 +90,8 @@ type Props = {
   showVoltar?: boolean
   /** Toolbar mínima + fechar com window.close e fallback de mensagem. */
   modoPublico?: boolean
+  loadingWhatsapp?: boolean
+  loadingPdf?: boolean
 }
 
 export function ReciboEmitidoView({
@@ -93,6 +106,8 @@ export function ReciboEmitidoView({
   showNovoRecibo = true,
   showVoltar = true,
   modoPublico = false,
+  loadingWhatsapp = false,
+  loadingPdf = false,
 }: Props) {
   const [avisoFecharPublico, setAvisoFecharPublico] = useState(false)
 
@@ -132,8 +147,9 @@ export function ReciboEmitidoView({
   const formaPagamento = dados?.formaPagamento || 'Pix'
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg,#f4f7fb 0%,#eaf1fb 100%)', overflowX: 'clip', overflowY: 'auto', padding: isMobile ? 'calc(env(safe-area-inset-top, 0px) + 12px) 10px 96px' : 20, boxSizing: 'border-box' }}>
-      <div style={{ maxWidth: 980, width: '100%', margin: '0 auto 14px' }}>
+    <div className="recibo-outer" style={{ minHeight: '100vh', background: 'linear-gradient(180deg,#f4f7fb 0%,#eaf1fb 100%)', overflowX: 'clip', overflowY: 'auto', padding: isMobile ? 'calc(env(safe-area-inset-top, 0px) + 12px) 10px 96px' : 20, boxSizing: 'border-box' }}>
+      <style>{reciboPrintCss}</style>
+      <div className="recibo-toolbar" style={{ maxWidth: 980, width: '100%', margin: '0 auto 14px' }}>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
           <button
             onClick={modoPublicoUi ? fecharModoPublico : onFechar}
@@ -162,17 +178,19 @@ export function ReciboEmitidoView({
           {showEnviarLink ? (
             <button
               onClick={onEnviarLink}
-              style={{ minHeight: 50, minWidth: isMobile ? 150 : 190, background: 'linear-gradient(135deg,#16a34a 0%, #065f46 100%)', color: '#fff', border: '1px solid rgba(34,197,94,.50)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 28px rgba(34,197,94,.30), inset 0 1px 0 rgba(255,255,255,.14)' }}
+              disabled={loadingWhatsapp}
+              style={{ minHeight: 50, minWidth: isMobile ? 150 : 190, background: loadingWhatsapp ? '#94a3b8' : 'linear-gradient(135deg,#16a34a 0%, #065f46 100%)', color: '#fff', border: '1px solid rgba(34,197,94,.50)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: loadingWhatsapp ? 'wait' : 'pointer', boxShadow: '0 0 28px rgba(34,197,94,.30), inset 0 1px 0 rgba(255,255,255,.14)', opacity: loadingWhatsapp ? 0.85 : 1 }}
             >
-              🟢 Enviar link
+              {loadingWhatsapp ? '⏳ Preparando link…' : '🟢 Enviar link'}
             </button>
           ) : null}
 
           <button
             onClick={onPdf}
-            style={{ minHeight: 50, minWidth: isMobile ? 180 : 230, background: 'linear-gradient(135deg,#0f3bff 0%, #001b6b 100%)', color: '#fff', border: '1px solid rgba(59,130,246,.55)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: 'pointer', boxShadow: '0 0 28px rgba(37,99,235,.30), inset 0 1px 0 rgba(255,255,255,.14)' }}
+            disabled={loadingPdf}
+            style={{ minHeight: 50, minWidth: isMobile ? 180 : 230, background: loadingPdf ? '#64748b' : 'linear-gradient(135deg,#0f3bff 0%, #001b6b 100%)', color: '#fff', border: '1px solid rgba(59,130,246,.55)', borderRadius: 18, padding: '0 20px', fontWeight: 950, cursor: loadingPdf ? 'wait' : 'pointer', boxShadow: '0 0 28px rgba(37,99,235,.30), inset 0 1px 0 rgba(255,255,255,.14)', opacity: loadingPdf ? 0.85 : 1 }}
           >
-            📄 Visualizar / Baixar PDF
+            {loadingPdf ? '⏳ Abrindo PDF…' : '📄 Visualizar / Baixar PDF'}
           </button>
         </div>
         {modoPublicoUi && avisoFecharPublico ? (
@@ -191,15 +209,18 @@ export function ReciboEmitidoView({
         ) : null}
       </div>
 
-      <div style={{ maxWidth: 980, width: '100%', margin: '0 auto', background: corSecundaria, borderRadius: isMobile ? 18 : 24, padding: isMobile ? 10 : 20, boxShadow: '0 18px 40px rgba(15,23,42,0.10)', border: '1px solid #94a3b8' }}>
-        <div style={{ background: '#fff', borderRadius: isMobile ? 16 : 22, padding: isMobile ? 12 : 18, border: '1px solid #cbd5e1', overflow: 'hidden' }}>
+      <div className="recibo-frame" style={{ maxWidth: 980, width: '100%', margin: '0 auto', background: corSecundaria, borderRadius: isMobile ? 18 : 24, padding: isMobile ? 10 : 20, boxShadow: '0 18px 40px rgba(15,23,42,0.10)', border: '1px solid #94a3b8' }}>
+        <div className="recibo-sheet" style={{ background: '#fff', borderRadius: isMobile ? 16 : 22, padding: isMobile ? 12 : 18, border: '1px solid #cbd5e1', overflow: 'hidden' }}>
+          <div style={{ textAlign: 'center', marginBottom: 10 }}>
+            <div style={{ display: 'inline-block', padding: '6px 20px', borderRadius: 999, background: corPrimaria, color: '#fff', fontSize: isMobile ? 22 : 28, fontWeight: 950, letterSpacing: '.22em' }}>RECIBO</div>
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', borderBottom: `3px solid ${corPrimaria}`, paddingBottom: 12, marginBottom: 12, background: 'linear-gradient(135deg,#ffffff 0%,#f8fbff 100%)', borderRadius: 18, padding: 16 }}>
             <div style={{ display: 'flex', gap: 12, alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', width: isMobile ? '100%' : 'auto' }}>
               {logoUrl ? (
                 <img
                   src={logoUrl}
                   alt="Logo"
-                  style={{ width: isMobile ? 64 : 82, height: isMobile ? 64 : 82, objectFit: 'contain', borderRadius: 12, alignSelf: isMobile ? 'flex-start' : 'center' }}
+                  style={{ width: isMobile ? 72 : 96, height: isMobile ? 72 : 96, objectFit: 'contain', borderRadius: 14, border: '1px solid #e2e8f0', padding: 6, background: '#fff', alignSelf: isMobile ? 'flex-start' : 'center' }}
                 />
               ) : null}
               <div>
@@ -211,24 +232,23 @@ export function ReciboEmitidoView({
             </div>
 
             <div style={{ textAlign: isMobile ? 'left' : 'right', width: isMobile ? '100%' : 'auto' }}>
-              <div style={{ fontWeight: 900, fontSize: 22, color: '#111827' }}>Recibo Comercial</div>
-              <div style={{ marginTop: 10, fontWeight: 700 }}>{formatarDataBR(dados?.dataRecibo)}</div>
+              <div style={{ fontWeight: 800, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.14em' }}>Comprovante oficial</div>
+              <div style={{ marginTop: 6, fontWeight: 900, fontSize: 18, color: '#111827' }}>{formatarDataBR(dados?.dataRecibo)}</div>
             </div>
           </div>
 
-          <div style={{ border: '1px solid #cbd5e1', borderRadius: 14, padding: 12, marginBottom: 10, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr auto', gap: 14, alignItems: 'center', overflow: 'hidden' }}>
+          <div style={{ border: `2px solid ${corPrimaria}`, borderRadius: 16, padding: isMobile ? 14 : 18, marginBottom: 10, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr auto', gap: 14, alignItems: 'center', overflow: 'hidden', background: 'linear-gradient(180deg,#fff,#f0fdf4)' }}>
             <div>
               <div style={{ fontSize: 18, color: '#111827', lineHeight: 1.3 }}>Recebi de <strong>{dados?.nomeCliente || ''}</strong></div>
               <div style={{ marginTop: 5, fontSize: 14, color: '#374151' }}>Referente a <strong>{dados?.referente || 'pagamento'}</strong></div>
               <div style={{ marginTop: 7, fontSize: 12, fontWeight: 800, color: '#374151' }}>{valorExtenso}</div>
             </div>
             <div style={{ textAlign: isMobile ? 'left' : 'right', width: isMobile ? '100%' : 'auto' }}>
-              <div style={{ display: 'inline-block', background: corPrimaria, color: '#fff', padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>RECIBO</div>
-              <br />
-              <div style={{ fontSize: 11, fontWeight: 900, color: '#334155', textTransform: 'uppercase', marginBottom: 4 }}>Valor recebido</div>
-              <div style={{ display: 'inline-block', maxWidth: '100%', background: '#fff59d', padding: isMobile ? '8px 12px' : '9px 15px', borderRadius: 14, fontSize: isMobile ? 22 : 28, fontWeight: 900, color: '#111827', boxShadow: 'inset 0 -12px 0 rgba(255,235,59,0.45)' }}>
+              <div style={{ fontSize: 11, fontWeight: 900, color: '#334155', textTransform: 'uppercase', letterSpacing: '.12em', marginBottom: 6 }}>Valor recebido</div>
+              <div style={{ display: 'inline-block', maxWidth: '100%', background: 'linear-gradient(135deg,#fef9c3,#fff59d)', padding: isMobile ? '10px 16px' : '12px 20px', borderRadius: 16, fontSize: isMobile ? 28 : 36, fontWeight: 950, color: '#0f172a', boxShadow: 'inset 0 -14px 0 rgba(250,204,21,.4), 0 8px 24px rgba(15,23,42,.08)', border: '2px solid #eab308' }}>
                 {moeda(valorNumerico)}
               </div>
+              <div style={{ marginTop: 8, fontSize: 13, fontWeight: 800, color: corPrimaria }}>{emojiPagamento(formaPagamento)} {formaPagamento}</div>
             </div>
           </div>
 
@@ -248,10 +268,16 @@ export function ReciboEmitidoView({
             <Card emoji={emojiPagamento(formaPagamento)} titulo="Recebido em" valor={formaPagamento} />
           </div>
 
-          <div style={{ marginTop: 46, textAlign: 'center' }}>
-            <div style={{ width: 230, maxWidth: '100%', margin: '0 auto', borderTop: '2px solid #111827', paddingTop: 8 }}>
-              <div style={{ fontSize: 14, fontWeight: 900, color: '#0f172a', textTransform: 'uppercase' }}>{cfg.responsavel || 'ERES FAUSTINO'}</div>
-              <div style={{ marginTop: 1, fontSize: 10, color: '#64748b', fontWeight: 700, letterSpacing: '.3px' }}>EMITENTE / ASSINATURA AUTOMÁTICA</div>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 20, marginTop: 36, paddingTop: 8 }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 10, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 32 }}>Assinatura do cliente</div>
+              <div style={{ borderTop: '2px solid #0f172a', maxWidth: 260, margin: '0 auto' }} />
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 10, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 32 }}>Emitente</div>
+              <div style={{ borderTop: '2px solid #0f172a', maxWidth: 260, margin: '0 auto', paddingTop: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a' }}>{cfg.responsavel || cfg.nomeEmpresa || 'Responsável'}</div>
+              </div>
             </div>
           </div>
         </div>

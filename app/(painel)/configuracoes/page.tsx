@@ -377,7 +377,7 @@ export default function ConfiguracoesPage() {
         nomeEmpresa: config.nomeEmpresa,
         telefone: config.telefone,
         celularEmpresa: config.celularEmpresa,
-        whatsappEmpresa: '',
+        whatsappEmpresa: config.celularEmpresa || config.telefone || '',
         email: config.email,
         endereco: config.endereco,
         cidadeUf: config.cidadeUf,
@@ -404,8 +404,9 @@ export default function ConfiguracoesPage() {
       await salvarConfigNaNuvem(config, categorias, formasPagamento)
 
       setMensagem('Configurações salvas e sincronizadas com sucesso!')
-    } catch {
-      setMensagem('Não foi possível salvar as configurações.')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Não foi possível salvar as configurações.'
+      setMensagem(msg)
     }
 
     setTimeout(() => setSalvando(false), 500)

@@ -338,8 +338,8 @@ export async function POST(req: Request) {
     const valorPlano = parseValorPlano(body.valor_plano)
 
     const sistemaCliente =
-      String(body.sistema_cliente || 'Connect Pro').trim() ||
-      'Connect Pro'
+      String(body.sistema_cliente || 'Connect Sistema').trim() ||
+      'Connect Sistema'
 
     const observacoes = String(body.observacoes || '').trim()
 

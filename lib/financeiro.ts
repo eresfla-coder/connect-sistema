@@ -1,3 +1,5 @@
+import { mensagemCobranca } from '@/lib/whatsappMensagens'
+
 export type FinanceiroStatus = 'pendente' | 'pago' | 'atrasado' | 'parcial' | 'hoje' | 'a_vencer'
 
 export type FinanceiroOrigem = 'manual' | 'orcamento' | 'ordem_servico' | 'recibo'
@@ -375,22 +377,23 @@ export function nivelCobranca(item: Partial<FinanceiroTitulo> | null | undefined
   return { nivel: 'ok', titulo: 'Em dia', descricao: `Vence em ${dias} dias`, prioridade: 0 }
 }
 
-export function buildWhatsappChargeMessageV2(titulo: FinanceiroWhatsappCharge) {
-  const nome = titulo.cliente || titulo.cliente_nome || 'cliente'
-  const descricao = titulo.descricao || 'pagamento em aberto'
+export function buildWhatsappChargeMessageV2(
+  titulo: FinanceiroWhatsappCharge,
+  opts?: { nomeEmpresa?: string },
+) {
+  const nivel = nivelCobranca(titulo)
   const valor = money(titulo.valorAberto ?? valorAberto(titulo) ?? titulo.valor ?? 0)
   const venc = formatDateBR(titulo.vencimento || titulo.data_vencimento)
-  const nivel = nivelCobranca(titulo)
 
-  if (nivel.nivel === 'atrasado') {
-    return `Olá ${nome}! Tudo bem? Identifiquei uma pendência referente a ${descricao}. Valor em aberto: ${valor}. Vencimento: ${venc}. Pode me dar um retorno, por favor?`
-  }
-
-  if (nivel.nivel === 'hoje') {
-    return `Olá ${nome}! Passando para lembrar que o pagamento referente a ${descricao} vence hoje. Valor: ${valor}. Qualquer dúvida estou à disposição.`
-  }
-
-  return `Olá ${nome}! Segue lembrete do pagamento referente a ${descricao}. Valor em aberto: ${valor}. Vencimento: ${venc}. Obrigado!`
+  return mensagemCobranca({
+    nomeEmpresa: opts?.nomeEmpresa,
+    nomeCliente: titulo.cliente || titulo.cliente_nome,
+    descricao: titulo.descricao || 'pagamento em aberto',
+    valorFormatado: valor,
+    vencimentoFormatado: venc,
+    atrasado: nivel.nivel === 'atrasado',
+    venceHoje: nivel.nivel === 'hoje',
+  })
 }
 
 export function gerarFinanceiroDeOrdemServico(os: {

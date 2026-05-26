@@ -1,5 +1,6 @@
 export const ADMIN_EMAILS = [
   'eresfla@gmail.com',
+  'eresfla2025@hotmail.com',
   'lojaconnect@hotmail.com',
 ]
 
@@ -9,6 +10,44 @@ export function isAdminEmail(email?: string | null) {
   return ADMIN_EMAILS.includes(
     String(email).trim().toLowerCase()
   )
+}
+
+/** Admin master: e-mails fixos + lista ADMIN_EMAILS (não depende de perfis). */
+export function isAdminMaster(email?: string | null) {
+  const emailNormalizado = String(email || '').toLowerCase().trim()
+  return (
+    emailNormalizado === 'eresfla2025@hotmail.com' ||
+    emailNormalizado === 'eresfla@gmail.com' ||
+    isAdminEmail(emailNormalizado)
+  )
+}
+
+export type PerfilAdminCheck = {
+  email?: string | null
+  role?: string | null
+  status?: string | null
+  plano_tier?: string | null
+}
+
+/** Perfil com role/tier admin ou master (campos opcionais no Supabase). */
+export function isPerfilRoleAdmin(perfil?: PerfilAdminCheck | null) {
+  if (!perfil) return false
+  const role = String((perfil as { role?: string }).role || (perfil as { perfil_role?: string }).perfil_role || '')
+    .trim()
+    .toLowerCase()
+  if (['admin', 'master', 'owner', 'superadmin', 'saas_master'].includes(role)) return true
+  const tier = String(perfil.plano_tier || '').trim().toLowerCase()
+  if (tier === 'admin' || tier === 'master') return true
+  const status = String(perfil.status || '').trim().toLowerCase()
+  if (status === 'admin' || status === 'master') return true
+  return false
+}
+
+/** Admin master: e-mail na lista ou perfil com role/tier admin. */
+export function isUsuarioAdmin(args?: { email?: string | null; perfil?: PerfilAdminCheck | null }) {
+  const email = String(args?.email || '').trim().toLowerCase()
+  if (isAdminMaster(email) || isAdminEmail(email)) return true
+  return isPerfilRoleAdmin(args?.perfil)
 }
 
 /** E-mail do usuário Supabase (campo principal ou metadata OAuth). */
@@ -91,7 +130,10 @@ export function dataMaisDias(dias: number) {
   return data.toISOString()
 }
 
-export function avisoTrial(entrada?: string | null | any) {
+export function avisoTrial(entrada?: string | null | any, opts?: { email?: string | null; perfil?: PerfilAdminCheck | null }) {
+  if (isUsuarioAdmin({ email: opts?.email, perfil: opts?.perfil })) return null
+  if (entrada && typeof entrada === 'object' && isPerfilRoleAdmin(entrada as PerfilAdminCheck)) return null
+
   let dataFim: string | null | undefined = null
 
   if (typeof entrada === 'string') {

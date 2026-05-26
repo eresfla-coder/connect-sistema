@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { urlLogoOgPublica, timestampVersaoPublica, resolverNomeEmpresaPublica } from '@/lib/empresaPublica'
+import { configRowSupabaseToPublica, mergeConfigPublicacao } from '@/lib/documentosPublicos'
 
 function normalizePhone(value?: string | null) {
   return String(value || '').replace(/\D/g, '')
@@ -72,18 +74,39 @@ export async function GET(request: Request) {
     )
 
     const telefoneFinal = telefoneAtual || telefonePayload
+    const versao = timestampVersaoPublica(doc.updated_at || Date.now())
+    const tokenDoc = String(doc.token || token || '')
+
+    const cfgMerged = mergeConfigPublicacao(
+      configRowSupabaseToPublica(configAtual as Record<string, unknown>),
+      payloadCfg as Record<string, unknown>,
+      {
+        empresa_nome: payload.empresa_nome,
+        empresa_logo: payload.empresa_logo,
+        empresa_telefone: payload.empresa_telefone,
+        empresa_email: payload.empresa_email,
+        empresa_endereco: payload.empresa_endereco,
+      }
+    )
+
+    const nomeEmpresa =
+      resolverNomeEmpresaPublica(payload, payloadCfg, configAtual) ||
+      String(cfgMerged.nomeEmpresa || 'Connect Sistema')
 
     const config = {
-      nomeEmpresa: String(configAtual.nome_empresa || payloadCfg.nomeEmpresa || payloadCfg.nome || 'LOJA CONNECT'),
-      telefone: String(telefoneFinal || ''),
-      celularEmpresa: String(configAtual.celular_empresa || telefoneFinal || payloadCfg.celularEmpresa || payloadCfg.celular || ''),
-      whatsappEmpresa: String(configAtual.whatsapp_empresa || telefoneFinal || payloadCfg.whatsappEmpresa || payloadCfg.whatsapp || ''),
-      telefoneEmpresa: String(configAtual.telefone || telefoneFinal || payloadCfg.telefoneEmpresa || payloadCfg.telefone || ''),
-      email: String(configAtual.email || payloadCfg.email || ''),
-      endereco: String(configAtual.endereco || payloadCfg.endereco || ''),
-      cidadeUf: String(configAtual.cidade_uf || payloadCfg.cidadeUf || ''),
-      responsavel: String(configAtual.responsavel || payloadCfg.responsavel || ''),
-      logoUrl: String(configAtual.logo_url || payloadCfg.logoUrl || payloadCfg.logo || '/logo-connect.png'),
+      nomeEmpresa,
+      telefone: String(telefoneFinal || cfgMerged.telefone || ''),
+      celularEmpresa: String(configAtual.celular_empresa || cfgMerged.celularEmpresa || telefoneFinal || ''),
+      whatsappEmpresa: String(configAtual.whatsapp_empresa || cfgMerged.whatsapp || telefoneFinal || ''),
+      telefoneEmpresa: String(configAtual.telefone || cfgMerged.telefoneEmpresa || telefoneFinal || ''),
+      email: String(payload.empresa_email || configAtual.email || cfgMerged.email || ''),
+      endereco: String(payload.empresa_endereco || configAtual.endereco || cfgMerged.endereco || ''),
+      cidadeUf: String(configAtual.cidade_uf || cfgMerged.cidadeUf || ''),
+      responsavel: String(configAtual.responsavel || cfgMerged.responsavel || ''),
+      logoUrl: cfgMerged.logoUrl || '/logo-connect.png',
+      empresa_logo_og: tokenDoc
+        ? urlLogoOgPublica({ token: tokenDoc, userId: ownerId || undefined, v: versao })
+        : urlLogoOgPublica({ userId: ownerId || undefined, v: versao }),
       corPrimaria: String(configAtual.cor_primaria || payloadCfg.corPrimaria || '#16a34a'),
       corSecundaria: String(configAtual.cor_secundaria || payloadCfg.corSecundaria || '#dcfce7'),
       tituloPdf: String(configAtual.titulo_pdf || payloadCfg.tituloPdf || 'Orçamento Comercial'),

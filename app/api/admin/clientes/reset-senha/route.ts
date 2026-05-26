@@ -139,7 +139,7 @@ export async function POST(req: Request) {
     }
 
     const nome = String(body.nome_empresa || email || 'cliente').trim()
-    const sistema = String(body.sistema_cliente || 'Connect Pro').trim()
+    const sistema = String(body.sistema_cliente || 'Connect Sistema').trim()
     const loginUrl = `${siteUrl()}/login`
     const textoWhatsApp = [
       `Olá, ${nome}!`,

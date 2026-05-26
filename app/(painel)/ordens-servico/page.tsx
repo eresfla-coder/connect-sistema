@@ -2,7 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { gerarFinanceiroDeOrdemServico, removerFinanceiroDoDocumento } from '@/lib/financeiro'
+import { abrirNovaAbaOuMesma, abrirWhatsappAposPrepararLink, comTimeout } from '@/lib/abrirExterno'
+import { montarUrlPublicaDocumento, timestampVersaoPublica } from '@/lib/empresaPublica'
+import { gerarFinanceiroDeOrdemServico, lerTitulosFinanceiros, removerFinanceiroDoDocumento } from '@/lib/financeiro'
+import {
+  baseUrlDocumentoPublico,
+  configEmpresaFromLocalStorage,
+  normalizarLogoEmpresaPublica,
+  type ConfigEmpresaPublica,
+} from '@/lib/documentosPublicos'
 import { supabase } from '@/lib/supabase'
 
 type Cliente = {
@@ -67,6 +75,7 @@ type OrdemServico = {
 }
 
 const STORAGE_KEY = 'connect_ordens_servico_salvas'
+const OS_SYNC_PENDING_KEY = 'connect_os_sync_pendentes'
 const CLIENTES_KEY = 'connect_clientes'
 const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || '').replace(/\/$/, '')
@@ -226,8 +235,8 @@ function normalizarTelefoneWhatsapp(valor?: string) {
   return `55${telefone}`
 }
 
-function telefoneClienteOS(item: any) {
-  return normalizarTelefoneWhatsapp(
+function telefoneClienteOS(item: any, clientesLista: Cliente[] = []) {
+  const direto = normalizarTelefoneWhatsapp(
     item?.telefone ||
       item?.whatsapp ||
       item?.cliente_telefone ||
@@ -235,8 +244,25 @@ function telefoneClienteOS(item: any) {
       item?.cliente?.whatsapp ||
       item?.contato?.telefone ||
       item?.contato?.whatsapp ||
-      ''
+      '',
   )
+  if (direto) return direto
+
+  const nome = String(item?.cliente || '').trim().toLowerCase()
+  if (!nome || !clientesLista.length) return ''
+
+  const encontrado = clientesLista.find((c) => String(c?.nome || '').trim().toLowerCase() === nome)
+  if (!encontrado) return ''
+
+  return normalizarTelefoneWhatsapp(encontrado.whatsapp || encontrado.telefone || '')
+}
+
+function linkFallbackOS(item: OrdemServico) {
+  return `${baseUrlAtual()}/impressao-ordem-servico/${Number(item.id)}?preview=1`
+}
+
+function linkFallbackOrcamento(orcamentoId: number) {
+  return `${baseUrlDocumentoPublico()}/impressao-orcamento/${orcamentoId}?preview=1`
 }
 
 function montarWhatsappOS(item: OrdemServico) {
@@ -281,12 +307,37 @@ type OsRow = {
   payload?: Partial<OrdemServico> | Record<string, unknown>
 }
 
+/** Apenas colunas existentes em public.ordens_servico (upsert não pode incluir extras → PGRST204). */
+type OsSupabaseUpsert = {
+  user_id: string
+  local_id: string
+  numero: string
+  cliente: string
+  telefone: string
+  equipamento: string
+  status: string
+  prioridade: string
+  valor: number
+  entrada: number
+  saldo: number
+  aprovado: boolean
+  payload: Record<string, unknown>
+}
+
 function osAprovadoPorStatus(status?: string) {
   const valor = String(status || '').toLowerCase()
   return valor.includes('aprov') || valor === 'finalizada' || valor === 'entregue'
 }
 
-function osParaRowSupabase(os: OrdemServico, userId: string): OsRow {
+function serializarPayloadOs(os: OrdemServico): Record<string, unknown> {
+  try {
+    return JSON.parse(JSON.stringify(os)) as Record<string, unknown>
+  } catch {
+    return { ...os } as unknown as Record<string, unknown>
+  }
+}
+
+function osParaUpsertSupabase(os: OrdemServico, userId: string): OsSupabaseUpsert {
   const clienteNome = String(os.cliente || '').trim()
   const telefone = String(os.telefone || os.whatsapp || '').trim()
   const status = String(os.status || 'Aberta')
@@ -294,7 +345,7 @@ function osParaRowSupabase(os: OrdemServico, userId: string): OsRow {
   return {
     user_id: userId,
     local_id: String(os.id),
-    numero: os.numero,
+    numero: String(os.numero || ''),
     cliente: clienteNome,
     telefone,
     equipamento: String(os.equipamento || ''),
@@ -304,9 +355,7 @@ function osParaRowSupabase(os: OrdemServico, userId: string): OsRow {
     entrada: Number(os.entrada || 0),
     saldo: Number(os.saldo || 0),
     aprovado: osAprovadoPorStatus(status),
-    payload: os,
-    cliente_nome: clienteNome,
-    cliente_telefone: telefone,
+    payload: serializarPayloadOs(os),
   }
 }
 
@@ -387,11 +436,13 @@ export default function OrdemServicoPage() {
   const ultimaSyncOsPublicaRef = useRef(0)
   const [osScrollLeft, setOsScrollLeft] = useState(0)
   const [osScrollMax, setOsScrollMax] = useState(1)
+  const [zapOsCarregando, setZapOsCarregando] = useState<string | number | null>(null)
 
   const [config, setConfig] = useState({
     nomeEmpresa: 'CONNECT SISTEMA',
     logoUrl: '/logo-connect.png',
   })
+  const [configEmpresa, setConfigEmpresa] = useState<ConfigEmpresaPublica | null>(null)
 
   function atualizarBarraOs() {
     const el = osTableRef.current
@@ -443,35 +494,25 @@ export default function OrdemServicoPage() {
     }
   }, [])
 
-  function configPublicaOS() {
-    try {
-      const raw = localStorage.getItem('connect_configuracoes')
-      const cfg = raw ? JSON.parse(raw) : {}
-
-      return {
-        nomeEmpresa: cfg?.nomeEmpresa || config.nomeEmpresa || 'LOJA CONNECT',
-        telefone: cfg?.celularEmpresa || cfg?.celular || cfg?.whatsappEmpresa || cfg?.whatsapp || cfg?.telefoneEmpresa || cfg?.telefone || '',
-        whatsapp: cfg?.whatsappEmpresa || cfg?.whatsapp || cfg?.celularEmpresa || cfg?.celular || cfg?.telefoneEmpresa || cfg?.telefone || '',
-        celularEmpresa: cfg?.celularEmpresa || cfg?.celular || cfg?.whatsappEmpresa || cfg?.whatsapp || cfg?.telefoneEmpresa || cfg?.telefone || '',
-        telefoneEmpresa: cfg?.telefoneEmpresa || cfg?.telefone || cfg?.celularEmpresa || cfg?.celular || cfg?.whatsappEmpresa || cfg?.whatsapp || '',
-        email: cfg?.email || 'lojaconnect@hotmail.com',
-        endereco: cfg?.endereco || '',
-        cidadeUf: cfg?.cidadeUf || '',
-        logoUrl: cfg?.logoUrl || config.logoUrl || '/logo-connect.png',
-      }
-    } catch {
-      return {
-        nomeEmpresa: config.nomeEmpresa || 'LOJA CONNECT',
-        telefone: '',
-        whatsapp: '',
-        celularEmpresa: '',
-        telefoneEmpresa: '',
-        email: 'lojaconnect@hotmail.com',
-        endereco: '',
-        cidadeUf: '',
-        logoUrl: config.logoUrl || '/logo-connect.png',
-      }
+  function configPublicaOS(): ConfigEmpresaPublica {
+    if (configEmpresa) return configEmpresa
+    const cfg = configEmpresaFromLocalStorage()
+    return {
+      ...cfg,
+      nomeEmpresa: cfg.nomeEmpresa || config.nomeEmpresa || 'LOJA CONNECT',
+      logoUrl: cfg.logoUrl || normalizarLogoEmpresaPublica(config.logoUrl) || '/logo-connect.png',
     }
+  }
+
+  async function headersPublicacaoDocs() {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    try {
+      const { data } = await supabase.auth.getSession()
+      if (data?.session?.access_token) {
+        headers.Authorization = `Bearer ${data.session.access_token}`
+      }
+    } catch {}
+    return headers
   }
 
   function codificarPayloadOS(item: OrdemServico) {
@@ -600,16 +641,11 @@ export default function OrdemServicoPage() {
     setLista(novaLista)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(novaLista))
     window.dispatchEvent(new Event('connect-local-saved'))
-    console.log('[ordens_servico] salvarLista', { origem, total: novaLista.length, ids: novaLista.map((o) => o.id).slice(0, 8) })
   }
 
   async function obterUserIdSupabase() {
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
     if (sessionData?.session?.user?.id) {
-      console.log('[ordens_servico] sessão (getSession)', {
-        user_id: sessionData.session.user.id,
-        email: sessionData.session.user.email,
-      })
       return sessionData.session.user.id
     }
     if (sessionError) {
@@ -618,10 +654,6 @@ export default function OrdemServicoPage() {
 
     const { data: userData, error: userError } = await supabase.auth.getUser()
     if (userData?.user?.id) {
-      console.log('[ordens_servico] sessão (getUser)', {
-        user_id: userData.user.id,
-        email: userData.user.email,
-      })
       return userData.user.id
     }
     if (userError) {
@@ -635,68 +667,147 @@ export default function OrdemServicoPage() {
   function carregarOsLocalFallback() {
     const listaCorrigida = lerOsLocalStorage()
     if (!listaCorrigida.length) {
-      console.log('[ordens_servico] localStorage vazio em carregarOsLocalFallback')
       return
     }
     setLista(listaCorrigida)
     setForm(ordemVazia(listaCorrigida))
-    console.log('[ordens_servico] carregado do localStorage', { total: listaCorrigida.length })
   }
 
-  async function persistirOsSupabase(os: OrdemServico, userId?: string | null) {
-    try {
-      const uid = userId || (await obterUserIdSupabase())
-      if (!uid) {
-        console.error('[ordens_servico] persistir abortado: user_id ausente (sessão não pronta).')
-        return false
+  function origemDispositivoOS() {
+    if (typeof window === 'undefined') return 'desconhecido'
+    return window.innerWidth <= 900 || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ? 'mobile' : 'PC'
+  }
+
+  async function obterAuthOS(maxTentativas = 8) {
+    for (let attempt = 0; attempt < maxTentativas; attempt += 1) {
+      const { data: sessionWrap, error: sessionError } = await supabase.auth.getSession()
+      if (sessionWrap?.session?.user?.id) {
+        return {
+          userId: String(sessionWrap.session.user.id),
+          email: sessionWrap.session.user.email || '',
+          metodo: 'getSession',
+          tentativa: attempt + 1,
+        }
       }
+      if (sessionError) console.error('[ordens_servico] getSession falhou:', sessionError.message)
 
-      const row = osParaRowSupabase(os, uid)
-      const payloadResumo = row.payload && typeof row.payload === 'object' ? (row.payload as OrdemServico) : null
+      const { data: userWrap, error: userError } = await supabase.auth.getUser()
+      if (userWrap?.user?.id) {
+        return {
+          userId: String(userWrap.user.id),
+          email: userWrap.user.email || '',
+          metodo: 'getUser',
+          tentativa: attempt + 1,
+        }
+      }
+      if (userError) console.error('[ordens_servico] getUser falhou:', userError.message)
 
-      console.log('[ordens_servico] persistir UPSERT → public.ordens_servico', {
-        user_id: row.user_id,
-        local_id: row.local_id,
-        local_id_ok: row.local_id === String(os.id),
-        numero: row.numero,
-        payload_id: payloadResumo?.id,
-        payload_cliente: payloadResumo?.cliente,
-        payload_keys: payloadResumo ? Object.keys(payloadResumo) : [],
-      })
+      await new Promise((r) => setTimeout(r, 220 + attempt * 120))
+    }
 
-      const { data, error } = await supabase
-        .from('ordens_servico')
-        .upsert(row, { onConflict: 'user_id,local_id' })
-        .select('*')
+    return null
+  }
 
-      if (error) {
-        console.error('[ordens_servico] erro Supabase no UPSERT:', {
-          message: error.message,
-          code: (error as { code?: string }).code,
-          details: (error as { details?: string }).details,
-          hint: (error as { hint?: string }).hint,
-          user_id: row.user_id,
-          local_id: row.local_id,
+  function marcarOsPendenteSync(localId: number | string) {
+    try {
+      const raw = localStorage.getItem(OS_SYNC_PENDING_KEY)
+      const lista = raw ? (JSON.parse(raw) as string[]) : []
+      const id = String(localId)
+      if (!lista.includes(id)) lista.push(id)
+      localStorage.setItem(OS_SYNC_PENDING_KEY, JSON.stringify(lista))
+    } catch {}
+  }
+
+  function removerOsPendenteSync(localId: number | string) {
+    try {
+      const raw = localStorage.getItem(OS_SYNC_PENDING_KEY)
+      const lista = raw ? (JSON.parse(raw) as string[]) : []
+      const id = String(localId)
+      const filtrada = lista.filter((item) => item !== id)
+      localStorage.setItem(OS_SYNC_PENDING_KEY, JSON.stringify(filtrada))
+    } catch {}
+  }
+
+  async function obterTokenSessaoOS(maxTentativas = 10) {
+    for (let attempt = 0; attempt < maxTentativas; attempt++) {
+      try {
+        const { data: sessao } = await supabase.auth.getSession()
+        const token = sessao?.session?.access_token || ''
+        if (token) return token
+      } catch {}
+      await new Promise((r) => setTimeout(r, 280 + attempt * 160))
+    }
+    return ''
+  }
+
+  async function persistirOsSupabase(os: OrdemServico, _userId?: string | null) {
+    try {
+      const token = await obterTokenSessaoOS(10)
+      if (!token) {
+        console.warn('[ordens_servico] sync API: sem token de sessão (aguardando login no aparelho).', {
+          local_id: String(os.id),
+          origem: origemDispositivoOS(),
         })
         return false
       }
 
-      console.log('[ordens_servico] persistir OK', {
-        linhas: data?.length ?? 0,
-        retorno: data?.[0]
-          ? {
-              id: data[0].id,
-              user_id: data[0].user_id,
-              local_id: data[0].local_id,
-              status: data[0].status,
-            }
-          : null,
+      const resp = await fetch('/api/ordens-servico/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ os }),
       })
+
+      if (!resp.ok) {
+        const erro = await resp.json().catch(() => null)
+        console.error('[ordens_servico] sync API falhou:', erro?.error || resp.status, {
+          local_id: String(os.id),
+        })
+        return false
+      }
+
+      removerOsPendenteSync(os.id)
       return true
     } catch (e) {
-      console.error('[ordens_servico] exceção ao persistir:', e)
+      console.error('[ordens_servico] exceção sync API:', e)
       return false
     }
+  }
+
+  async function persistirOsComRetry(os: OrdemServico, origem: string, maxTentativas = 4) {
+    for (let tentativa = 0; tentativa < maxTentativas; tentativa++) {
+      const ok = await persistirOsSupabase(os)
+      if (ok) return true
+      await new Promise((resolve) => setTimeout(resolve, 700 + tentativa * 900))
+    }
+
+    marcarOsPendenteSync(os.id)
+    console.warn('[ordens_servico] OS ficou pendente de sync na nuvem.', {
+      origem,
+      dispositivo: origemDispositivoOS(),
+      local_id: String(os.id),
+    })
+    return false
+  }
+
+  async function reenviarOsPendentesNuvem() {
+    try {
+      const raw = localStorage.getItem(OS_SYNC_PENDING_KEY)
+      const ids = raw ? (JSON.parse(raw) as string[]) : []
+      if (!ids.length) return
+
+      const localList = lerOsLocalStorage()
+      for (const id of ids) {
+        const os = localList.find((item) => String(item.id) === String(id))
+        if (!os) {
+          removerOsPendenteSync(id)
+          continue
+        }
+        await persistirOsComRetry(os, 'fila-pendente', 2)
+      }
+    } catch {}
   }
 
   async function excluirOsSupabase(os: OrdemServico) {
@@ -721,7 +832,6 @@ export default function OrdemServicoPage() {
 
   async function sincronizarOsLocaisAntigos(cloudList?: OrdemServico[]) {
     if (osSyncRodandoRef.current) {
-      console.log('[ordens_servico] sincronizarOsLocaisAntigos ignorado (já em execução)')
       return
     }
     osSyncRodandoRef.current = true
@@ -734,14 +844,6 @@ export default function OrdemServicoPage() {
       const cloudIds = new Set((cloudList || []).map((item) => String(item.id)))
       const pendentes = localList.filter((item) => item?.id && !cloudIds.has(String(item.id)))
 
-      console.log('[ordens_servico] sync local→nuvem', {
-        user_id: userId,
-        locais: localList.length,
-        naNuvem: cloudList?.length ?? 0,
-        pendentes: pendentes.length,
-        idsPendentes: pendentes.map((o) => o.id).slice(0, 8),
-      })
-
       if (!pendentes.length) return
 
       let enviados = 0
@@ -749,7 +851,6 @@ export default function OrdemServicoPage() {
         const ok = await persistirOsSupabase(os, userId)
         if (ok) enviados += 1
       }
-      console.log('[ordens_servico] sync enviou', { enviados, de: pendentes.length })
 
       const { data: rows, error } = await supabase
         .from('ordens_servico')
@@ -763,7 +864,6 @@ export default function OrdemServicoPage() {
       }
 
       const normalizados = ((rows || []) as OsRow[]).map((row) => normalizarItem(osDeRowSupabase(row)))
-      console.log('[ordens_servico] pós-sync SELECT', { total: normalizados.length })
 
       const mesclada = mesclarListasOs(normalizados, localList)
       aplicarListaOs(mesclada, 'sincronizarOsLocaisAntigos')
@@ -774,7 +874,6 @@ export default function OrdemServicoPage() {
 
   async function carregarOsSupabase() {
     const loadId = ++osLoadSeqRef.current
-    console.log('[ordens_servico] carregarOsSupabase início', { loadId })
 
     try {
       const userId = await obterUserIdSupabase()
@@ -793,7 +892,6 @@ export default function OrdemServicoPage() {
         .order('created_at', { ascending: false })
 
       if (loadId !== osLoadSeqRef.current) {
-        console.log('[ordens_servico] carregarOsSupabase descartado (load obsoleto)', { loadId })
         return
       }
 
@@ -808,15 +906,6 @@ export default function OrdemServicoPage() {
 
       const normalizados = ((data || []) as OsRow[]).map((row) => normalizarItem(osDeRowSupabase(row)))
 
-      console.log('[ordens_servico] SELECT public.ordens_servico', {
-        user_id: userId,
-        count,
-        recebidos: normalizados.length,
-        localStorage: localList.length,
-        rls: 'auth.uid() deve ser igual a user_id da linha',
-        ids: normalizados.map((o) => ({ id: o.id, numero: o.numero })).slice(0, 8),
-      })
-
       if (normalizados.length === 0) {
         console.warn('[ordens_servico] Supabase retornou lista vazia', {
           user_id: userId,
@@ -825,7 +914,6 @@ export default function OrdemServicoPage() {
       }
 
       if (normalizados.length === 0 && localList.length > 0) {
-        console.log('[ordens_servico] tentando enviar OS locais para a nuvem antes de exibir…')
         await sincronizarOsLocaisAntigos([])
         if (loadId !== osLoadSeqRef.current) return
         const aposSync = lerOsLocalStorage()
@@ -927,7 +1015,8 @@ export default function OrdemServicoPage() {
   async function publicarOS(item: OrdemServico) {
     const id = Number(item.id)
     const base = baseUrlAtual()
-    const payload = { ...item, cfg: configPublicaOS() }
+    const cfg = configPublicaOS()
+    const payload = { ...item, cfg, config: cfg }
     const tokenLocal = Array.from(crypto.getRandomValues(new Uint8Array(12)))
       .map((byte) => byte.toString(16).padStart(2, '0'))
       .join('')
@@ -935,7 +1024,7 @@ export default function OrdemServicoPage() {
     try {
       const resp = await fetch('/api/public-docs', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await headersPublicacaoDocs(),
         body: JSON.stringify({
           document_type: 'ordem_servico',
           document_id: String(id),
@@ -956,16 +1045,133 @@ export default function OrdemServicoPage() {
         throw new Error('Token da OS não retornado pela API.')
       }
 
-      return `${base}/view/os/${id}?token=${encodeURIComponent(token)}`
+      const v = timestampVersaoPublica(json?.updated_at || Date.now())
+      return montarUrlPublicaDocumento('/view/os', String(id), { token, v })
     } catch (error) {
       console.error('[PUBLICAR_OS]', error)
-      alert(error instanceof Error ? error.message : 'Erro ao publicar OS.')
       throw error
+    }
+  }
+
+  async function linkPublicoOS(item: OrdemServico): Promise<string> {
+    try {
+      return await comTimeout(publicarOS(item), 14000)
+    } catch {
+      return linkFallbackOS(item)
     }
   }
 
   function linkValido(item: OrdemServico) {
     return montarLinkOS(item)
+  }
+
+  async function gerarLinkOrcamentoPublico(orcamentoId: number) {
+    const orc = orcamentos.find((o) => Number(o.id) === Number(orcamentoId))
+    if (!orc) throw new Error('Orçamento vinculado não encontrado.')
+
+    const cfg = configPublicaOS()
+    const base = baseUrlDocumentoPublico()
+    const tokenLocal = Array.from(crypto.getRandomValues(new Uint8Array(12)))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')
+
+    const resp = await fetch('/api/public-docs', {
+      method: 'POST',
+      headers: await headersPublicacaoDocs(),
+      body: JSON.stringify({
+        tipo: 'orcamento',
+        documentoId: String(orcamentoId),
+        document_type: 'orcamento',
+        document_id: String(orcamentoId),
+        token: tokenLocal,
+        payload: { ...orc, config: cfg, cfg },
+      }),
+    })
+
+    if (!resp.ok) {
+      const erro = await resp.json().catch(() => null)
+      throw new Error(erro?.error || 'Falha ao publicar orçamento.')
+    }
+
+    const json = await resp.json().catch(() => null)
+    const token = String(json?.token || tokenLocal).trim()
+    const v = timestampVersaoPublica(json?.updated_at || Date.now())
+    return montarUrlPublicaDocumento('/impressao-orcamento', String(orcamentoId), { token, preview: true, v })
+  }
+
+  async function linkPublicoOrcamento(orcamentoId: number): Promise<string> {
+    try {
+      return await comTimeout(gerarLinkOrcamentoPublico(orcamentoId), 14000)
+    } catch {
+      return linkFallbackOrcamento(orcamentoId)
+    }
+  }
+
+  async function copiarTexto(link: string, mensagemOk: string) {
+    if (navigator?.clipboard?.writeText && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(link)
+        alert(mensagemOk)
+        return
+      } catch {}
+    }
+    window.prompt('Copie o link:', link)
+  }
+
+  async function copiarLinkOrcamento(item: OrdemServico) {
+    const orcId = Number(item.orcamentoId || 0)
+    if (!orcId) {
+      alert('Esta OS não está vinculada a um orçamento.')
+      return
+    }
+    try {
+      const link = await linkPublicoOrcamento(orcId)
+      await copiarTexto(link, 'Link do orçamento copiado (com sua logo).')
+    } catch (error) {
+      const fallback = linkFallbackOrcamento(orcId)
+      await copiarTexto(fallback, 'Link alternativo copiado. Se não abrir com logo, tente de novo com internet.')
+    }
+  }
+
+  function abrirRecebimentoOS(item: OrdemServico) {
+    gerarFinanceiroDeOrdemServico(item)
+    const titulos = lerTitulosFinanceiros()
+    const temTitulo = titulos.some(
+      (t) => String(t.origem || '') === 'ordem_servico' && String(t.origem_id || '') === String(item.id),
+    )
+    if (!temTitulo) {
+      alert('Não há saldo em aberto para cobrar nesta OS.')
+      return
+    }
+    router.push(`/financeiro?busca=${encodeURIComponent(String(item.numero || item.id))}`)
+  }
+
+  function emitirReciboOS(item: OrdemServico) {
+    const cfg = configPublicaOS()
+    const valor = Number(item.saldo ?? Math.max(Number(item.valor || 0) - Number(item.entrada || 0), 0))
+    const prefill = {
+      nomeCliente: item.cliente || '',
+      clienteTelefone: item.telefone || item.whatsapp || '',
+      referente: `OS #${item.numero}`,
+      valorNumero: String(valor > 0 ? valor : item.valor || 0),
+      dataRecibo: new Date().toISOString().slice(0, 10),
+      formaPagamento: 'Pix',
+      observacao: item.observacao || 'Pagamento referente à ordem de serviço.',
+      config: {
+        nomeEmpresa: cfg.nomeEmpresa,
+        cidadeUf: cfg.cidadeUf,
+        telefone: cfg.telefone || cfg.whatsapp,
+        responsavel: cfg.responsavel || '',
+        corPrimaria: '#16a34a',
+        corSecundaria: '#f0fdf4',
+        logoUrl: cfg.logoUrl,
+        endereco: cfg.endereco,
+      },
+    }
+    try {
+      sessionStorage.setItem('connect_recibo_prefill', JSON.stringify(prefill))
+    } catch {}
+    router.push('/recibo-avulso')
   }
 
   useEffect(() => {
@@ -976,16 +1182,69 @@ export default function OrdemServicoPage() {
   }, [])
 
   useEffect(() => {
-    try {
-      const salvoConfig = localStorage.getItem('connect_configuracoes')
-      if (salvoConfig) {
-        const dados = JSON.parse(salvoConfig)
-        setConfig({
-          nomeEmpresa: dados?.nomeEmpresa || 'CONNECT SISTEMA',
-          logoUrl: dados?.logoUrl || '/logo-connect.png',
-        })
+    function aplicarConfigLocal() {
+      const cfg = configEmpresaFromLocalStorage()
+      setConfigEmpresa(cfg)
+      setConfig({
+        nomeEmpresa: cfg.nomeEmpresa || 'CONNECT SISTEMA',
+        logoUrl: cfg.logoUrl || '/logo-connect.png',
+      })
+    }
+
+    aplicarConfigLocal()
+
+    async function carregarConfigNuvem() {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const userId = sessionData?.session?.user?.id
+        if (!userId) return
+
+        const { data } = await supabase
+          .from('configuracoes_empresa')
+          .select('nome_empresa,logo_url,whatsapp_empresa,telefone,endereco,email,responsavel')
+          .eq('user_id', userId)
+          .maybeSingle()
+
+        if (!data) return
+
+        const local = configEmpresaFromLocalStorage()
+        const logoUrl = normalizarLogoEmpresaPublica(data.logo_url) || local.logoUrl
+        const merged: ConfigEmpresaPublica = {
+          ...local,
+          nomeEmpresa: String(data.nome_empresa || local.nomeEmpresa),
+          logoUrl: logoUrl || '/logo-connect.png',
+          whatsapp: String(data.whatsapp_empresa || local.whatsapp),
+          telefone: String(data.telefone || data.whatsapp_empresa || local.telefone),
+          telefoneEmpresa: String(data.telefone || local.telefoneEmpresa),
+          celularEmpresa: String(data.whatsapp_empresa || local.celularEmpresa),
+          email: String(data.email || local.email),
+          endereco: String(data.endereco || local.endereco),
+          responsavel: String(data.responsavel || local.responsavel || ''),
+        }
+
+        setConfigEmpresa(merged)
+        setConfig({ nomeEmpresa: merged.nomeEmpresa, logoUrl: merged.logoUrl })
+
+        try {
+          localStorage.setItem(
+            'connect_configuracoes',
+            JSON.stringify({
+              ...JSON.parse(localStorage.getItem('connect_configuracoes') || '{}'),
+              nomeEmpresa: merged.nomeEmpresa,
+              logoUrl: merged.logoUrl,
+              whatsappEmpresa: merged.whatsapp,
+              telefone: merged.telefone,
+              endereco: merged.endereco,
+              email: merged.email,
+            }),
+          )
+        } catch {}
+      } catch (error) {
+        console.error('[OS_CONFIG_EMPRESA]', error)
       }
-    } catch {}
+    }
+
+    void carregarConfigNuvem()
   }, [])
 
   useEffect(() => {
@@ -993,7 +1252,6 @@ export default function OrdemServicoPage() {
     void carregarOsSupabase()
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('[ordens_servico] onAuthStateChange', { event, user_id: session?.user?.id, email: session?.user?.email })
       if (
         session?.user &&
         (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED')
@@ -1093,6 +1351,20 @@ export default function OrdemServicoPage() {
       window.clearInterval(interval)
     }
   }, [lista])
+
+  useEffect(() => {
+    void reenviarOsPendentesNuvem()
+    const timer = window.setInterval(() => void reenviarOsPendentesNuvem(), 25000)
+    const aoVisivel = () => {
+      if (document.visibilityState === 'visible') void reenviarOsPendentesNuvem()
+    }
+    document.addEventListener('visibilitychange', aoVisivel)
+    window.addEventListener('focus', () => void reenviarOsPendentesNuvem())
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', aoVisivel)
+    }
+  }, [])
 
   useEffect(() => {
     setForm((anterior) => ({
@@ -1300,12 +1572,14 @@ export default function OrdemServicoPage() {
 
       const novaLista = lista.map((item) => (item.id === editandoId ? atualizada : item))
       salvarLista(novaLista, 'editar')
-      const okNuvem = await persistirOsSupabase(atualizada)
-      if (!okNuvem) {
-        alert('OS salva no aparelho, mas não foi confirmada na nuvem. Verifique a conexão e o console (F12).')
-      }
       gerarFinanceiroDeOrdemServico(atualizada)
-      alert('OS atualizada com sucesso.')
+      const okNuvem = await persistirOsComRetry(atualizada, 'editar')
+      if (okNuvem) {
+        alert('OS atualizada com sucesso.')
+        void publicarOS(atualizada).catch(() => {})
+      } else {
+        alert('Alterações salvas neste aparelho. A sincronização com a nuvem continuará automaticamente.')
+      }
       limpar()
       return
     }
@@ -1324,12 +1598,13 @@ export default function OrdemServicoPage() {
 
     const novaLista = [nova, ...lista]
     salvarLista(novaLista, 'criar')
-    const okNuvem = await persistirOsSupabase(nova)
     gerarFinanceiroDeOrdemServico(nova)
-    if (!okNuvem) {
-      alert('OS salva no aparelho, mas não foi confirmada na nuvem. Verifique a conexão e o console.')
+    const okNuvem = await persistirOsComRetry(nova, 'criar')
+    if (okNuvem) {
+      alert('OS salva com sucesso.')
+      void publicarOS(nova).catch(() => {})
     } else {
-      alert('OS salva com sucesso e financeiro atualizado.')
+      alert('OS salva neste aparelho. A sincronização com a nuvem continuará em instantes.')
     }
     limpar()
   }
@@ -1385,11 +1660,12 @@ export default function OrdemServicoPage() {
   }
 
   async function abrir(item: OrdemServico) {
-    window.location.href = await publicarOS(item)
+    const link = await linkPublicoOS(item)
+    abrirNovaAbaOuMesma(link)
   }
 
   async function copiarLink(item: OrdemServico) {
-    const link = await publicarOS(item)
+    const link = await linkPublicoOS(item)
 
     if (navigator?.clipboard?.writeText && window.isSecureContext) {
       navigator.clipboard
@@ -1420,33 +1696,42 @@ export default function OrdemServicoPage() {
   }
 
   async function abrirLinkPublico(item: OrdemServico) {
-    window.open(await publicarOS(item), '_blank')
+    abrirNovaAbaOuMesma(await linkPublicoOS(item))
   }
 
   async function enviarWhatsAppOS(item: OrdemServico) {
-    const telefone = telefoneClienteOS(item)
+    if (zapOsCarregando != null) return
+
+    const telefone = telefoneClienteOS(item, clientes)
 
     if (!telefone) {
-      alert('Este cliente não tem telefone/WhatsApp cadastrado na OS.')
+      alert('Preencha o telefone/WhatsApp na OS ou cadastre o cliente com telefone.')
       return
     }
 
-    const link = await publicarOS(item)
-
-    let mensagem = `Olá ${item.cliente || 'cliente'}!\n\n`
-    mensagem += `Segue sua ordem de serviço *${item.numero}*.\n`
-
-    if (item.equipamento) mensagem += `Equipamento: ${item.equipamento}\n`
-    if (item.status) mensagem += `Status: ${item.status}\n`
-
-    mensagem += `Valor: ${moeda(item.valor)}\n`
-    mensagem += `Saldo: ${moeda(item.saldo)}\n\n`
-    mensagem += `Acesse aqui:\n${link}`
-
-    const texto = encodeURIComponent(mensagem)
-    const url = `https://wa.me/${telefone}?text=${texto}`
-
-    window.open(url, '_blank', 'noopener,noreferrer')
+    setZapOsCarregando(item.id)
+    try {
+      await abrirWhatsappAposPrepararLink({
+        telefone,
+        linkRapido: linkFallbackOS(item),
+        prepararLinkCompleto: () => linkPublicoOS(item),
+        montarMensagem: (link) => {
+          let mensagem = `Olá ${item.cliente || 'cliente'}!\n\n`
+          mensagem += `Segue sua ordem de serviço *${item.numero}*.\n`
+          if (item.equipamento) mensagem += `Equipamento: ${item.equipamento}\n`
+          if (item.status) mensagem += `Status: ${item.status}\n`
+          mensagem += `Valor: ${moeda(item.valor)}\n`
+          mensagem += `Saldo: ${moeda(item.saldo)}\n\n`
+          mensagem += `Acesse aqui:\n${link}`
+          return mensagem
+        },
+      })
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Não foi possível abrir o WhatsApp. Tente novamente.'
+      alert(msg)
+    } finally {
+      window.setTimeout(() => setZapOsCarregando(null), 800)
+    }
   }
 
   const colors = darkMode
@@ -2164,23 +2449,41 @@ export default function OrdemServicoPage() {
                             </span>
                           </div>
 
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginTop: 14 }}>
-                            <button title="Visualizar" onClick={() => abrir(itemCorrigido)} style={mobileActionButton(colors, 'blue')}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 14 }}>
+                            <button type="button" className="connect-os-action-btn" title="Visualizar" onClick={() => void abrir(itemCorrigido)} style={mobileActionButton(colors, 'blue')}>
                               👁 Ver
                             </button>
-                            <button title="Copiar link" onClick={() => copiarLink(itemCorrigido)} style={mobileActionButton(colors, 'green')}>
-                              🔗 Link
+                            <button
+                              type="button"
+                              className={`connect-os-action-btn connect-zap-btn${zapOsCarregando === itemCorrigido.id ? ' connect-zap-btn--loading' : ''}`}
+                              title="WhatsApp"
+                              disabled={zapOsCarregando === itemCorrigido.id}
+                              onClick={() => void enviarWhatsAppOS(itemCorrigido)}
+                              style={mobileActionButton(colors, 'green')}
+                            >
+                              {zapOsCarregando === itemCorrigido.id ? '⏳ Abrindo…' : '📲 Zap'}
                             </button>
-                            <button title="WhatsApp" onClick={() => enviarWhatsAppOS(itemCorrigido)} style={mobileActionButton(colors, 'green')}>
-                              📲 Zap
+                            <button type="button" className="connect-os-action-btn" title="Link OS" onClick={() => void copiarLink(itemCorrigido)} style={mobileActionButton(colors, 'green')}>
+                              🔗 OS
                             </button>
-                            <button title="Editar" onClick={() => editar(itemCorrigido)} style={mobileActionButton(colors, 'blue')}>
+                            {Number(itemCorrigido.orcamentoId || 0) > 0 ? (
+                              <button type="button" className="connect-os-action-btn" title="Link orçamento" onClick={() => void copiarLinkOrcamento(itemCorrigido)} style={mobileActionButton(colors, 'blue')}>
+                                📄 Orç.
+                              </button>
+                            ) : null}
+                            <button type="button" className="connect-os-action-btn" title="Receber pagamento" onClick={() => abrirRecebimentoOS(itemCorrigido)} style={mobileActionButton(colors, 'green')}>
+                              💰 Receber
+                            </button>
+                            <button type="button" className="connect-os-action-btn" title="Emitir recibo" onClick={() => emitirReciboOS(itemCorrigido)} style={mobileActionButton(colors, 'dark')}>
+                              🧾 Recibo
+                            </button>
+                            <button type="button" className="connect-os-action-btn" title="Editar" onClick={() => editar(itemCorrigido)} style={mobileActionButton(colors, 'blue')}>
                               ✎ Editar
                             </button>
-                            <button title="Duplicar" onClick={() => duplicar(itemCorrigido)} style={mobileActionButton(colors, 'dark')}>
+                            <button type="button" className="connect-os-action-btn" title="Duplicar" onClick={() => duplicar(itemCorrigido)} style={mobileActionButton(colors, 'dark')}>
                               ⧉ Duplicar
                             </button>
-                            <button title="Excluir" onClick={() => excluir(itemCorrigido.id)} style={mobileActionButton(colors, 'red')}>
+                            <button type="button" className="connect-os-action-btn" title="Excluir" onClick={() => excluir(itemCorrigido.id)} style={mobileActionButton(colors, 'red')}>
                               🗑 Excluir
                             </button>
                           </div>
@@ -2290,14 +2593,32 @@ export default function OrdemServicoPage() {
                                 </td>
 
                                 <td style={{ ...tdStyle, textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                  <button title="Visualizar" onClick={() => abrir(itemCorrigido)} style={iconButton(colors, 'blue')}>
+                                  <button title="Visualizar" type="button" onClick={() => void abrir(itemCorrigido)} style={iconButton(colors, 'blue')}>
                                     👁
                                   </button>
-                                  <button title="Copiar link" onClick={() => copiarLink(itemCorrigido)} style={iconButton(colors, 'green')}>
+                                  <button title="Link OS" type="button" onClick={() => void copiarLink(itemCorrigido)} style={iconButton(colors, 'green')}>
                                     🔗
                                   </button>
-                                  <button title="WhatsApp" onClick={() => enviarWhatsAppOS(itemCorrigido)} style={iconButton(colors, 'green')}>
-                                    📲
+                                  {Number(itemCorrigido.orcamentoId || 0) > 0 ? (
+                                    <button title="Link orçamento (sua logo)" type="button" onClick={() => void copiarLinkOrcamento(itemCorrigido)} style={iconButton(colors, 'blue')}>
+                                      📄
+                                    </button>
+                                  ) : null}
+                                  <button title="Receber pagamento" onClick={() => abrirRecebimentoOS(itemCorrigido)} style={iconButton(colors, 'green')}>
+                                    💰
+                                  </button>
+                                  <button title="Emitir recibo" onClick={() => emitirReciboOS(itemCorrigido)} style={iconButton(colors, 'dark')}>
+                                    🧾
+                                  </button>
+                                  <button
+                                    title="WhatsApp"
+                                    type="button"
+                                    className={`connect-os-action-btn connect-zap-btn${zapOsCarregando === itemCorrigido.id ? ' connect-zap-btn--loading' : ''}`}
+                                    disabled={zapOsCarregando === itemCorrigido.id}
+                                    onClick={() => void enviarWhatsAppOS(itemCorrigido)}
+                                    style={iconButton(colors, 'green')}
+                                  >
+                                    {zapOsCarregando === itemCorrigido.id ? '⏳' : '📲'}
                                   </button>
                                   <button title="Editar" onClick={() => editar(itemCorrigido)} style={iconButton(colors, 'blue')}>
                                     ✎

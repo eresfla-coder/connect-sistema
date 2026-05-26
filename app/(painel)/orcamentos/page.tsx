@@ -1,10 +1,18 @@
-﻿'use client'
+'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { abrirNovaAbaOuMesma, abrirWhatsappAposPrepararLink, abrirWhatsappUrl, comTimeout, montarUrlWhatsapp } from '@/lib/abrirExterno'
+import { buscarConfiguracao } from '@/lib/configuracaoEmpresa'
+import { montarUrlPublicaDocumento, timestampVersaoPublica } from '@/lib/empresaPublica'
+import { mergeConfigPublicacao, normalizarLogoEmpresaPublica } from '@/lib/documentosPublicos'
 import { gerarFinanceiroDeOrcamento } from '@/lib/financeiro'
 import { supabase } from '@/lib/supabase'
-
+import {
+  extrairFormasPagamentoOrcamento,
+  montarFormasPagamentoOrcamento,
+  OPCOES_PAGAMENTO_ORCAMENTO,
+} from '@/lib/orcamento-pagamento'
 type TipoPessoaCliente = 'PF' | 'PJ'
 
 type Cliente = {
@@ -39,6 +47,7 @@ type ItemOrcamento = {
   tipoCadastro?: TipoCadastroProduto
   id: number
   nome: string
+  descricao?: string
   quantidade: number
   valor: number
   mostrarCliente?: boolean
@@ -62,12 +71,80 @@ type OrcamentoSalvo = {
   desconto: number
   total: number
   formaPagamento: string
+  formasPagamentoLista?: string[]
+  observacaoPagamento?: string
+  ocultarValorUnitarioM2?: boolean
   validade: string
   prazoEntrega: string
   observacao: string
   status: StatusOrcamento
   data: string
   link: string
+  aprovado?: boolean
+  aprovadoEm?: string
+  atualizadoEm?: number
+  osGeradaId?: number
+  osGeradaEm?: string
+  aprovacaoDigital?: {
+    status?: 'aprovado' | 'recusado'
+    nome?: string
+    data?: string
+    assinatura?: string
+    origem?: string
+  }
+  tipoDocumento?: 'orcamento' | 'proposta_comercial'
+  tituloProposta?: string
+  descricaoProposta?: string
+  condicoesPagamento?: string
+  validadeProposta?: string
+  observacoesProposta?: string
+}
+
+type ModeloPropostaRapida = 'servico' | 'produto' | 'moveis' | 'assistencia' | 'grafica'
+
+type OrdemServicoGerada = {
+  id: number
+  numero: string
+  cliente: string
+  telefone: string
+  whatsapp?: string
+  email: string
+  endereco: string
+  equipamento: string
+  marca: string
+  modelo: string
+  serial: string
+  defeito: string
+  checklist: string
+  observacao: string
+  valor: number
+  entrada: number
+  saldo: number
+  status: string
+  prioridade: string
+  tecnico: string
+  previsao: string
+  data: string
+  ultimaAtualizacao: string
+  link: string
+  orcamentoId?: number
+  origem?: string
+}
+
+type OsSupabaseRow = {
+  user_id: string
+  local_id: string
+  numero: string
+  cliente: string
+  telefone: string
+  equipamento: string
+  status: string
+  prioridade: string
+  valor: number
+  entrada: number
+  saldo: number
+  aprovado: boolean
+  payload: Record<string, unknown>
 }
 
 type VendaSalva = {
@@ -145,8 +222,10 @@ function logoPublicaCompactaOrcamento(valor: any) {
 
   if (!logo) return '/logo-connect.png'
 
-  // Nunca embutir base64 no link público: causa URI_TOO_LONG na Vercel e WhatsApp.
-  if (logo.startsWith('data:')) return '/logo-connect.png'
+  // Logo base64 enorme estoura o limite da URL do WhatsApp; link com token traz a logo depois.
+  if (logo.startsWith('data:') && logo.length > 1200) return ''
+
+  if (logo.startsWith('data:')) return logo
 
   if (logo.startsWith('http://') || logo.startsWith('https://')) return logo
   if (logo.startsWith('/')) return logo
@@ -203,12 +282,33 @@ function serializarCompactoOrcamento(dados: any, config: any) {
     ds: Number(dados?.desconto || 0),
     tt: Number(dados?.total || 0),
     fp: String(dados?.formaPagamento || ''),
+    fpl: Array.isArray(dados?.formasPagamentoLista) ? dados.formasPagamentoLista : undefined,
+    opg: String(dados?.observacaoPagamento || ''),
+    om2: Boolean(dados?.ocultarValorUnitarioM2),
     vd: String(dados?.validade || ''),
     pe: String(dados?.prazoEntrega || ''),
     ob: String(dados?.observacao || ''),
+    td: String(dados?.tipoDocumento || ''),
+    tp: String(dados?.tituloProposta || ''),
+    dp: String(dados?.descricaoProposta || ''),
+    cp: String(dados?.condicoesPagamento || ''),
+    vp: String(dados?.validadeProposta || dados?.validade || ''),
+    op: String(dados?.observacoesProposta || ''),
     em: {
       n: String(config?.nomeEmpresa || 'CONNECT SISTEMAS'),
       l: logoPublicaCompactaOrcamento(config?.logoUrl),
+      t: String(
+        config?.celularEmpresa ||
+          config?.celular ||
+          config?.whatsappEmpresa ||
+          config?.whatsapp ||
+          config?.telefoneEmpresa ||
+          config?.telefone ||
+          ''
+      ),
+      e: String(config?.email || ''),
+      en: String(config?.endereco || ''),
+      c: String(config?.cidadeUf || ''),
     },
   }))
 }
@@ -218,6 +318,83 @@ function moeda(valor: number) {
     style: 'currency',
     currency: 'BRL',
   })
+}
+
+const MODELOS_PROPOSTA: Record<
+  ModeloPropostaRapida,
+  {
+    titulo: string
+    descricao: string
+    servico: string
+    prazo: string
+    pagamento: string
+    validade: string
+    observacoes: string
+  }
+> = {
+  servico: {
+    titulo: 'Proposta de Serviços',
+    descricao: 'Apresentamos proposta para execução de serviços conforme especificações acordadas.',
+    servico: 'Prestação de serviço especializado',
+    prazo: '5 a 10 dias úteis após aprovação',
+    pagamento: '50% na aprovação e 50% na entrega',
+    validade: '7 dias',
+    observacoes: 'Garantia conforme combinado. Início após confirmação da proposta.',
+  },
+  produto: {
+    titulo: 'Proposta de Produtos',
+    descricao: 'Proposta comercial para fornecimento de produtos com especificação e entrega programada.',
+    servico: 'Fornecimento de produtos',
+    prazo: '3 a 7 dias úteis após aprovação',
+    pagamento: 'PIX, cartão ou boleto conforme negociação',
+    validade: '5 dias',
+    observacoes: 'Valores sujeitos a disponibilidade de estoque no momento da aprovação.',
+  },
+  moveis: {
+    titulo: 'Proposta de Móveis Planejados',
+    descricao: 'Projeto, fabricação e instalação de móveis planejados sob medida para o ambiente do cliente.',
+    servico: 'Móveis planejados sob medida',
+    prazo: '20 a 35 dias úteis após aprovação e medição',
+    pagamento: 'Entrada na aprovação + saldo na entrega/instalação',
+    validade: '10 dias',
+    observacoes: 'Projeto técnico e medição final podem ajustar valores e prazos.',
+  },
+  assistencia: {
+    titulo: 'Proposta de Assistência Técnica',
+    descricao: 'Atendimento técnico especializado com diagnóstico, reparo e acompanhamento do equipamento.',
+    servico: 'Assistência técnica',
+    prazo: 'Atendimento em até 48h após aprovação',
+    pagamento: 'À vista na aprovação ou conforme combinado',
+    validade: '3 dias',
+    observacoes: 'Peças não inclusas, salvo indicação expressa nesta proposta.',
+  },
+  grafica: {
+    titulo: 'Proposta Gráfica / Papelaria',
+    descricao: 'Produção gráfica personalizada para materiais impressos e comunicação visual.',
+    servico: 'Serviços gráficos e papelaria',
+    prazo: '2 a 5 dias úteis após aprovação da arte',
+    pagamento: '50% na aprovação e 50% na retirada/entrega',
+    validade: '5 dias',
+    observacoes: 'Alterações de arte após aprovação podem gerar custo adicional.',
+  },
+}
+
+function isPropostaComercial(orc?: Partial<OrcamentoSalvo> | null) {
+  return String(orc?.tipoDocumento || '').toLowerCase() === 'proposta_comercial'
+}
+
+function rotuloTipoDocumento(orc?: Partial<OrcamentoSalvo> | null) {
+  return isPropostaComercial(orc) ? 'Proposta Comercial' : 'Orçamento Comercial'
+}
+
+function textoIntroWhatsapp(orc?: Partial<OrcamentoSalvo> | null) {
+  return isPropostaComercial(orc) ? 'Segue sua proposta comercial' : 'Segue seu orçamento'
+}
+
+function parseValorMoedaInput(valor: string) {
+  const normalizado = String(valor || '').replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.')
+  const numero = Number(normalizado)
+  return Number.isFinite(numero) ? numero : 0
 }
 
 function formatarDecimalVisual(valor?: number) {
@@ -336,6 +513,10 @@ function montarTextoBoleto(parcelas: string) {
   return `Boletos com vencimento em ${dias.map((dia) => `${dia} dias`).join(', ')}.`
 }
 
+function pagamentoOrcamentoTexto(formas: string[], observacao: string, parcelas?: string) {
+  return montarFormasPagamentoOrcamento(formas, observacao, parcelas)
+}
+
 function montarFormaPagamentoFinal(base: string, parcelasBoleto?: string) {
   const forma = String(base || '').trim()
   if (!forma.toLowerCase().includes('boleto')) return forma
@@ -348,12 +529,201 @@ function normalizarStatus(status?: string): StatusOrcamento {
   return 'Pendente'
 }
 
+type FonteStatusOrcamento = {
+  status?: string
+  aprovado?: boolean
+  aprovadoEm?: string
+  aprovacaoDigital?: OrcamentoSalvo['aprovacaoDigital']
+}
+
+function fonteStatusDeOrcamento(orc?: Partial<OrcamentoSalvo> | null): FonteStatusOrcamento | null {
+  if (!orc) return null
+  return {
+    status: orc.status,
+    aprovado: orc.aprovado,
+    aprovadoEm: orc.aprovadoEm,
+    aprovacaoDigital: orc.aprovacaoDigital,
+  }
+}
+
+function fonteStatusDePublico(publico?: Record<string, unknown> | null): FonteStatusOrcamento | null {
+  if (!publico || typeof publico !== 'object') return null
+  const aprovacaoDigital = publico.aprovacaoDigital as OrcamentoSalvo['aprovacaoDigital']
+  return {
+    status: String(publico.status || ''),
+    aprovado:
+      publico.aprovado === true ||
+      aprovacaoDigital?.status === 'aprovado' ||
+      String(publico.status || '').toLowerCase().includes('aprov'),
+    aprovadoEm: String(publico.aprovadoEm || aprovacaoDigital?.data || ''),
+    aprovacaoDigital,
+  }
+}
+
+function fonteStatusDeRow(row: OrcamentoRow): FonteStatusOrcamento {
+  const payload =
+    row.payload && typeof row.payload === 'object'
+      ? (row.payload as Partial<OrcamentoSalvo>)
+      : null
+
+  return {
+    status: payload?.status || row.status,
+    aprovado: row.aprovado === true || payload?.aprovado === true,
+    aprovadoEm: payload?.aprovadoEm,
+    aprovacaoDigital: payload?.aprovacaoDigital,
+  }
+}
+
+function statusFonteAprovado(fonte?: FonteStatusOrcamento | null): boolean {
+  if (!fonte) return false
+  if (fonte.aprovado === true) return true
+  const st = String(fonte.status || '').toLowerCase()
+  return st.includes('aprov') || st === 'convertido'
+}
+
+function statusFonteCancelado(fonte?: FonteStatusOrcamento | null): boolean {
+  if (!fonte) return false
+  if (fonte.aprovacaoDigital?.status === 'recusado') return true
+  const st = String(fonte.status || '').toLowerCase()
+  return st.includes('cancel') || st.includes('recus')
+}
+
+function statusFonteConvertido(fonte?: FonteStatusOrcamento | null): boolean {
+  if (!fonte) return false
+  return normalizarStatus(fonte.status) === 'Convertido'
+}
+
+/** Aprovado é sticky: se qualquer fonte indicar aprovado, nunca volta para Pendente. */
+function resolverStatusOrcamento(
+  local?: FonteStatusOrcamento | null,
+  remoto?: FonteStatusOrcamento | null,
+  publico?: FonteStatusOrcamento | null,
+): Pick<OrcamentoSalvo, 'status' | 'aprovado' | 'aprovadoEm' | 'aprovacaoDigital'> {
+  if (publico?.aprovacaoDigital?.status === 'recusado' || statusFonteCancelado(publico)) {
+    return {
+      status: 'Cancelado',
+      aprovado: false,
+      aprovadoEm: publico?.aprovadoEm,
+      aprovacaoDigital: publico?.aprovacaoDigital,
+    }
+  }
+
+  const convertido =
+    statusFonteConvertido(publico) ||
+    statusFonteConvertido(remoto) ||
+    statusFonteConvertido(local)
+
+  const aprovadoPublico = statusFonteAprovado(publico) || publico?.aprovacaoDigital?.status === 'aprovado'
+  const aprovadoRemoto = statusFonteAprovado(remoto)
+  const aprovadoLocal = statusFonteAprovado(local)
+
+  if (aprovadoPublico) {
+    return {
+      status: convertido ? 'Convertido' : 'Aprovado',
+      aprovado: true,
+      aprovadoEm: publico?.aprovadoEm || publico?.aprovacaoDigital?.data,
+      aprovacaoDigital: publico?.aprovacaoDigital,
+    }
+  }
+
+  if (aprovadoRemoto) {
+    return {
+      status: convertido ? 'Convertido' : 'Aprovado',
+      aprovado: true,
+      aprovadoEm: remoto?.aprovadoEm || local?.aprovadoEm,
+      aprovacaoDigital: remoto?.aprovacaoDigital || local?.aprovacaoDigital || publico?.aprovacaoDigital,
+    }
+  }
+
+  if (aprovadoLocal) {
+    return {
+      status: convertido || statusFonteConvertido(local) ? 'Convertido' : 'Aprovado',
+      aprovado: true,
+      aprovadoEm: local?.aprovadoEm || remoto?.aprovadoEm,
+      aprovacaoDigital: local?.aprovacaoDigital || remoto?.aprovacaoDigital || publico?.aprovacaoDigital,
+    }
+  }
+
+  if (convertido) {
+    return {
+      status: 'Convertido',
+      aprovado: true,
+      aprovadoEm: publico?.aprovadoEm || remoto?.aprovadoEm || local?.aprovadoEm,
+      aprovacaoDigital: publico?.aprovacaoDigital || remoto?.aprovacaoDigital || local?.aprovacaoDigital,
+    }
+  }
+
+  if (statusFonteCancelado(remoto) || statusFonteCancelado(local)) {
+    return {
+      status: 'Cancelado',
+      aprovado: false,
+      aprovadoEm: remoto?.aprovadoEm || local?.aprovadoEm,
+      aprovacaoDigital: remoto?.aprovacaoDigital || local?.aprovacaoDigital,
+    }
+  }
+
+  const statusCandidato =
+    (publico?.status && normalizarStatus(publico.status) !== 'Pendente' && publico.status) ||
+    (remoto?.status && normalizarStatus(remoto.status) !== 'Pendente' && remoto.status) ||
+    local?.status
+
+  return {
+    status: normalizarStatus(statusCandidato),
+    aprovado: false,
+    aprovadoEm: undefined,
+    aprovacaoDigital: publico?.aprovacaoDigital || local?.aprovacaoDigital || remoto?.aprovacaoDigital,
+  }
+}
+
+function aplicarStatusResolvido(
+  orcamento: OrcamentoSalvo,
+  local?: OrcamentoSalvo | null,
+  publico?: Record<string, unknown> | null,
+): OrcamentoSalvo {
+  const resolvido = resolverStatusOrcamento(
+    fonteStatusDeOrcamento(local || orcamento),
+    fonteStatusDeOrcamento(orcamento),
+    fonteStatusDePublico(publico),
+  )
+
+  return {
+    ...orcamento,
+    status: resolvido.status,
+    aprovado: resolvido.aprovado,
+    aprovadoEm: resolvido.aprovadoEm || orcamento.aprovadoEm,
+    aprovacaoDigital: resolvido.aprovacaoDigital || orcamento.aprovacaoDigital,
+  }
+}
+
+function mesclarParOrcamentos(remoto: OrcamentoSalvo, local: OrcamentoSalvo): OrcamentoSalvo {
+  const resolvido = resolverStatusOrcamento(
+    fonteStatusDeOrcamento(local),
+    fonteStatusDeOrcamento(remoto),
+    null,
+  )
+  const maisRecente =
+    Number(local.atualizadoEm || 0) >= Number(remoto.atualizadoEm || 0) ? local : remoto
+
+  return {
+    ...remoto,
+    ...maisRecente,
+    id: local.id || remoto.id,
+    status: resolvido.status,
+    aprovado: resolvido.aprovado,
+    aprovadoEm: resolvido.aprovadoEm || maisRecente.aprovadoEm || local.aprovadoEm || remoto.aprovadoEm,
+    aprovacaoDigital:
+      resolvido.aprovacaoDigital ||
+      maisRecente.aprovacaoDigital ||
+      local.aprovacaoDigital ||
+      remoto.aprovacaoDigital,
+    osGeradaId: maisRecente.osGeradaId || local.osGeradaId || remoto.osGeradaId,
+    osGeradaEm: maisRecente.osGeradaEm || local.osGeradaEm || remoto.osGeradaEm,
+  }
+}
+
 type OrcamentoRow = {
   user_id?: string
   local_id?: string
-  numero?: string
-  cliente?: string
-  telefone?: string
   cliente_nome?: string
   cliente_telefone?: string
   cliente_email?: string
@@ -361,9 +731,7 @@ type OrcamentoRow = {
   itens?: ItemOrcamento[]
   subtotal?: number
   desconto?: number
-  entrega?: number
   total?: number
-  observacao?: string
   observacoes?: string
   status?: string
   aprovado?: boolean
@@ -374,79 +742,112 @@ type OrcamentoRow = {
   payload?: Partial<OrcamentoSalvo> | Record<string, unknown>
 }
 
-function orcamentoParaRowSupabase(orc: OrcamentoSalvo, userId: string): OrcamentoRow {
-  const status = normalizarStatus(orc.status)
-  const clienteNome = String(orc.cliente?.nome || '').trim()
-  const clienteTel = String(orc.cliente?.telefone || '').trim()
-  const observacao = String(orc.observacao || '')
+type OrcamentoSupabaseUpsert = {
+  user_id: string
+  local_id: string
+  aprovado: boolean
+  payload: Record<string, unknown>
+}
+
+function serializarPayloadOrcamento(orcamento: OrcamentoSalvo): Record<string, unknown> {
+  try {
+    return JSON.parse(JSON.stringify(orcamento)) as Record<string, unknown>
+  } catch {
+    return { ...orcamento } as unknown as Record<string, unknown>
+  }
+}
+
+function orcamentoParaUpsertSupabase(orc: OrcamentoSalvo, userId: string): OrcamentoSupabaseUpsert {
+  const orcNormalizado = aplicarStatusResolvido(orc)
+  const status = normalizarStatus(orcNormalizado.status)
 
   return {
     user_id: userId,
     local_id: String(orc.id),
-    numero: orc.numero,
-    cliente: clienteNome,
-    telefone: clienteTel,
-    itens: orc.itens,
-    subtotal: orc.subtotal,
-    desconto: orc.desconto,
-    entrega: orc.entrega,
-    total: orc.total,
-    observacao,
-    status,
-    aprovado: status === 'Aprovado' || status === 'Convertido',
-    payload: orc,
-    cliente_nome: clienteNome,
-    cliente_telefone: clienteTel,
-    observacoes: observacao,
-    data: orc.data,
-    validade: orc.validade,
-    prazo_entrega: orc.prazoEntrega,
-    forma_pagamento: orc.formaPagamento,
-    cliente_email: orc.cliente?.email || '',
-    cliente_endereco: orc.cliente?.endereco || '',
+    aprovado: status === 'Aprovado' || status === 'Convertido' || orcNormalizado.aprovado === true,
+    payload: serializarPayloadOrcamento(orcNormalizado),
   }
 }
 
-function orcamentoDeRowSupabase(row: OrcamentoRow): OrcamentoSalvo {
+function orcamentoDeRowSupabase(row: OrcamentoRow, local?: OrcamentoSalvo | null): OrcamentoSalvo {
   const payload = row.payload && typeof row.payload === 'object' ? row.payload as Partial<OrcamentoSalvo> : null
   const localId = Number(row.local_id || payload?.id || 0) || Date.now()
 
   if (payload?.numero) {
-    return {
-      ...(payload as OrcamentoSalvo),
-      id: localId,
-      status: normalizarStatus(payload.status || row.status),
-    }
+    return aplicarStatusResolvido(
+      {
+        ...(payload as OrcamentoSalvo),
+        id: localId,
+        status: normalizarStatus(payload.status || row.status),
+      },
+      local,
+    )
   }
 
-  const clienteNome = String(row.cliente || row.cliente_nome || '').trim()
-  const clienteTel = String(row.telefone || row.cliente_telefone || '').trim()
+  const clienteNome = String(row.cliente_nome || '').trim()
+  const clienteTel = String(row.cliente_telefone || '').trim()
+
+  return aplicarStatusResolvido(
+    {
+      id: localId,
+      numero: String(payload?.numero || localId),
+      titulo: 'Orçamento Comercial',
+      cliente: clienteNome
+        ? {
+            id: localId,
+            nome: clienteNome,
+            telefone: clienteTel,
+            email: String(row.cliente_email || ''),
+            endereco: String(row.cliente_endereco || ''),
+          }
+        : null,
+      itens: Array.isArray(row.itens) ? row.itens : [],
+      subtotal: Number(row.subtotal || 0),
+      entrega: 0,
+      desconto: Number(row.desconto || 0),
+      total: Number(row.total || 0),
+      formaPagamento: String(row.forma_pagamento || 'PIX'),
+      validade: String(row.validade || ''),
+      prazoEntrega: String(row.prazo_entrega || ''),
+      observacao: String(row.observacoes || ''),
+      status: normalizarStatus(row.status),
+      data: String(row.data || new Date().toLocaleDateString('pt-BR')),
+      link: '',
+    },
+    local,
+  )
+}
+
+function osAprovadoPorStatus(status?: string) {
+  const valor = String(status || '').toLowerCase()
+  return valor.includes('aprov') || valor === 'finalizada' || valor === 'entregue'
+}
+
+function serializarPayloadOS(os: OrdemServicoGerada): Record<string, unknown> {
+  try {
+    return JSON.parse(JSON.stringify(os)) as Record<string, unknown>
+  } catch {
+    return { ...os } as unknown as Record<string, unknown>
+  }
+}
+
+function osParaRowSupabase(os: OrdemServicoGerada, userId: string): OsSupabaseRow {
+  const status = String(os.status || 'Aberta')
 
   return {
-    id: localId,
-    numero: String(row.numero || ''),
-    titulo: 'Orçamento Comercial',
-    cliente: clienteNome
-      ? {
-          id: localId,
-          nome: clienteNome,
-          telefone: clienteTel,
-          email: String(row.cliente_email || ''),
-          endereco: String(row.cliente_endereco || ''),
-        }
-      : null,
-    itens: Array.isArray(row.itens) ? row.itens : [],
-    subtotal: Number(row.subtotal || 0),
-    entrega: Number(row.entrega || 0),
-    desconto: Number(row.desconto || 0),
-    total: Number(row.total || 0),
-    formaPagamento: String(row.forma_pagamento || 'PIX'),
-    validade: String(row.validade || ''),
-    prazoEntrega: String(row.prazo_entrega || ''),
-    observacao: String(row.observacao || row.observacoes || ''),
-    status: normalizarStatus(row.status),
-    data: String(row.data || new Date().toLocaleDateString('pt-BR')),
-    link: '',
+    user_id: userId,
+    local_id: String(os.id),
+    numero: String(os.numero || ''),
+    cliente: String(os.cliente || '').trim(),
+    telefone: String(os.telefone || os.whatsapp || '').trim(),
+    equipamento: String(os.equipamento || ''),
+    status,
+    prioridade: String(os.prioridade || 'Média'),
+    valor: Number(os.valor || 0),
+    entrada: Number(os.entrada || 0),
+    saldo: Number(os.saldo || 0),
+    aprovado: osAprovadoPorStatus(status),
+    payload: serializarPayloadOS(os),
   }
 }
 
@@ -466,6 +867,7 @@ export default function OrcamentoPage() {
   ]
 
   const [isMobile, setIsMobile] = useState(false)
+  const [zapOrcCarregando, setZapOrcCarregando] = useState<number | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [darkMode, setDarkMode] = useState(false)
 
@@ -517,6 +919,9 @@ export default function OrcamentoPage() {
   const [mostrarEscolhaModelo, setMostrarEscolhaModelo] = useState(false)
   const [formAberto, setFormAberto] = useState(false)
   const [formaPagamento, setFormaPagamento] = useState('PIX')
+  const [formasPagamentoSelecionadas, setFormasPagamentoSelecionadas] = useState<string[]>(['Pix'])
+  const [observacaoFormasPagamento, setObservacaoFormasPagamento] = useState('')
+  const [ocultarValorUnitarioM2, setOcultarValorUnitarioM2] = useState(false)
   const [parcelasBoleto, setParcelasBoleto] = useState('')
   const [validade, setValidade] = useState('')
   const [prazoEntrega, setPrazoEntrega] = useState('')
@@ -531,12 +936,31 @@ export default function OrcamentoPage() {
   const [orcamentoMenuAberto, setOrcamentoMenuAberto] = useState<OrcamentoSalvo | null>(null)
   const syncAprovacaoPublicaRodandoRef = useRef(false)
   const ultimaSyncAprovacaoPublicaRef = useRef(0)
+  const osAprovacaoRodandoRef = useRef(false)
+  const osAprovacaoCriadasRef = useRef<Set<string>>(new Set())
+  const syncOrcamentosRodandoRef = useRef(false)
+  const syncOrcamentosPendenteRef = useRef(false)
+  const ultimaCargaOrcamentosRef = useRef(0)
+  const orcamentosCountRef = useRef(0)
 
   const [mostrarNovoCliente, setMostrarNovoCliente] = useState(false)
   const [tipoPessoa, setTipoPessoa] = useState<TipoPessoaCliente>('PF')
   const [novoCliente, setNovoCliente] = useState({
     ...NOVO_CLIENTE_INICIAL,
   })
+
+  const [modalPropostaAberto, setModalPropostaAberto] = useState(false)
+  const [modeloPropostaRapida, setModeloPropostaRapida] = useState<ModeloPropostaRapida>('servico')
+  const [propostaClienteBusca, setPropostaClienteBusca] = useState('')
+  const [propostaCliente, setPropostaCliente] = useState<Cliente | null>(null)
+  const [propostaTitulo, setPropostaTitulo] = useState('')
+  const [propostaDescricao, setPropostaDescricao] = useState('')
+  const [propostaServicoPrincipal, setPropostaServicoPrincipal] = useState('')
+  const [propostaValorTotal, setPropostaValorTotal] = useState('')
+  const [propostaPrazoEntrega, setPropostaPrazoEntrega] = useState('')
+  const [propostaCondicoesPagamento, setPropostaCondicoesPagamento] = useState('')
+  const [propostaValidade, setPropostaValidade] = useState('')
+  const [propostaObservacoes, setPropostaObservacoes] = useState('')
 
   function carregarOrcamentosLocalFallback() {
     try {
@@ -552,40 +976,372 @@ export default function OrcamentoPage() {
     } catch {}
   }
 
-  async function carregarOrcamentosSupabase() {
+  function lerOrcamentosLocalStorage() {
     try {
+      const salvos = localStorage.getItem(ORCAMENTOS_KEY)
+      const lista = salvos ? JSON.parse(salvos) : []
+      if (!Array.isArray(lista)) return [] as OrcamentoSalvo[]
+      return lista.map((item) => ({ ...item, status: normalizarStatus(item.status) })) as OrcamentoSalvo[]
+    } catch (error) {
+      console.error('[orcamentos] erro ao ler localStorage:', error)
+      return [] as OrcamentoSalvo[]
+    }
+  }
+
+  function mesclarOrcamentos(cloud: OrcamentoSalvo[], local: OrcamentoSalvo[]) {
+    const mapaCloud = new Map<string, OrcamentoSalvo>()
+    const mapaLocal = new Map<string, OrcamentoSalvo>()
+
+    for (const item of cloud) {
+      if (item?.id) mapaCloud.set(String(item.id), item)
+    }
+    for (const item of local) {
+      if (item?.id) mapaLocal.set(String(item.id), item)
+    }
+
+    const ids = new Set([...mapaCloud.keys(), ...mapaLocal.keys()])
+    return Array.from(ids)
+      .map((id) => {
+        const remoto = mapaCloud.get(id)
+        const itemLocal = mapaLocal.get(id)
+        if (remoto && itemLocal) return mesclarParOrcamentos(remoto, itemLocal)
+        return aplicarStatusResolvido((remoto || itemLocal) as OrcamentoSalvo, itemLocal || null)
+      })
+      .sort((a, b) => Number(b.id) - Number(a.id))
+  }
+
+  function aplicarOrcamentos(lista: OrcamentoSalvo[], contexto: string) {
+    const locais = lerOrcamentosLocalStorage().map((item) => aplicarStatusResolvido(item))
+    if (lista.length === 0 && locais.length > 0) {
+      console.warn('[orcamentos] Supabase retornou vazio, mantendo cache local.', {
+        contexto,
+        locais: locais.length,
+        idsLocais: locais.map((item) => item.id).slice(0, 8),
+      })
+      setOrcamentosSalvos(locais)
+      try {
+        localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(locais))
+      } catch (error) {
+        console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
+      }
+      return false
+    }
+
+    const listaNormalizada = mesclarOrcamentos(lista, locais)
+    setOrcamentosSalvos(listaNormalizada)
+    try {
+      localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(listaNormalizada))
+    } catch (error) {
+      console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
+    }
+    return true
+  }
+
+  function isMobileOrcamentos() {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth <= 900 || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+  }
+
+  function aguardarOrcamentos(ms: number) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms))
+  }
+
+  function origemDispositivoOrcamentos() {
+    return isMobileOrcamentos() ? 'mobile' : 'PC'
+  }
+
+  async function obterAuthOrcamentos(maxTentativas = 6) {
+    for (let tentativa = 1; tentativa <= maxTentativas; tentativa += 1) {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+      if (sessionData?.session?.user?.id) {
+        const auth = {
+          userId: sessionData.session.user.id,
+          email: sessionData.session.user.email || '',
+        }
+        return auth
+      }
+      if (sessionError) console.error('[Orcamentos] getSession falhou:', sessionError.message)
+
+      const { data: userData, error: userError } = await supabase.auth.getUser()
+      if (userData?.user?.id) {
+        const auth = {
+          userId: userData.user.id,
+          email: userData.user.email || '',
+        }
+        return auth
+      }
+      if (userError) console.error('[Orcamentos] getUser falhou:', userError.message)
+
+      if (tentativa < maxTentativas) {
+        await aguardarOrcamentos(220 + tentativa * 120)
+      }
+    }
+
+    return null
+  }
+
+  async function obterUserIdOrcamentos(maxTentativas = 6) {
+    return (await obterAuthOrcamentos(maxTentativas))?.userId || null
+  }
+
+  async function carregarOrcamentosSupabase(motivo = 'manual') {
+    if (syncOrcamentosRodandoRef.current) {
+      syncOrcamentosPendenteRef.current = true
+      return
+    }
+    syncOrcamentosRodandoRef.current = true
+    try {
+      const mobile = isMobileOrcamentos()
+      const locaisAntes = lerOrcamentosLocalStorage()
+
+      const auth = await obterAuthOrcamentos(mobile ? 8 : 5)
+      const userId = auth?.userId || null
+      if (!userId) {
+        console.error('[Orcamentos] carregar abortado: user_id ausente.')
+        carregarOrcamentosLocalFallback()
+        return
+      }
+
+      const locais = locaisAntes.length ? locaisAntes : lerOrcamentosLocalStorage()
+
       const { data, error } = await supabase
         .from('orcamentos')
         .select('*')
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
 
       if (error) throw error
 
-      const normalizados = ((data || []) as OrcamentoRow[])
-        .map(orcamentoDeRowSupabase)
-        .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+      const normalizados = ((data || []) as OrcamentoRow[]).map((row) => {
+        const localId = String(row.local_id || (row.payload as Partial<OrcamentoSalvo> | undefined)?.id || '')
+        const itemLocal = locais.find((item) => String(item.id) === localId)
+        return orcamentoDeRowSupabase(row, itemLocal)
+      })
 
-      setOrcamentosSalvos(normalizados)
-      try { localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(normalizados)) } catch {}
-    } catch {
+      if (normalizados.length === 0 && locais.length > 0) {
+        console.warn('[Orcamentos] Supabase retornou lista vazia. Tentando subir cache local antes de exibir.')
+        for (const orcamento of locais) {
+          await persistirOrcamentoSupabase(orcamento, userId)
+        }
+        aplicarOrcamentos(locais, 'carregar-vazio-com-cache')
+        return
+      }
+
+      const listaFinal = mesclarOrcamentos(normalizados, locais)
+      aplicarOrcamentos(listaFinal, 'carregarOrcamentosSupabase')
+      ultimaCargaOrcamentosRef.current = Date.now()
+    } catch (error) {
+      console.error('[Orcamentos] erro ao carregar do Supabase:', error)
       carregarOrcamentosLocalFallback()
+    } finally {
+      syncOrcamentosRodandoRef.current = false
+      if (syncOrcamentosPendenteRef.current) {
+        syncOrcamentosPendenteRef.current = false
+        window.setTimeout(() => void carregarOrcamentosSupabase('sync-pendente'), 350)
+      }
     }
   }
 
-  async function persistirOrcamentoSupabase(orcamento: OrcamentoSalvo) {
+  async function persistirOrcamentoSupabase(orcamento: OrcamentoSalvo, userIdParam?: string | null) {
     try {
-      const { data } = await supabase.auth.getUser()
-      const userId = data?.user?.id
-      if (!userId) return
+      const auth = userIdParam ? null : await obterAuthOrcamentos()
+      const userId = userIdParam || auth?.userId || null
+      if (!userId) {
+        console.error('[Orcamentos] persistir abortado: user_id ausente.', {
+          origem: origemDispositivoOrcamentos(),
+          local_id: String(orcamento.id),
+          quantidadeEnviada: 1,
+          tabela: 'orcamentos',
+          onConflict: 'user_id,local_id',
+        })
+        return false
+      }
 
-      const row = orcamentoParaRowSupabase(orcamento, userId)
-      const { error } = await supabase
+      const row = orcamentoParaUpsertSupabase(orcamento, userId)
+      const { data, error } = await supabase
         .from('orcamentos')
         .upsert(row, { onConflict: 'user_id,local_id' })
+        .select('local_id,payload')
 
-      if (error) console.warn('[orcamentos] erro ao persistir:', error.message)
+      if (error) {
+        const err = error as { code?: string; message?: string; details?: string; hint?: string }
+        console.error('[Orcamentos] UPSERT public.orcamentos falhou:', {
+          origem: origemDispositivoOrcamentos(),
+          user_id: row.user_id,
+          email: auth?.email || '(userIdParam)',
+          local_id: row.local_id,
+          quantidadeEnviada: 1,
+          objetoEnviado: row,
+          tabela: 'orcamentos',
+          onConflict: 'user_id,local_id',
+          'error.code': err.code ?? '(sem code)',
+          'error.message': err.message ?? '(sem message)',
+          'error.details': err.details ?? '(sem details)',
+          'error.hint': err.hint ?? '(sem hint)',
+          errorCompleto: error,
+        })
+        return false
+      }
+
+      return true
     } catch (e) {
-      console.warn('[orcamentos] erro ao persistir:', e)
+      console.error('[Orcamentos] exceção ao persistir:', {
+        origem: origemDispositivoOrcamentos(),
+        user_id: userIdParam || null,
+        local_id: String(orcamento.id),
+        quantidadeEnviada: 1,
+        objetoEnviado: userIdParam ? orcamentoParaUpsertSupabase(orcamento, userIdParam) : orcamento,
+        tabela: 'orcamentos',
+        onConflict: 'user_id,local_id',
+        errorCompleto: e,
+      })
+      return false
+    }
+  }
+
+  async function obterUserIdPainel() {
+    const { data: sessionData } = await supabase.auth.getSession()
+    if (sessionData?.session?.user?.id) return sessionData.session.user.id
+
+    const { data: userData } = await supabase.auth.getUser()
+    return userData?.user?.id || null
+  }
+
+  function lerOrdensServicoLocais(): OrdemServicoGerada[] {
+    try {
+      const raw = localStorage.getItem(OS_KEY)
+      const lista = raw ? JSON.parse(raw) : []
+      return Array.isArray(lista) ? lista : []
+    } catch (error) {
+      console.error('[orcamentos] erro ao ler OS locais:', error)
+      return []
+    }
+  }
+
+  function proximoNumeroOS(ordens: OrdemServicoGerada[]) {
+    const numeros = ordens.map((o) => Number(o.numero)).filter((n) => !Number.isNaN(n))
+    const maior = numeros.length ? Math.max(...numeros) : 0
+    return String(maior + 1).padStart(4, '0')
+  }
+
+  function montarOSDeOrcamentoAprovado(orc: OrcamentoSalvo, ordens: OrdemServicoGerada[]): OrdemServicoGerada {
+    const novoId = Date.now()
+    const hoje = new Date().toLocaleDateString('pt-BR')
+
+    return {
+      id: novoId,
+      numero: proximoNumeroOS(ordens),
+      cliente: orc.cliente?.nome || '',
+      telefone: orc.cliente?.telefone || '',
+      whatsapp: orc.cliente?.telefone || '',
+      email: orc.cliente?.email || '',
+      endereco: orc.cliente?.endereco || '',
+      equipamento: 'Serviço vindo do orçamento aprovado',
+      marca: '',
+      modelo: '',
+      serial: '',
+      defeito: orc.observacao || '',
+      checklist: '',
+      observacao: `Gerada automaticamente pela aprovação digital do orçamento ${orc.numero || orc.id}.`,
+      valor: Number(orc.total || 0),
+      entrada: 0,
+      saldo: Number(orc.total || 0),
+      status: 'Aberta',
+      prioridade: 'Média',
+      tecnico: '',
+      previsao: '',
+      data: hoje,
+      ultimaAtualizacao: hoje,
+      link: `${SITE_URL}/impressao-ordem-servico/${novoId}`,
+      orcamentoId: orc.id,
+      origem: 'aprovação digital',
+    }
+  }
+
+  async function persistirOrdemServicoSupabase(os: OrdemServicoGerada, userId: string) {
+    const row = osParaRowSupabase(os, userId)
+    const { data, error } = await supabase
+      .from('ordens_servico')
+      .upsert(row, { onConflict: 'user_id,local_id' })
+      .select('local_id,payload')
+
+    if (error) {
+      const err = error as { code?: string; message?: string; details?: string; hint?: string }
+      console.error('[Orcamentos] erro Supabase ao criar OS automática:', {
+        origem: origemDispositivoOrcamentos(),
+        user_id: row.user_id,
+        email: '(painel autenticado)',
+        local_id: row.local_id,
+        quantidadeEnviada: 1,
+        objetoEnviado: row,
+        tabela: 'ordens_servico',
+        onConflict: 'user_id,local_id',
+        'error.code': err.code ?? '(sem code)',
+        'error.message': err.message ?? '(sem message)',
+        'error.details': err.details ?? '(sem details)',
+        'error.hint': err.hint ?? '(sem hint)',
+        errorCompleto: error,
+      })
+      return false
+    }
+
+    return true
+  }
+
+  async function garantirOSParaOrcamentoAprovado(orc: OrcamentoSalvo): Promise<OrcamentoSalvo> {
+    const chave = String(orc.id)
+    if (osAprovacaoCriadasRef.current.has(chave) || orc.osGeradaId) return orc
+
+    const userId = await obterUserIdPainel()
+    if (!userId) {
+      console.error('[orcamentos] aprovação recebida, mas sessão autenticada indisponível para criar OS.')
+      return orc
+    }
+
+    const ordensLocais = lerOrdensServicoLocais()
+    const localExistente = ordensLocais.find((os) => String(os.orcamentoId) === chave)
+    if (localExistente) {
+      osAprovacaoCriadasRef.current.add(chave)
+      return { ...orc, osGeradaId: Number(localExistente.id), osGeradaEm: orc.osGeradaEm || new Date().toLocaleString('pt-BR') }
+    }
+
+    try {
+      const { data: rows, error } = await supabase
+        .from('ordens_servico')
+        .select('local_id,numero,payload')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('[orcamentos] erro ao consultar OS existentes antes de criar:', error)
+      } else {
+        const existente = ((rows || []) as Array<{ local_id?: string; payload?: Record<string, unknown> }>).find(
+          (row) => String(row.payload?.orcamentoId || '') === chave
+        )
+        if (existente?.local_id) {
+          osAprovacaoCriadasRef.current.add(chave)
+          return { ...orc, osGeradaId: Number(existente.local_id), osGeradaEm: orc.osGeradaEm || new Date().toLocaleString('pt-BR') }
+        }
+      }
+
+      const novaOS = montarOSDeOrcamentoAprovado(orc, ordensLocais)
+      const ok = await persistirOrdemServicoSupabase(novaOS, userId)
+      if (!ok) return orc
+
+      localStorage.setItem(OS_KEY, JSON.stringify([novaOS, ...ordensLocais]))
+      window.dispatchEvent(new Event('connect-data-change'))
+      osAprovacaoCriadasRef.current.add(chave)
+
+      const atualizado: OrcamentoSalvo = {
+        ...orc,
+        osGeradaId: novaOS.id,
+        osGeradaEm: new Date().toLocaleString('pt-BR'),
+      }
+      await persistirOrcamentoSupabase(atualizado)
+      return atualizado
+    } catch (error) {
+      console.error('[orcamentos] erro ao garantir OS automática:', error)
+      return orc
     }
   }
 
@@ -659,6 +1415,10 @@ export default function OrcamentoPage() {
   }, [toast])
 
   useEffect(() => {
+    orcamentosCountRef.current = orcamentosSalvos.length
+  }, [orcamentosSalvos.length])
+
+  useEffect(() => {
     const salvoConfig = localStorage.getItem(CONFIG_KEY)
     if (salvoConfig) {
       try {
@@ -671,6 +1431,16 @@ export default function OrcamentoPage() {
         setPrazoEntrega(dados.prazoEntregaPadrao || '')
       } catch {}
     }
+
+    void buscarConfiguracao()
+      .then((nuvem) => {
+        setConfig((anterior) => ({
+          ...anterior,
+          ...nuvem,
+          logoUrl: normalizarLogoEmpresaPublica(nuvem.logoUrl || anterior.logoUrl),
+        }))
+      })
+      .catch(() => {})
 
     const salvoFormas = localStorage.getItem(FORMAS_KEY)
     if (salvoFormas) {
@@ -694,7 +1464,7 @@ export default function OrcamentoPage() {
       } catch {}
     }
 
-    void carregarOrcamentosSupabase()
+    void carregarOrcamentosSupabase('abertura-painel')
 
     const salvosProdutos = localStorage.getItem(PRODUTOS_KEY)
     if (salvosProdutos) {
@@ -749,9 +1519,12 @@ export default function OrcamentoPage() {
         const salvosOrcamentos = localStorage.getItem(ORCAMENTOS_KEY)
         if (salvosOrcamentos) {
           const lista = JSON.parse(salvosOrcamentos)
-          if (Array.isArray(lista)) setOrcamentosSalvos(lista.map((item) => ({ ...item, status: normalizarStatus(item.status) })))
+          if (Array.isArray(lista) && lista.length > 0 && ultimaCargaOrcamentosRef.current === 0) {
+            setOrcamentosSalvos(lista.map((item) => ({ ...item, status: normalizarStatus(item.status) })))
+          }
         }
       } catch {}
+      void carregarOrcamentosSupabase('connect-cloud-hydrated')
       try {
         const salvosProdutos = localStorage.getItem(PRODUTOS_KEY)
         if (salvosProdutos) {
@@ -795,6 +1568,51 @@ export default function OrcamentoPage() {
     return () => window.removeEventListener('connect-cloud-hydrated', carregarDadosLocaisV78)
   }, [])
 
+  useEffect(() => {
+    let ativo = true
+
+    const rodarCargaSupabase = (motivo: string) => {
+      if (!ativo) return
+      void carregarOrcamentosSupabase(motivo)
+    }
+
+    const timers = [
+      window.setTimeout(() => rodarCargaSupabase('auth-estabilizando-350ms'), 350),
+      window.setTimeout(() => rodarCargaSupabase('auth-estabilizando-1500ms'), 1500),
+      window.setTimeout(() => rodarCargaSupabase('auth-estabilizando-3500ms'), 3500),
+    ]
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!ativo || !session?.user?.id) return
+      rodarCargaSupabase(`auth-${event}`)
+    })
+
+    const aoFoco = () => rodarCargaSupabase('window-focus')
+    const aoVoltarVisivel = () => {
+      if (document.visibilityState === 'visible') rodarCargaSupabase('visibility-visible')
+    }
+
+    window.addEventListener('focus', aoFoco)
+    document.addEventListener('visibilitychange', aoVoltarVisivel)
+
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      const tempoSemCarga = Date.now() - ultimaCargaOrcamentosRef.current
+      if (tempoSemCarga > 30000 || orcamentosCountRef.current === 0) {
+        rodarCargaSupabase('polling-leve')
+      }
+    }, 25000)
+
+    return () => {
+      ativo = false
+      timers.forEach((timer) => window.clearTimeout(timer))
+      subscription.unsubscribe()
+      window.removeEventListener('focus', aoFoco)
+      document.removeEventListener('visibilitychange', aoVoltarVisivel)
+      window.clearInterval(interval)
+    }
+  }, [])
+
   const produtoSelecionado = useMemo(() => produtos.find((produto) => produto.id === produtoSelecionadoId) || null, [produtos, produtoSelecionadoId])
   const usaCampoM2 = produtoSelecionado?.tipoCalculo === 'm2'
   const usaCampoPeso = produtoSelecionado?.tipoCalculo === 'peso'
@@ -834,6 +1652,19 @@ export default function OrcamentoPage() {
       ticketMedio,
     }
   }, [orcamentosSalvos])
+
+  const clientesPropostaFiltrados = useMemo(() => {
+    const busca = propostaClienteBusca.trim().toLowerCase()
+    if (!busca) return clientes.slice(0, 10)
+    return clientes
+      .filter(
+        (cliente) =>
+          cliente.nome.toLowerCase().includes(busca) ||
+          String(cliente.telefone || '').includes(busca) ||
+          String(cliente.email || '').toLowerCase().includes(busca),
+      )
+      .slice(0, 10)
+  }, [clientes, propostaClienteBusca])
 
   const clientesFiltrados = useMemo(() => {
     const termo = clienteBusca.trim().toLowerCase()
@@ -878,6 +1709,7 @@ export default function OrcamentoPage() {
     const agora = Date.now()
     if (!forcar && agora - ultimaSyncAprovacaoPublicaRef.current < 10000) return
     if (!orcamentosSalvos.length) return
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible' && !forcar) return
 
     syncAprovacaoPublicaRodandoRef.current = true
     ultimaSyncAprovacaoPublicaRef.current = agora
@@ -904,18 +1736,37 @@ export default function OrcamentoPage() {
             const temAprovacaoPublica = statusPublico === 'Aprovado' || statusPublico === 'Cancelado' || aprovacaoPublica?.status === 'aprovado' || aprovacaoPublica?.status === 'recusado'
             if (!temAprovacaoPublica) return orcamento
 
-            const statusFinal = aprovacaoPublica?.status === 'recusado' ? 'Cancelado' : statusPublico
-            if (orcamento.status === statusFinal && JSON.stringify((orcamento as any).aprovacaoDigital || {}) === JSON.stringify(aprovacaoPublica || {})) return orcamento
+            const atualizado = aplicarStatusResolvido(
+              {
+                ...orcamento,
+                ...(publico && typeof publico === 'object' ? (publico as Partial<OrcamentoSalvo>) : {}),
+                id: orcamento.id,
+                atualizadoEm: Number((publico as any)?.atualizadoEm || Date.now()),
+              },
+              orcamento,
+              publico && typeof publico === 'object' ? (publico as Record<string, unknown>) : null,
+            )
+
+            if (
+              orcamento.status === atualizado.status &&
+              Boolean(orcamento.aprovado) === Boolean(atualizado.aprovado) &&
+              JSON.stringify((orcamento as any).aprovacaoDigital || {}) ===
+                JSON.stringify(atualizado.aprovacaoDigital || {})
+            ) {
+              return orcamento
+            }
 
             alterou = true
             return {
-              ...publico,
-              id: orcamento.id,
-              status: statusFinal,
-              aprovacaoDigital: aprovacaoPublica || (publico as any)?.aprovacaoDigital,
-              atualizadoEm: Number((publico as any)?.atualizadoEm || Date.now()),
+              ...atualizado,
+              aprovadoEm:
+                atualizado.aprovadoEm ||
+                (publico as any)?.aprovadoEm ||
+                aprovacaoPublica?.data ||
+                new Date().toLocaleString('pt-BR'),
             }
-          } catch {
+          } catch (error) {
+            console.error('[orcamentos] erro ao buscar aprovação pública:', error)
             return orcamento
           }
         })
@@ -923,8 +1774,38 @@ export default function OrcamentoPage() {
 
       if (alterou) {
         const mapa = new Map(atualizados.map((item) => [String(item.id), item]))
-        const listaFinal = listaBase.map((item) => mapa.get(String(item.id)) || item)
+        let listaFinal = listaBase.map((item) => {
+          const atualizado = mapa.get(String(item.id))
+          if (!atualizado) return aplicarStatusResolvido(item)
+          return mesclarParOrcamentos(atualizado, item)
+        })
         salvarListaOrcamentos(listaFinal)
+
+        const userIdSync = await obterUserIdOrcamentos(3)
+        if (userIdSync) {
+          const aprovadosAlterados = listaFinal.filter(
+            (item) => item.status === 'Aprovado' || item.status === 'Convertido' || item.aprovado === true,
+          )
+          for (const orcamento of aprovadosAlterados) {
+            await persistirOrcamentoSupabase(orcamento, userIdSync)
+          }
+        }
+
+        if (!osAprovacaoRodandoRef.current) {
+          osAprovacaoRodandoRef.current = true
+          try {
+            const aprovadosSemOs = listaFinal.filter((item) => item.status === 'Aprovado' && !item.osGeradaId)
+            if (aprovadosSemOs.length) {
+              const atualizadosComOs = await Promise.all(aprovadosSemOs.map((item) => garantirOSParaOrcamentoAprovado(item)))
+              const mapaComOs = new Map(atualizadosComOs.map((item) => [String(item.id), item]))
+              listaFinal = listaFinal.map((item) => mapaComOs.get(String(item.id)) || item)
+              salvarListaOrcamentos(listaFinal)
+            }
+          } finally {
+            osAprovacaoRodandoRef.current = false
+          }
+        }
+
         notificar('Aprovação do cliente sincronizada no painel.', 'success')
       }
     } finally {
@@ -950,6 +1831,7 @@ export default function OrcamentoPage() {
     document.addEventListener('visibilitychange', aoVoltarParaAba)
 
     const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
       sincronizarAprovacoesPublicas(false)
     }, 20000)
 
@@ -1002,8 +1884,9 @@ export default function OrcamentoPage() {
   }
 
   function salvarListaOrcamentos(lista: OrcamentoSalvo[]) {
-    setOrcamentosSalvos(lista)
-    localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(lista))
+    const listaNormalizada = lista.map((item) => aplicarStatusResolvido(item))
+    setOrcamentosSalvos(listaNormalizada)
+    localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(listaNormalizada))
     window.dispatchEvent(new Event('connect-data-change'))
   }
 
@@ -1107,34 +1990,67 @@ export default function OrcamentoPage() {
     return String(maior + 1).padStart(4, '0')
   }
 
-  function gerarLinkDocumento(id: number, dados?: OrcamentoSalvo) {
+  function gerarLinkDocumento(
+    id: number,
+    dados?: OrcamentoSalvo,
+    cfgOverride?: Partial<ConfiguracaoSistema> | Record<string, unknown>
+  ) {
     const base = baseUrlDocumentoPublico()
     const urlBase = `${base}/impressao-orcamento/${id}?preview=1`
 
     if (!dados) return urlBase
 
     try {
-      const payload = serializarCompactoOrcamento(dados, config)
+      const cfgEnvio = cfgOverride || config
+      const payload = serializarCompactoOrcamento(dados, cfgEnvio)
       return payload ? `${urlBase}&d=${payload}` : urlBase
     } catch {
       return urlBase
     }
   }
 
+  async function configParaPublicar() {
+    try {
+      const nuvem = await buscarConfiguracao()
+      return mergeConfigPublicacao(config, nuvem)
+    } catch {
+      return mergeConfigPublicacao(config)
+    }
+  }
+
   async function gerarLinkDocumentoPublico(id: number, dados: OrcamentoSalvo) {
     const base = baseUrlDocumentoPublico()
+    const cfgPublica = await configParaPublicar()
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const { data: sessao } = await supabase.auth.getSession()
+      if (sessao?.session?.access_token) {
+        headers.Authorization = `Bearer ${sessao.session.access_token}`
+      }
       const resp = await fetch('/api/public-docs', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo: 'orcamento', documentoId: String(id), payload: { ...prepararOrcamentoCliente(dados), config } }),
+        headers,
+        body: JSON.stringify({
+          tipo: 'orcamento',
+          documentoId: String(id),
+          document_type: 'orcamento',
+          document_id: String(id),
+          payload: { ...prepararOrcamentoCliente(dados), config: cfgPublica, cfg: cfgPublica },
+        }),
       })
       if (resp.ok) {
         const json = await resp.json()
-        if (json?.token) return `${base}/impressao-orcamento/${id}?preview=1&p=${json.token}`
+        if (json?.token) {
+          const v = timestampVersaoPublica(json?.updated_at || Date.now())
+          return montarUrlPublicaDocumento('/impressao-orcamento', String(id), {
+            token: json.token,
+            preview: true,
+            v,
+          })
+        }
       }
     } catch {}
-    return gerarLinkDocumento(id, dados)
+    return gerarLinkDocumento(id, dados, cfgPublica)
   }
 
   function visualizarOrcamentoInterno(id: number) {
@@ -1167,6 +2083,103 @@ export default function OrcamentoPage() {
     setEditandoId(null)
   }
 
+  function aplicarModeloProposta(modelo: ModeloPropostaRapida) {
+    const base = MODELOS_PROPOSTA[modelo]
+    setModeloPropostaRapida(modelo)
+    setPropostaTitulo(base.titulo)
+    setPropostaDescricao(base.descricao)
+    setPropostaServicoPrincipal(base.servico)
+    setPropostaPrazoEntrega(base.prazo)
+    setPropostaCondicoesPagamento(base.pagamento)
+    setPropostaValidade(base.validade)
+    setPropostaObservacoes(base.observacoes)
+  }
+
+  function abrirModalProposta() {
+    aplicarModeloProposta('servico')
+    setPropostaCliente(null)
+    setPropostaClienteBusca('')
+    setPropostaValorTotal('')
+    setModalPropostaAberto(true)
+  }
+
+  async function salvarPropostaComercial() {
+    const valor = parseValorMoedaInput(propostaValorTotal)
+    if (!propostaCliente?.nome?.trim()) {
+      notificar('Selecione o cliente da proposta.', 'error')
+      return
+    }
+    if (!propostaTitulo.trim() || !propostaServicoPrincipal.trim()) {
+      notificar('Preencha o título e o serviço/produto principal.', 'error')
+      return
+    }
+    if (valor <= 0) {
+      notificar('Informe o valor total da proposta.', 'error')
+      return
+    }
+
+    const id = Date.now()
+    const itemPrincipal: ItemOrcamento = {
+      id: 1,
+      nome: propostaServicoPrincipal.trim(),
+      descricao: propostaDescricao.trim(),
+      quantidade: 1,
+      valor,
+      tipoCadastro:
+        modeloPropostaRapida === 'produto' || modeloPropostaRapida === 'grafica' ? 'produto' : 'servico',
+      mostrarCliente: true,
+    }
+
+    const observacaoFinal = [
+      propostaObservacoes.trim(),
+      propostaDescricao.trim() ? `Descrição: ${propostaDescricao.trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+
+    const novoBase: OrcamentoSalvo = {
+      id,
+      numero: gerarNumeroDocumentoIgnorandoAtual(),
+      titulo: propostaTitulo.trim(),
+      tituloProposta: propostaTitulo.trim(),
+      modelo: 'comercial_premium',
+      cliente: propostaCliente,
+      itens: [itemPrincipal],
+      subtotal: valor,
+      entrega: 0,
+      desconto: 0,
+      total: valor,
+      formaPagamento: propostaCondicoesPagamento.trim() || 'PIX',
+      condicoesPagamento: propostaCondicoesPagamento.trim(),
+      validade: propostaValidade.trim(),
+      validadeProposta: propostaValidade.trim(),
+      prazoEntrega: propostaPrazoEntrega.trim(),
+      observacao: observacaoFinal,
+      observacoesProposta: propostaObservacoes.trim(),
+      descricaoProposta: propostaDescricao.trim(),
+      status: 'Pendente',
+      data: new Date().toLocaleDateString('pt-BR'),
+      link: '',
+      tipoDocumento: 'proposta_comercial',
+      atualizadoEm: Date.now(),
+    }
+
+    const novo: OrcamentoSalvo = {
+      ...novoBase,
+      link: gerarLinkDocumento(id, prepararOrcamentoCliente(novoBase)),
+    }
+
+    salvarListaOrcamentos([novo, ...orcamentosSalvos])
+    const okNuvem = await persistirOrcamentoSupabase(novo)
+    notificar(
+      okNuvem
+        ? 'Proposta comercial salva com sucesso!'
+        : 'Proposta salva no aparelho. A sincronização com a nuvem será tentada novamente.',
+      okNuvem ? 'success' : 'info',
+    )
+    setModalPropostaAberto(false)
+  }
+
   function novoOrcamento() {
     setClienteSelecionado(null)
     setClienteBusca('')
@@ -1176,6 +2189,9 @@ export default function OrcamentoPage() {
     setTituloPdf(config.tituloPdf || 'Orçamento Comercial')
     setObservacao(config.rodapePdf || 'Obrigado pela preferência.')
     setFormaPagamento(config.formaPagamentoPadrao || formasPagamento[0] || 'PIX')
+    setFormasPagamentoSelecionadas([config.formaPagamentoPadrao || formasPagamento[0] || 'Pix'])
+    setObservacaoFormasPagamento('')
+    setOcultarValorUnitarioM2(false)
     setParcelasBoleto('')
     setValidade(config.validadePadrao || '')
     setPrazoEntrega(config.prazoEntregaPadrao || '')
@@ -1528,7 +2544,10 @@ export default function OrcamentoPage() {
         entrega: valorEntrega,
         desconto: valorDesconto,
         total,
-        formaPagamento: montarFormaPagamentoFinal(formaPagamento, parcelasBoleto),
+        formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
+        formasPagamentoLista: formasPagamentoSelecionadas,
+        observacaoPagamento: observacaoFormasPagamento,
+        ocultarValorUnitarioM2,
         validade,
         prazoEntrega,
         observacao,
@@ -1546,9 +2565,14 @@ export default function OrcamentoPage() {
         item.id === editandoOrcamentoId ? atualizado : item
       )
       salvarListaOrcamentos(listaAtualizada)
-      void persistirOrcamentoSupabase(atualizado)
+      const okNuvem = await persistirOrcamentoSupabase(atualizado)
       gerarFinanceiroDeOrcamento(atualizado)
-      notificar('Orçamento atualizado com sucesso! Parcelas financeiras atualizadas.')
+      notificar(
+        okNuvem
+          ? 'Orçamento atualizado com sucesso! Parcelas financeiras atualizadas.'
+          : 'Orçamento salvo no aparelho. A sincronização com a nuvem será tentada novamente.',
+        okNuvem ? 'success' : 'info'
+      )
       setFormAberto(false)
       novoOrcamento()
       return
@@ -1566,7 +2590,10 @@ export default function OrcamentoPage() {
       entrega: valorEntrega,
       desconto: valorDesconto,
       total,
-      formaPagamento: montarFormaPagamentoFinal(formaPagamento, parcelasBoleto),
+              formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
+        formasPagamentoLista: formasPagamentoSelecionadas,
+        observacaoPagamento: observacaoFormasPagamento,
+        ocultarValorUnitarioM2,
       validade,
       prazoEntrega,
       observacao,
@@ -1581,9 +2608,14 @@ export default function OrcamentoPage() {
     }
 
     salvarListaOrcamentos([novo, ...orcamentosSalvos])
-    void persistirOrcamentoSupabase(novo)
+    const okNuvem = await persistirOrcamentoSupabase(novo)
     gerarFinanceiroDeOrcamento(novo)
-    notificar('Orçamento salvo com sucesso! Parcelas financeiras geradas.')
+    notificar(
+      okNuvem
+        ? 'Orçamento salvo com sucesso! Parcelas financeiras geradas.'
+        : 'Orçamento salvo no aparelho. A sincronização com a nuvem será tentada novamente.',
+      okNuvem ? 'success' : 'info'
+    )
     setFormAberto(false)
   }
 
@@ -1592,6 +2624,8 @@ export default function OrcamentoPage() {
       item.id === id ? { ...item, status } : item
     )
     salvarListaOrcamentos(listaAtualizada)
+    const atualizado = listaAtualizada.find((item) => item.id === id)
+    if (atualizado) void persistirOrcamentoSupabase(atualizado)
     notificar(mensagem, status === 'Cancelado' ? 'info' : 'success')
   }
 
@@ -1692,8 +2726,12 @@ export default function OrcamentoPage() {
     setModeloOrcamento(orc.modelo || 'recibo_profissional')
     setTituloPdf(orc.titulo || 'Orçamento Comercial')
     setObservacao(orc.observacao || '')
-    setFormaPagamento(String(orc.formaPagamento || 'PIX').split(' • ')[0])
-    setParcelasBoleto(String(orc.formaPagamento || '').includes('•') ? String(orc.formaPagamento || '').split(' • ').slice(1).join(' • ') : '')
+    const pagExtraido = extrairFormasPagamentoOrcamento(orc)
+    setFormasPagamentoSelecionadas(pagExtraido.formas.length ? pagExtraido.formas : ['Pix'])
+    setObservacaoFormasPagamento(pagExtraido.observacao)
+    setFormaPagamento(pagExtraido.formas[0] || 'Pix')
+    setParcelasBoleto(String(orc.formaPagamento || '').includes('(') ? String(orc.formaPagamento || '').match(/\(([^)]+)\)/)?.[1] || '' : '')
+    setOcultarValorUnitarioM2(Boolean(orc.ocultarValorUnitarioM2))
     setValidade(orc.validade || '')
     setPrazoEntrega(orc.prazoEntrega || '')
     setValorEntrega(Number(orc.entrega || 0))
@@ -1718,14 +2756,14 @@ export default function OrcamentoPage() {
     if (!link) return
     try {
       const url = new URL(link, window.location.origin)
-      window.open(url.toString(), '_blank')
+      abrirNovaAbaOuMesma(url.toString())
     } catch {
-      window.open(link, '_blank')
+      abrirNovaAbaOuMesma(link)
     }
   }
 
   async function copiarLinkOrcamento(orc: OrcamentoSalvo) {
-    const link = await gerarLinkDocumentoPublico(orc.id, orc)
+    const link = await linkPublicoOrcamentoLista(orc)
 
     if (navigator?.clipboard?.writeText && window.isSecureContext) {
       navigator.clipboard.writeText(link).then(() => {
@@ -1765,24 +2803,43 @@ export default function OrcamentoPage() {
     }
   }
 
-  async function compartilharLinkOrcamento(orc: OrcamentoSalvo) {
-    const telefone = telefoneWhatsappBrasil(orc.cliente?.telefone)
-    const link = await gerarLinkDocumentoPublico(orc.id, orc)
-
-    let mensagem = `Olá ${orc.cliente?.nome || 'cliente'}!\n\n`
-    mensagem += `Segue seu orçamento *${orc.numero}* no valor de *${moeda(orc.total)}*.\n`
-
-    if (orc.validade) {
-      mensagem += `Validade: ${orc.validade}.\n`
+  async function linkPublicoOrcamentoLista(orc: OrcamentoSalvo): Promise<string> {
+    try {
+      return await comTimeout(gerarLinkDocumentoPublico(orc.id, orc), 14000)
+    } catch {
+      return gerarLinkDocumento(orc.id, orc)
     }
+  }
 
-    mensagem += `\n🔗 Acesse aqui:\n${link}`
+  async function compartilharLinkOrcamento(orc: OrcamentoSalvo) {
+    if (zapOrcCarregando != null) return
 
-    const whatsappUrl = telefone
-      ? `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`
-      : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
-
-    window.open(whatsappUrl, '_blank', 'noopener,noreferrer')
+    const telefone = telefoneWhatsappBrasil(orc.cliente?.telefone)
+    setZapOrcCarregando(orc.id)
+    try {
+      let cfgEnvio = mergeConfigPublicacao(config)
+      try {
+        cfgEnvio = mergeConfigPublicacao(config, await configParaPublicar())
+      } catch {}
+      const linkRapido = gerarLinkDocumento(orc.id, prepararOrcamentoCliente(orc), cfgEnvio)
+      await abrirWhatsappAposPrepararLink({
+        telefone,
+        linkRapido,
+        prepararLinkCompleto: () => linkPublicoOrcamentoLista(orc),
+        montarMensagem: (link) => {
+          let mensagem = `Olá ${orc.cliente?.nome || 'cliente'}!\n\n`
+          mensagem += `${textoIntroWhatsapp(orc)} *${orc.numero}* no valor de *${moeda(orc.total)}*.\n`
+          if (orc.validade) mensagem += `Validade: ${orc.validade}.\n`
+          mensagem += `\n🔗 Acesse aqui:\n${link}`
+          return mensagem
+        },
+      })
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Não foi possível abrir o WhatsApp. Tente novamente.'
+      notificar(msg, 'error')
+    } finally {
+      window.setTimeout(() => setZapOrcCarregando(null), 800)
+    }
   }
 
   async function enviarWhatsApp() {
@@ -1807,7 +2864,10 @@ export default function OrcamentoPage() {
       entrega: valorEntrega,
       desconto: valorDesconto,
       total,
-      formaPagamento: montarFormaPagamentoFinal(formaPagamento, parcelasBoleto),
+              formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
+        formasPagamentoLista: formasPagamentoSelecionadas,
+        observacaoPagamento: observacaoFormasPagamento,
+        ocultarValorUnitarioM2,
       validade,
       prazoEntrega,
       observacao,
@@ -1816,36 +2876,45 @@ export default function OrcamentoPage() {
       link: '',
     }
 
-    const linkPublico = await gerarLinkDocumentoPublico(baseId, dadosLinkPublico)
+    try {
+      const linkPublico = await linkPublicoOrcamentoLista(dadosLinkPublico)
 
-    let mensagem = `Olá ${clienteSelecionado?.nome || 'cliente'}!
+      let mensagem = `Olá ${clienteSelecionado?.nome || 'cliente'}!
 
 `
-    mensagem += `Segue seu orçamento #${numeroDocumento}
+      const docAtual = orcamentosSalvos.find((item) => item.id === editandoOrcamentoId)
+      const introDoc = textoIntroWhatsapp(docAtual || { tipoDocumento: 'orcamento' })
+      mensagem += `${introDoc} #${numeroDocumento}
 `
-    mensagem += `Total: ${moeda(total)}
+      mensagem += `Total: ${moeda(total)}
 `
-    mensagem += `Pagamento: ${montarFormaPagamentoFinal(formaPagamento, parcelasBoleto)}
+      mensagem += `Pagamento: ${pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto)}
 `
-    if (formaPagamento.toLowerCase().includes('boleto') && parcelasBoleto) {
-      mensagem += `${montarTextoBoleto(parcelasBoleto)}
+      if (formasPagamentoSelecionadas.some((f) => f.toLowerCase().includes('boleto')) && parcelasBoleto) {
+        mensagem += `${montarTextoBoleto(parcelasBoleto)}
 `
-    }
-    if (validade) mensagem += `Validade: ${validade}
+      }
+      if (validade) mensagem += `Validade: ${validade}
 `
-    if (prazoEntrega) mensagem += `Prazo de entrega: ${prazoEntrega}
+      if (prazoEntrega) mensagem += `Prazo de entrega: ${prazoEntrega}
 `
-    if (observacao) mensagem += `Obs.: ${observacao}
+      if (observacao) mensagem += `Obs.: ${observacao}
 `
-    mensagem += `
+      mensagem += `
 Acesse aqui:
 ${linkPublico}`
-    mensagem += `
+      mensagem += `
 
 Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
-    const destino = numero ? `https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}` : `https://wa.me/?text=${encodeURIComponent(mensagem)}`
-    window.open(destino, '_blank')
+      const zap = abrirWhatsappUrl(montarUrlWhatsapp(numero, mensagem))
+      if (!zap.abriu && !zap.mostrarLink) {
+        notificar('Não foi possível abrir o WhatsApp.', 'error')
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Não foi possível preparar o link para o WhatsApp.'
+      notificar(msg, 'error')
+    }
   }
 
 
@@ -1886,7 +2955,10 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         entrega: valorEntrega,
         desconto: valorDesconto,
         total,
-        formaPagamento: montarFormaPagamentoFinal(formaPagamento, parcelasBoleto),
+        formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
+        formasPagamentoLista: formasPagamentoSelecionadas,
+        observacaoPagamento: observacaoFormasPagamento,
+        ocultarValorUnitarioM2,
         validade,
         prazoEntrega,
         observacao,
@@ -1918,7 +2990,10 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         entrega: valorEntrega,
         desconto: valorDesconto,
         total,
-        formaPagamento: montarFormaPagamentoFinal(formaPagamento, parcelasBoleto),
+        formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
+        formasPagamentoLista: formasPagamentoSelecionadas,
+        observacaoPagamento: observacaoFormasPagamento,
+        ocultarValorUnitarioM2,
         validade,
         prazoEntrega,
         observacao,
@@ -1940,7 +3015,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
     notificar('PDF pronto para visualização.', 'info')
     const linkFinal = gerarLinkDocumento(idParaAbrir, dadosParaAbrir || undefined)
-    window.open(linkFinal, '_blank', 'noopener,noreferrer')
+    abrirNovaAbaOuMesma(linkFinal)
   }
 
   const colors = darkMode
@@ -2182,6 +3257,25 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                 <div style={{ fontSize: 24, fontWeight: 900, opacity: .9 }}>›</div>
               </div>
             </button>
+            <button
+              type="button"
+              onClick={abrirModalProposta}
+              style={{
+                border: '1px solid rgba(37,99,235,.28)',
+                cursor: 'pointer',
+                minHeight: 74,
+                minWidth: isMobile ? '100%' : 220,
+                padding: '12px 16px',
+                borderRadius: 22,
+                color: '#fff',
+                background: 'linear-gradient(135deg,#1d4ed8 0%,#2563eb 52%,#0f172a 100%)',
+                boxShadow: '0 14px 30px rgba(37,99,235,.22)',
+                fontWeight: 950,
+                fontSize: 15,
+              }}
+            >
+              Nova proposta
+            </button>
             <div style={{ display: 'none' }}>
               <div style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, color: colors.muted }}>Modelo ativo</div>
               <div style={{ marginTop: 4, fontWeight: 900, color: colors.text }}>
@@ -2281,8 +3375,23 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                                <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '4px 8px',
+                          borderRadius: 999,
+                          fontSize: 10,
+                          fontWeight: 950,
+                          letterSpacing: .4,
+                          textTransform: 'uppercase',
+                          color: isPropostaComercial(orc) ? '#1d4ed8' : '#166534',
+                          background: isPropostaComercial(orc) ? 'rgba(37,99,235,.12)' : 'rgba(34,197,94,.12)',
+                          border: `1px solid ${isPropostaComercial(orc) ? 'rgba(37,99,235,.28)' : 'rgba(34,197,94,.28)'}`,
+                        }}>
+                          {rotuloTipoDocumento(orc)}
+                        </span>
                         <strong style={{ color: colors.text, fontSize: 15, lineHeight: 1.25 }}>
-                          {orc.titulo || 'Orçamento Comercial'}
+                          {orc.tituloProposta || orc.titulo || rotuloTipoDocumento(orc)}
                         </strong>
                         <span style={{
                           display: 'inline-flex',
@@ -2318,10 +3427,13 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                         👁 Visualizar
                       </button>
                       <button
-                        onClick={() => compartilharLinkOrcamento(orc)}
-                        style={{ ...buttonBase, background: 'linear-gradient(135deg,#16a34a,#065f46)', color: '#fff', minHeight: 34, height: 34, borderRadius: 12 }}
+                        type="button"
+                        className={`connect-zap-btn${zapOrcCarregando === orc.id ? ' connect-zap-btn--loading' : ''}`}
+                        disabled={zapOrcCarregando === orc.id}
+                        onClick={() => void compartilharLinkOrcamento(orc)}
+                        style={{ ...buttonBase, background: 'linear-gradient(135deg,#16a34a,#065f46)', color: '#fff', minHeight: 34, height: 34, borderRadius: 12, touchAction: 'manipulation' }}
                       >
-                        📲 WhatsApp
+                        {zapOrcCarregando === orc.id ? '⏳ Abrindo…' : '📲 WhatsApp'}
                       </button>
                     </div>
 
@@ -3098,15 +4210,63 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
               <div style={cardStyle}>
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
-                  <div>
-                    <label style={labelStyle}>💳 Pagamento</label>
-                    <select value={formaPagamento} onChange={(e) => setFormaPagamento(e.target.value)} style={inputStyle}>
-                      {formasPagamento.map((forma) => (
-                        <option key={forma} value={forma}>{forma}</option>
-                      ))}
-                    </select>
+                  <div style={{ gridColumn: isMobile ? '1 / -1' : '1 / -1' }}>
+                    <label style={labelStyle}>💳 Formas de pagamento</label>
+                    
+                    
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                      {OPCOES_PAGAMENTO_ORCAMENTO.map((opcao) => {
+                        const ativo = formasPagamentoSelecionadas.includes(opcao.label)
+                        return (
+                          <button
+                            key={opcao.id}
+                            type="button"
+                            onClick={() =>
+                              setFormasPagamentoSelecionadas((atual) =>
+                                atual.includes(opcao.label) ? atual.filter((f) => f !== opcao.label) : [...atual, opcao.label],
+                              )
+                            }
+                            style={{
+                              minHeight: 38,
+                              borderRadius: 999,
+                              border: ativo ? '2px solid #2563eb' : `1px solid ${colors.inputBorder}`,
+                              background: ativo ? (darkMode ? '#1e3a8a' : '#eff6ff') : (darkMode ? '#0f172a' : '#fff'),
+                              color: ativo ? (darkMode ? '#bfdbfe' : '#1d4ed8') : colors.text,
+                              fontWeight: 900,
+                              fontSize: 13,
+                              padding: '0 14px',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              boxShadow: ativo ? '0 0 16px rgba(37,99,235,.15)' : 'none',
+                            }}
+                          >
+                            <span>{opcao.icon}</span> {opcao.label}
+                          </button>
+                        )
+                      })}
+                    
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <label style={{ ...labelStyle, fontSize: 12 }}>Observação de pagamento</label>
+                      <input
+                        value={observacaoFormasPagamento}
+                        onChange={(e) => setObservacaoFormasPagamento(e.target.value)}
+                        placeholder="Ex: Parcelamos em até 10x"
+                        style={inputStyle}
+                      />
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontWeight: 800, color: colors.muted, fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={ocultarValorUnitarioM2}
+                        onChange={(e) => setOcultarValorUnitarioM2(e.target.checked)}
+                      />
+                      Ocultar valor unitário/m² no orçamento (cliente vê metragem e total)
+                    </label>
                   </div>
-                  {formaPagamento.toLowerCase().includes('boleto') && (
+                  {formasPagamentoSelecionadas.some((f) => f.toLowerCase().includes('boleto')) && (
                     <div>
                       <label style={labelStyle}>🗓️ Prazo dos boletos</label>
                       <select value={parcelasBoleto} onChange={(e) => setParcelasBoleto(e.target.value)} style={inputStyle}>
@@ -3219,6 +4379,128 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
           </div>
         )}
 
+        {modalPropostaAberto && (
+          <div
+            onClick={() => setModalPropostaAberto(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 1250,
+              background: 'rgba(2,6,23,0.62)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 18,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: 760,
+                maxHeight: '92vh',
+                overflowY: 'auto',
+                borderRadius: 24,
+                background: darkMode ? '#161b22' : '#ffffff',
+                border: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : '#dbeafe'}`,
+                boxShadow: '0 28px 70px rgba(15,23,42,0.34)',
+                padding: isMobile ? 16 : 22,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 900, color: colors.muted, textTransform: 'uppercase', letterSpacing: 1 }}>Proposta rápida</div>
+                  <div style={{ fontSize: isMobile ? 22 : 28, fontWeight: 900, color: colors.text }}>Nova proposta comercial</div>
+                </div>
+                <button type="button" onClick={() => setModalPropostaAberto(false)} style={{ ...buttonBase, minHeight: 40, padding: '10px 14px', background: darkMode ? '#2b313a' : '#e5e7eb', color: colors.text }}>Fechar</button>
+              </div>
+
+              <label style={labelStyle}>Modelo rápido</label>
+              <select
+                value={modeloPropostaRapida}
+                onChange={(e) => aplicarModeloProposta(e.target.value as ModeloPropostaRapida)}
+                style={{ ...inputStyle, marginBottom: 12 }}
+              >
+                <option value="servico">Serviço</option>
+                <option value="produto">Produto</option>
+                <option value="moveis">Móveis planejados</option>
+                <option value="assistencia">Assistência técnica</option>
+                <option value="grafica">Gráfica / Papelaria</option>
+              </select>
+
+              <label style={labelStyle}>Cliente</label>
+              <input
+                value={propostaClienteBusca}
+                onChange={(e) => setPropostaClienteBusca(e.target.value)}
+                placeholder="Buscar cliente cadastrado"
+                style={{ ...inputStyle, marginBottom: 8 }}
+              />
+              {propostaCliente ? (
+                <div style={{ marginBottom: 12, padding: 10, borderRadius: 12, background: darkMode ? 'rgba(37,99,235,.12)' : '#eff6ff', color: colors.text, fontWeight: 800 }}>
+                  Selecionado: {propostaCliente.nome} {propostaCliente.telefone ? `• ${propostaCliente.telefone}` : ''}
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 6, marginBottom: 12, maxHeight: 140, overflowY: 'auto' }}>
+                  {clientesPropostaFiltrados.map((cliente) => (
+                    <button
+                      key={cliente.id}
+                      type="button"
+                      onClick={() => {
+                        setPropostaCliente(cliente)
+                        setPropostaClienteBusca(cliente.nome)
+                      }}
+                      style={{ ...buttonBase, justifyContent: 'flex-start', background: darkMode ? '#1f2937' : '#f8fafc', color: colors.text, minHeight: 38, height: 38 }}
+                    >
+                      {cliente.nome} {cliente.telefone ? `• ${cliente.telefone}` : ''}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label style={labelStyle}>Título da proposta</label>
+                  <input value={propostaTitulo} onChange={(e) => setPropostaTitulo(e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Serviço/produto principal</label>
+                  <input value={propostaServicoPrincipal} onChange={(e) => setPropostaServicoPrincipal(e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+
+              <label style={labelStyle}>Descrição da proposta</label>
+              <textarea value={propostaDescricao} onChange={(e) => setPropostaDescricao(e.target.value)} rows={3} style={{ ...inputStyle, minHeight: 88, resize: 'vertical', marginBottom: 10 }} />
+
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label style={labelStyle}>Valor total</label>
+                  <input value={propostaValorTotal} onChange={(e) => setPropostaValorTotal(e.target.value)} placeholder="0,00" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Prazo de entrega</label>
+                  <input value={propostaPrazoEntrega} onChange={(e) => setPropostaPrazoEntrega(e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Condições de pagamento</label>
+                  <input value={propostaCondicoesPagamento} onChange={(e) => setPropostaCondicoesPagamento(e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Validade da proposta</label>
+                  <input value={propostaValidade} onChange={(e) => setPropostaValidade(e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+
+              <label style={labelStyle}>Observações</label>
+              <textarea value={propostaObservacoes} onChange={(e) => setPropostaObservacoes(e.target.value)} rows={2} style={{ ...inputStyle, minHeight: 70, resize: 'vertical', marginBottom: 14 }} />
+
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
+                <button type="button" onClick={() => setModalPropostaAberto(false)} style={{ ...buttonBase, background: darkMode ? '#2b313a' : '#e5e7eb', color: colors.text }}>Cancelar</button>
+                <button type="button" onClick={() => void salvarPropostaComercial()} style={actionButtonStyle('os')}>Salvar proposta</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {orcamentoMenuAberto && (
           <div
             onClick={fecharMenuOrcamento}
@@ -3263,7 +4545,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                 <label style={labelStyle}>🔗 Link compartilhável do documento</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 46px', gap: 8 }}>
                   <input readOnly value={gerarLinkDocumento(orcamentoMenuAberto.id, orcamentoMenuAberto)} style={inputStyle} />
-                  <button onClick={() => copiarLinkOrcamento(orcamentoMenuAberto)} style={{ ...buttonBase, background: darkMode ? '#2b313a' : '#e5e7eb', color: colors.text, minHeight: 28, height: 28 }}>📋</button>
+                  <button type="button" onClick={() => void copiarLinkOrcamento(orcamentoMenuAberto)} style={{ ...buttonBase, background: darkMode ? '#2b313a' : '#e5e7eb', color: colors.text, minHeight: 28, height: 28 }}>📋</button>
                 </div>
               </div>
 
@@ -3302,7 +4584,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                   Visualizar
                 </button>
                 <button onClick={() => { excluirOrcamento(orcamentoMenuAberto.id); fecharMenuOrcamento() }} style={actionButtonStyle('deletar')}>Deletar</button>
-                <button onClick={() => copiarLinkOrcamento(orcamentoMenuAberto)} style={actionButtonStyle('copiar')}>Copiar</button>
+                <button type="button" onClick={() => void copiarLinkOrcamento(orcamentoMenuAberto)} style={actionButtonStyle('copiar')}>Copiar</button>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(112px,1fr))', gap: 8 }}>
@@ -3340,3 +4622,4 @@ function ResumoCard({ titulo, valor, darkMode }: { titulo: string; valor: string
     </div>
   )
 }
+

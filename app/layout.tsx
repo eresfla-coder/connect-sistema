@@ -1,8 +1,40 @@
 import './globals.css'
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://appconnectpro.com.br'
+
 export const metadata = {
-  title: 'Connect Sistema',
-  description: 'Sistema premium para orçamento, OS, financeiro, CRM e automações por WhatsApp.',
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: 'Connect Sistema — Orçamentos, OS e vendas em um só lugar',
+    template: '%s | Connect Sistema',
+  },
+  description:
+    'SaaS premium para orçamentos, propostas comerciais, ordens de serviço, aprovação digital, PDF profissional e financeiro integrado. Sync celular e PC.',
+  keywords: [
+    'orçamento',
+    'ordem de serviço',
+    'proposta comercial',
+    'gestão de vendas',
+    'assistência técnica',
+    'SaaS',
+    'Connect Sistema',
+  ],
+  openGraph: {
+    type: 'website',
+    locale: 'pt_BR',
+    url: siteUrl,
+    siteName: 'Connect Sistema',
+    title: 'Connect Sistema — Controle total de orçamentos, OS e vendas',
+    description:
+      'Propostas, aprovação online, OS automática, PDF premium e WhatsApp. Teste grátis.',
+    images: [{ url: '/icons/icon-512x512.png', width: 512, height: 512, alt: 'Connect Sistema' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Connect Sistema',
+    description: 'Orçamentos, OS, clientes e vendas com visual premium.',
+    images: ['/icons/icon-512x512.png'],
+  },
   manifest: '/manifest.json',
   icons: {
     icon: [

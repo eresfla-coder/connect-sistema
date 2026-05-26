@@ -1,3 +1,4 @@
+import { normalizarLogoEmpresaPublica } from '@/lib/documentosPublicos'
 import { supabase } from '@/lib/supabase'
 
 // ============================
@@ -60,7 +61,7 @@ function dbToApp(row: any): ConfiguracaoEmpresa {
     endereco: row.endereco || '',
     cidadeUf: row.cidade_uf || '',
     responsavel: row.responsavel || '',
-    logoUrl: row.logo_url || CONFIG_PADRAO.logoUrl,
+    logoUrl: normalizarLogoEmpresaPublica(row.logo_url) || CONFIG_PADRAO.logoUrl,
     corPrimaria: row.cor_primaria || CONFIG_PADRAO.corPrimaria,
     corSecundaria: row.cor_secundaria || CONFIG_PADRAO.corSecundaria,
     tituloPdf: row.titulo_pdf || CONFIG_PADRAO.tituloPdf,
@@ -98,36 +99,44 @@ function appToDb(cfg: ConfiguracaoEmpresa): Record<string, any> {
 // BUSCAR (Com fallbacks)
 // ============================
 
+async function obterUserIdLogado(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession()
+    return data.session?.user?.id || null
+  } catch {
+    return null
+  }
+}
+
 /**
- * Buscador principal: Supabase → localStorage → padrão
+ * Buscador principal: Supabase (por user_id) → cache local → padrão
  */
 export async function buscarConfiguracao(): Promise<ConfiguracaoEmpresa> {
-  try {
-    const { data, error } = await supabase
-      .from('configuracoes_empresa')
-      .select('*')
-      .order('updated_at', { ascending: false })
-      .limit(1)
+  const userId = await obterUserIdLogado()
 
-    if (error) {
-      console.warn('[config] Supabase error:', error.message)
-    }
+  if (userId) {
+    try {
+      const { data, error } = await supabase
+        .from('configuracoes_empresa')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle()
 
-    if (data && data.length > 0) {
-      const cfg = dbToApp(data[0])
-      // Sincronizar localStorage como cache
-      salvarLocal(cfg)
-      return cfg
+      if (error) {
+        console.warn('[config] Supabase error:', error.message)
+      } else if (data) {
+        const cfg = dbToApp(data)
+        salvarLocal(cfg)
+        return cfg
+      }
+    } catch (e) {
+      console.warn('[config] Erro ao buscar config:', e)
     }
-  } catch (e) {
-    console.warn('[config] Erro ao buscar config:', e)
   }
 
-  // 2. Fallback localStorage
   const local = carregarLocal()
   if (local) return local
 
-  // 3. Padrão final
   return { ...CONFIG_PADRAO }
 }
 
@@ -165,29 +174,24 @@ export async function salvarConfiguracao(cfg: ConfiguracaoEmpresa): Promise<void
   // Sempre salvar localStorage (fallback e cache)
   salvarLocal(cfg)
 
-  // Se não estiver logado, retornar (fallback local funciona)
   if (!userId) {
-    console.warn('[config] Usuário não logado — salvando apenas localStorage')
-    return
+    throw new Error('Faça login para salvar as configurações na nuvem.')
   }
 
-  try {
-    const dbRecord = appToDb(cfg)
-    const { error } = await supabase
-      .from('configuracoes_empresa')
-      .upsert(
-        {
-          user_id: userId,
-          ...dbRecord,
-        },
-        { onConflict: 'user_id' }
-      )
+  const dbRecord = appToDb(cfg)
+  const { error } = await supabase
+    .from('configuracoes_empresa')
+    .upsert(
+      {
+        user_id: userId,
+        ...dbRecord,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    )
 
-    if (error) {
-      console.warn('[config] Supabase error ao salvar:', (error as SupabaseError).message)
-    }
-  } catch (e) {
-    console.warn('[config] Erro ao salvar no Supabase:', e)
+  if (error) {
+    throw new Error((error as SupabaseError).message || 'Erro ao salvar configurações no Supabase.')
   }
 }
 

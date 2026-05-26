@@ -593,3 +593,62 @@ body {
   overscroll-behavior-y: auto !important;
   touch-action: pan-x pan-y !important;
 }
+
+/* Landing Connect SaaS */
+.landing-root {
+  --landing-bg: #f8fafc;
+  --landing-text: #0f172a;
+  --landing-muted: #64748b;
+  --landing-primary: #2563eb;
+  --landing-accent: #10b981;
+  background: var(--landing-bg);
+  color: var(--landing-text);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  overflow-x: hidden;
+}
+
+.landing-root[data-theme='dark'] {
+  --landing-bg: #020617;
+  --landing-text: #f8fafc;
+  --landing-muted: #94a3b8;
+}
+
+@keyframes landing-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes landing-fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.landing-animate {
+  animation: landing-fade-up 0.7s ease both;
+}
+
+.landing-float {
+  animation: landing-float 4s ease-in-out infinite;
+}
+
+.connect-os-action-btn,
+.connect-zap-btn {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(34, 197, 94, 0.35);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.1s ease, filter 0.1s ease, opacity 0.15s ease;
+}
+
+.connect-os-action-btn:active:not(:disabled),
+.connect-zap-btn:active:not(:disabled) {
+  transform: scale(0.94);
+  filter: brightness(0.9);
+}
+
+.connect-os-action-btn--loading,
+.connect-zap-btn--loading {
+  opacity: 0.72;
+  transform: scale(0.97);
+  pointer-events: none;
+}

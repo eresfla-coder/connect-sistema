@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
+import { statusOsCor, urlQrCode } from '@/lib/pdfPremium'
 
 type OrdemServico = {
   id: number
@@ -281,6 +282,7 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
   const contatoEmpresa = useMemo(() => limparPartesRepetidas([empresa.telefone, empresa.email, empresa.endereco, empresa.cidadeUf].filter(Boolean).join(' • ')), [empresa])
 
   const osAprovada = useMemo(() => (os ? osEstaAprovada(os) : false), [os])
+  const statusVisual = useMemo(() => statusOsCor(os?.status), [os?.status])
 
   const linkCompartilhamento = useMemo(() => {
     if (!os || typeof window === 'undefined') return ''
@@ -290,6 +292,8 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
     const linkBase = `${base}/view/os/${os.id}`
     return tokenAtual ? `${linkBase}?token=${encodeURIComponent(tokenAtual)}` : linkBase
   }, [os])
+
+  const qrUrl = linkCompartilhamento ? urlQrCode(linkCompartilhamento, 80) : ''
 
   function copiarLinkAtual() {
     if (!linkCompartilhamento) return
@@ -402,7 +406,16 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
         .sheet { width: 190mm; min-height: auto; margin: 0 auto; background: white; border: 1px solid #cbd5e1; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px rgba(15,23,42,.10); }
         .header { display: grid; grid-template-columns: 1fr auto; gap: 7px; align-items: center; padding: 2.4mm 5.5mm 1.4mm; background: linear-gradient(135deg,#f8fbff,#eef4fb); border-bottom: 1.5px solid #2563eb; }
         .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
-        .brand img { width: 7.5mm; height: 7.5mm; object-fit: contain; border-radius: 7px; background: transparent; border: 0; padding: 0; }
+        .brand img { width: 14mm; height: 14mm; object-fit: contain; border-radius: 10px; background: #fff; border: 1px solid #dbe4ef; padding: 1.5mm; }
+        .hero-qr { display: grid; place-items: center; gap: 2px; padding: 2mm; background: #fff; border: 1px solid #dbe4ef; border-radius: 8px; }
+        .hero-qr span { font-size: 5.5px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; color: #64748b; }
+        .header-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+        .status-pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 7px; font-weight: 950; letter-spacing: .06em; text-transform: uppercase; border: 1px solid; }
+        .equip-hero { margin-bottom: 4px; padding: 3px 6px; border-radius: 10px; border: 2px solid #2563eb; background: linear-gradient(135deg,#eff6ff,#f8fafc); }
+        .equip-hero .label { color: #1d4ed8; margin-bottom: 2px; }
+        .equip-hero .value { font-size: 10px; font-weight: 950; color: #0f172a; line-height: 1.2; }
+        .block-defeito { border-color: #fecaca; background: #fffbfb; }
+        .block-check { border-color: #bfdbfe; background: #f8fbff; }
         .brand h1 { margin: 0; font-size: 13px; line-height: .95; letter-spacing: .02em; font-family: Dubai, Arial, sans-serif; font-weight: 900; }
         .brand p { margin: 1px 0 0; font-size: 6.9px; color: #334155; line-height: 1.18; max-width: 128mm; }
         .doc-number { text-align: right; text-transform: uppercase; letter-spacing: .08em; color: #334155; font-size: 7.8px; font-weight: 900; }
@@ -484,21 +497,36 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
               <p>{contatoEmpresa}</p>
             </div>
           </div>
-          <div className="doc-number">Ordem de Serviço<strong>Nº {os.numero || '0000'}</strong><span>{parseDataBR(os.data)}</span></div>
+          <div className="header-meta">
+            {qrUrl ? (
+              <div className="hero-qr">
+                <img src={qrUrl} alt="QR" width={80} height={80} />
+                <span>Acompanhar OS</span>
+              </div>
+            ) : null}
+            <div className="doc-number">Ordem de Serviço<strong>Nº {os.numero || '0000'}</strong><span>{parseDataBR(os.data)}</span></div>
+          </div>
         </header>
 
-        <section className="title"><small>Documento técnico premium</small><h2>ORDEM DE SERVIÇO</h2></section>
+        <section className="title"><small>Assistência técnica • Connect</small><h2>ORDEM DE SERVIÇO</h2></section>
 
         <main className="content">
-          <div className="client-line"><span><span className="label">Cliente</span> <b>{os.cliente || '-'}</b></span><b>{os.telefone || '-'}</b></div>
+          <div className="client-line">
+            <span><span className="label">Cliente</span> <b>{os.cliente || '-'}</b></span>
+            <span className="status-pill" style={{ background: statusVisual.bg, color: statusVisual.fg, borderColor: statusVisual.border }}>{os.status || 'Aberta'}</span>
+          </div>
+
+          <div className="equip-hero">
+            <div className="label">Equipamento em atendimento</div>
+            <div className="value">{textoPdf(os.equipamento)}</div>
+          </div>
 
           <div className="grid4">
-            <InfoCell titulo="Equipamento" valor={os.equipamento} />
             <InfoCell titulo="Marca" valor={os.marca} />
             <InfoCell titulo="Modelo" valor={os.modelo} />
             <InfoCell titulo="Serial / IMEI" valor={os.serial} />
-            <InfoCell titulo="Status" valor={os.status} />
             <InfoCell titulo="Prioridade" valor={os.prioridade} />
+            <InfoCell titulo="Status" valor={os.status} />
             <InfoCell titulo="Técnico" valor={os.tecnico} />
             <InfoCell titulo="Previsão" valor={parseDataBR(os.previsao)} />
           </div>
@@ -507,8 +535,8 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
             <div>
               <div className="block"><div className="label">E-mail</div><div className="text">{textoPdf(os.email)}</div></div>
               <div className="block"><div className="label">Endereço</div><div className="text">{textoPdf(os.endereco)}</div></div>
-              <div className="block"><div className="label">Defeito informado</div><div className="text">{textoPdf(os.defeito)}</div></div>
-              <div className="block"><div className="label">Checklist / acessórios</div><div className="text">{textoPdf(os.checklist)}</div></div>
+              <div className="block block-defeito"><div className="label">Defeito informado</div><div className="text">{textoPdf(os.defeito)}</div></div>
+              <div className="block block-check"><div className="label">Checklist / acessórios</div><div className="text">{textoPdf(os.checklist)}</div></div>
               <div className="block"><div className="label">Observação</div><div className="text">{textoPdf(os.observacao)}</div></div>
             </div>
             <div>

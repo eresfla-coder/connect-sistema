@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { ADMIN_EMAILS, acessoBloqueado } from './access'
+import { acessoBloqueado, isUsuarioAdmin } from './access'
 import type { EmpresaSaas, PerfilSaas } from './empresa'
 
 type UserLike = { id: string; email?: string | null }
@@ -13,7 +13,7 @@ export type ResultadoAcesso = {
 
 export async function verificarAcesso(user: UserLike): Promise<ResultadoAcesso> {
   const emailNormalizado = String(user.email || '').trim().toLowerCase()
-  if (ADMIN_EMAILS.includes(emailNormalizado)) {
+  if (isUsuarioAdmin({ email: emailNormalizado })) {
     return { bloqueado: false, motivo: 'admin_liberado' }
   }
 

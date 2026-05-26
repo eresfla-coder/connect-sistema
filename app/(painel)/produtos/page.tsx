@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { CalculadoraPrecoM2Modal } from '@/components/produtos/CalculadoraPrecoM2Modal'
+import { ProdutosFabMenu } from '@/components/produtos/ProdutosFabMenu'
 
 type Categoria = { id: number; nome: string; ativa: boolean }
 type TipoCalculoProduto = 'unidade' | 'm2' | 'peso'
@@ -147,6 +149,7 @@ export default function ProdutosPage() {
   const [editandoId, setEditandoId] = useState<number | null>(null)
   const [busca, setBusca] = useState('')
   const [drawerAberto, setDrawerAberto] = useState(false)
+  const [calculadoraM2Aberta, setCalculadoraM2Aberta] = useState(false)
 
   const [nome, setNome] = useState('')
   const [categoria, setCategoria] = useState('')
@@ -311,6 +314,25 @@ export default function ProdutosPage() {
     setPreco(formatarDecimalVisual(calculoAtual.precoSugerido))
   }
 
+  function abrirCalculadoraM2() {
+    if (!drawerAberto) {
+      if (!editandoId) {
+        limparFormulario()
+        setTipoCadastro('produto')
+        setTipoCalculo('m2')
+      }
+      setDrawerAberto(true)
+    }
+    setCalculadoraM2Aberta(true)
+  }
+
+  function aplicarPrecoCalculadoM2(valor: number) {
+    setPreco(formatarDecimalVisual(Number(valor.toFixed(2))))
+    if (tipoCadastro !== 'servico') setTipoCalculo('m2')
+  }
+
+  const labelPrecoVenda = tipoCalculo === 'm2' ? 'Preço de venda por m²' : 'Preço de venda'
+
   function salvarProduto() {
     if (!nome.trim()) return alert('Digite o nome do produto ou serviço.')
     const categoriaFinal = categoria.trim() || (tipoCadastro === 'servico' ? 'Serviços' : 'Produtos')
@@ -429,7 +451,7 @@ export default function ProdutosPage() {
         {produtosFiltrados.length === 0 ? <div style={{ padding: 22, border: '1px dashed #cbd5e1', borderRadius: 16, color: '#64748b' }}>Nenhum produto ou serviço encontrado.</div> : (
           <div className="connect-mobile-scroll" data-scroll-hint="true" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}>
             <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, minWidth: 1080 }}>
-              <thead><tr style={{ background: '#f8fafc' }}>{['Item', 'Tipo', 'Categoria', 'Preço', 'Custo', 'Margem', 'Lucro', 'Estoque', 'Ações'].map((h, i) => <th key={h} style={{ textAlign: i === 8 ? 'right' : 'left', padding: '12px 10px', color: '#475569', fontSize: 12, textTransform: 'uppercase', letterSpacing: .8, borderBottom: '1px solid #e2e8f0' }}>{h}</th>)}</tr></thead>
+              <thead><tr style={{ background: '#f8fafc' }}>{['Item', 'Tipo', 'Categoria', 'Preço de venda', 'Preço de custo', 'Margem', 'Lucro', 'Estoque', 'Ações'].map((h, i) => <th key={h} style={{ textAlign: i === 8 ? 'right' : 'left', padding: '12px 10px', color: '#475569', fontSize: 12, textTransform: 'uppercase', letterSpacing: .8, borderBottom: '1px solid #e2e8f0' }}>{h}</th>)}</tr></thead>
               <tbody>{produtosFiltrados.map((produto) => <tr key={produto.id}>
                 <td style={td}><b>{produto.nome}</b><div style={{ color: '#64748b', fontSize: 12 }}>{produto.descricao || 'Sem descrição'}</div></td>
                 <td style={td}><span style={badgeStyle(produto.tipoCadastro, produto.tipoCalculo)}>{badgeTipo(produto.tipoCalculo, produto.tipoCadastro)}</span></td>
@@ -478,9 +500,38 @@ export default function ProdutosPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}><button onClick={() => setTipoCadastro('produto')} style={{ ...btn, background: tipoCadastro === 'produto' ? '#f97316' : '#f8fafc', color: tipoCadastro === 'produto' ? '#fff' : '#0f172a', borderColor: tipoCadastro === 'produto' ? '#f97316' : '#dbe4ef' }}>Produto</button><button onClick={() => setTipoCadastro('servico')} style={{ ...btn, background: tipoCadastro === 'servico' ? '#2563eb' : '#f8fafc', color: tipoCadastro === 'servico' ? '#fff' : '#0f172a', borderColor: tipoCadastro === 'servico' ? '#2563eb' : '#dbe4ef' }}>Serviço</button></div>
             {tipoCadastro === 'produto' && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}><button onClick={() => setTipoCalculo('unidade')} style={{ ...btn, background: tipoCalculo === 'unidade' ? '#16a34a' : '#f8fafc', color: tipoCalculo === 'unidade' ? '#fff' : '#0f172a' }}>Unid.</button><button onClick={() => setTipoCalculo('peso')} style={{ ...btn, background: tipoCalculo === 'peso' ? '#16a34a' : '#f8fafc', color: tipoCalculo === 'peso' ? '#fff' : '#0f172a' }}>Kg</button><button onClick={() => setTipoCalculo('m2')} style={{ ...btn, background: tipoCalculo === 'm2' ? '#16a34a' : '#f8fafc', color: tipoCalculo === 'm2' ? '#fff' : '#0f172a' }}>m²</button></div>}
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}><div><label style={label}>Categoria</label><select value={categoria} onChange={(e) => setCategoria(e.target.value)} style={input}><option value="">Selecione</option>{categoriasAtivas.map((item) => <option key={item.id} value={item.nome}>{item.nome}</option>)}</select></div><div><label style={label}>Estoque {tipoCalculo === 'peso' ? 'kg' : ''}</label><input value={estoque} onChange={(e) => setEstoque(tipoCadastro === 'servico' ? '' : tipoCalculo === 'peso' ? e.target.value : normalizarInteiroTexto(e.target.value))} placeholder={tipoCadastro === 'servico' ? 'Sem estoque' : tipoCalculo === 'peso' ? 'Ex: 1,250' : '0'} inputMode={tipoCalculo === 'peso' ? 'decimal' : 'numeric'} style={input} disabled={tipoCadastro === 'servico'} /></div></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><div><label style={label}>Preço atual</label><input value={preco} onChange={(e) => setPreco(aplicarMascaraDecimal(e.target.value))} placeholder="0,00" style={input} /></div><div><label style={label}>Custo</label><input value={custo} onChange={(e) => setCusto(aplicarMascaraDecimal(e.target.value))} placeholder="0,00" style={input} /></div></div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label style={label}>{labelPrecoVenda}</label>
+                  <input value={preco} onChange={(e) => setPreco(aplicarMascaraDecimal(e.target.value))} placeholder="0,00" style={input} />
+                </div>
+                <div>
+                  <label style={label}>Preço de custo</label>
+                  <input value={custo} onChange={(e) => setCusto(aplicarMascaraDecimal(e.target.value))} placeholder="0,00" style={input} />
+                </div>
+              </div>
+              {tipoCalculo === 'm2' || tipoCadastro === 'produto' ? (
+                <button
+                  type="button"
+                  onClick={abrirCalculadoraM2}
+                  style={{
+                    ...btn,
+                    width: '100%',
+                    minHeight: 40,
+                    justifyContent: 'center',
+                    background: tipoCalculo === 'm2' ? 'linear-gradient(135deg,#eff6ff,#f0fdf4)' : '#f8fafc',
+                    borderColor: tipoCalculo === 'm2' ? '#93c5fd' : '#dbe4ef',
+                    color: '#1d4ed8',
+                    fontSize: 13,
+                  }}
+                >
+                  💡 Não sabe quanto cobrar? Calcular meu preço ideal
+                </button>
+              ) : null}
+            </div>
             <section style={{ border: '1px solid #bbf7d0', background: '#f0fdf4', borderRadius: 18, padding: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}><div><div style={{ color: '#047857', fontWeight: 950, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Precificação automática</div><div style={{ color: '#065f46', fontSize: 12, fontWeight: 700, marginTop: 3 }}>Base: preço = custo × markup. Markup = 1 ÷ (1 - impostos - taxas - despesas - comissão - lucro desejado).</div></div><button onClick={aplicarPrecoSugerido} style={{ ...btn, background: '#16a34a', color: '#fff', borderColor: '#16a34a' }}>Aplicar sugerido</button></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}><div><div style={{ color: '#047857', fontWeight: 950, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Precificação automática</div><div style={{ color: '#065f46', fontSize: 12, fontWeight: 700, marginTop: 3 }}>Base: preço de venda = preço de custo × markup. Markup = 1 ÷ (1 - impostos - taxas - despesas - comissão - lucro desejado).</div></div><button onClick={aplicarPrecoSugerido} style={{ ...btn, background: '#16a34a', color: '#fff', borderColor: '#16a34a' }}>Aplicar sugerido</button></div>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(5,1fr)', gap: 8 }}><PercentInput label="Imposto %" value={impostoPct} setValue={setImpostoPct} /><PercentInput label="Cartão %" value={taxaCartaoPct} setValue={setTaxaCartaoPct} /><PercentInput label="Despesa %" value={despesasPct} setValue={setDespesasPct} /><PercentInput label="Comissão %" value={comissaoPct} setValue={setComissaoPct} /><PercentInput label="Lucro desejado %" value={lucroDesejadoPct} setValue={setLucroDesejadoPct} /></div>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4,1fr)', gap: 8, marginTop: 12 }}><PriceCard title="Preço sugerido" value={moeda(calculoAtual.precoSugerido)} /><PriceCard title="Lucro líquido" value={moeda(calculoAtual.lucroEstimado)} tone={calculoAtual.lucroEstimado >= 0 ? 'green' : 'red'} /><PriceCard title="Margem real" value={percentual(calculoAtual.margemRealPct)} tone={calculoAtual.statusMargem === 'saudavel' ? 'green' : calculoAtual.statusMargem === 'apertada' ? 'yellow' : 'red'} /><PriceCard title="Markup" value={`${Number(calculoAtual.markup || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x`} /></div>
             </section>
@@ -489,6 +540,20 @@ export default function ProdutosPage() {
           </div>
         </div>
       </aside>
+
+      <CalculadoraPrecoM2Modal
+        aberto={calculadoraM2Aberta}
+        isMobile={isMobile}
+        onFechar={() => setCalculadoraM2Aberta(false)}
+        onUsarPreco={aplicarPrecoCalculadoM2}
+      />
+
+      <ProdutosFabMenu
+        isMobile={isMobile}
+        visivel={!drawerAberto}
+        onNovoProduto={novoProduto}
+        onCalcularPrecoM2={abrirCalculadoraM2}
+      />
     </div>
   )
 }

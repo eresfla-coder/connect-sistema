@@ -2,6 +2,10 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
+import { abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
+import { logoUrlAbsolutaPublica, mergeConfigPublicacao } from '@/lib/documentosPublicos'
+import { urlQrCode } from '@/lib/pdfPremium'
+import { iconeFormaPagamento, listaFormasPagamentoOrcamento, textoPagamentoOrcamento } from '@/lib/orcamento-pagamento'
 
 type Cliente = {
   nome?: string
@@ -51,6 +55,15 @@ type Orcamento = {
   prazoEntrega?: string
   observacao?: string
   link?: string
+  tipoDocumento?: string
+  tituloProposta?: string
+  descricaoProposta?: string
+  condicoesPagamento?: string
+  validadeProposta?: string
+  observacoesProposta?: string
+  formasPagamentoLista?: string[]
+  observacaoPagamento?: string
+  ocultarValorUnitarioM2?: boolean
   aprovacaoDigital?: {
     status?: 'aprovado' | 'recusado'
     nome?: string
@@ -164,7 +177,11 @@ function unidadeItem(item: ItemOrcamento) {
   return 'un'
 }
 
-function quantidadeItem(item: ItemOrcamento) {
+function quantidadeItem(item: ItemOrcamento, ocultarM2 = false) {
+  if (ocultarM2 && item.tipoCalculo === 'm2') {
+    const met = Number(item.metragem || 0)
+    return met.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) + ' m²'
+  }
   if (item.tipoCalculo === 'peso') {
     return Number(item.quantidade || 0).toLocaleString('pt-BR', {
       minimumFractionDigits: 3,
@@ -173,6 +190,10 @@ function quantidadeItem(item: ItemOrcamento) {
     })
   }
   return numero(Number(item.quantidade || 0))
+}
+
+function ocultarUnitarioItem(item: ItemOrcamento, ocultarM2: boolean) {
+  return ocultarM2 && item.tipoCalculo === 'm2'
 }
 
 function findOrcamento(lista: any[], idParam: string) {
@@ -225,6 +246,15 @@ function decodePayload(value: string | null) {
       validade: compact.vd || compact.validade,
       prazoEntrega: compact.pe || compact.prazoEntrega,
       observacao: compact.ob || compact.observacao,
+      tipoDocumento: compact.td || compact.tipoDocumento,
+      tituloProposta: compact.tp || compact.tituloProposta,
+      descricaoProposta: compact.dp || compact.descricaoProposta,
+      condicoesPagamento: compact.cp || compact.condicoesPagamento,
+      formasPagamentoLista: compact.fpl || compact.formasPagamentoLista,
+      observacaoPagamento: compact.opg || compact.observacaoPagamento,
+      ocultarValorUnitarioM2: Boolean(compact.om2 ?? compact.ocultarValorUnitarioM2),
+      validadeProposta: compact.vp || compact.validadeProposta,
+      observacoesProposta: compact.op || compact.observacoesProposta,
       config: compact.em
         ? {
             nomeEmpresa: compact.em.n || compact.em.nomeEmpresa,
@@ -242,6 +272,23 @@ function decodePayload(value: string | null) {
             logoUrl: compact.em.l || compact.em.logoUrl,
             corPrimaria: compact.em.cp || compact.em.corPrimaria,
             corSecundaria: compact.em.cs || compact.em.corSecundaria,
+          }
+        : undefined,
+      cfg: compact.em
+        ? {
+            nomeEmpresa: compact.em.n || compact.em.nomeEmpresa,
+            telefone:
+              compact.em.t ||
+              compact.em.celularEmpresa ||
+              compact.em.celular ||
+              compact.em.whatsappEmpresa ||
+              compact.em.whatsapp ||
+              compact.em.telefoneEmpresa ||
+              compact.em.telefone,
+            email: compact.em.e || compact.em.email,
+            endereco: compact.em.en || compact.em.endereco,
+            cidadeUf: compact.em.c || compact.em.cidadeUf,
+            logoUrl: compact.em.l || compact.em.logoUrl,
           }
         : undefined,
     }
@@ -282,9 +329,7 @@ function serializarOrcamentoPublico(dados: Orcamento, config: Config) {
 
   const cliente: any = typeof dados?.cliente === 'object' && dados?.cliente ? dados.cliente : {}
 
-  const logo = String(config?.logoUrl || '').startsWith('data:')
-    ? '/logo-connect.png'
-    : String(config?.logoUrl || '/logo-connect.png')
+  const logo = logoUrlAbsolutaPublica(config?.logoUrl) || logoPublicaOrcamento(config?.logoUrl)
 
   return toBase64UrlOrcamento(JSON.stringify({
     i: Number(dados?.id || 0),
@@ -307,6 +352,15 @@ function serializarOrcamentoPublico(dados: Orcamento, config: Config) {
     vd: String(dados?.validade || ''),
     pe: String(dados?.prazoEntrega || ''),
     ob: String(dados?.observacao || ''),
+    td: String(dados?.tipoDocumento || ''),
+    tp: String(dados?.tituloProposta || ''),
+    dp: String(dados?.descricaoProposta || ''),
+    cp: String(dados?.condicoesPagamento || ''),
+    fpl: Array.isArray(dados?.formasPagamentoLista) ? dados.formasPagamentoLista : undefined,
+    opg: String(dados?.observacaoPagamento || ''),
+    om2: Boolean(dados?.ocultarValorUnitarioM2),
+    vp: String(dados?.validadeProposta || dados?.validade || ''),
+    op: String(dados?.observacoesProposta || ''),
     em: {
       n: String(config?.nomeEmpresa || 'LOJA CONNECT'),
       t: String(
@@ -398,7 +452,17 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         let docPublico: any = null
         let documentoIdPublico = id
 
+        let cfgApiPublica: Record<string, unknown> | null = null
+
         if (!payload && tokenPublico) {
+          try {
+            const respCfg = await fetch(`/api/public-docs/config?token=${encodeURIComponent(tokenPublico)}`, { cache: 'no-store' })
+            if (respCfg.ok) {
+              const dadosCfg = await respCfg.json()
+              if (dadosCfg?.config) cfgApiPublica = dadosCfg.config
+            }
+          } catch {}
+
           try {
             const resp = await fetch(`/api/public-docs/${encodeURIComponent(tokenPublico)}`, { cache: 'no-store' })
             if (resp.ok) {
@@ -426,6 +490,19 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           } catch {}
         }
 
+        if (!cfgApiPublica && (tokenPublico || docPublico || payload)) {
+          try {
+            const qsCfg = tokenPublico
+              ? `token=${encodeURIComponent(tokenPublico)}`
+              : `tipo=orcamento&documentoId=${encodeURIComponent(documentoIdPublico || id)}`
+            const respCfg = await fetch(`/api/public-docs/config?${qsCfg}`, { cache: 'no-store' })
+            if (respCfg.ok) {
+              const dadosCfg = await respCfg.json()
+              if (dadosCfg?.config) cfgApiPublica = dadosCfg.config
+            }
+          } catch {}
+        }
+
         if (cancelado) return
 
         const saved = localStorage.getItem(STORAGE_KEY)
@@ -437,22 +514,53 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         }
         setOrc(encontrado || null)
 
+        const linkPublico = Boolean(tokenPublico || payload)
         const cfgLocal = getConfig()
-        const cfgPayload = (encontrado as any)?.config || {}
-        // Resolver telefone de todos os campos possíveis
-        const resolverTelefone = (cfg: any) => {
-          return String(
-            cfg?.celularEmpresa || cfg?.celular || cfg?.whatsappEmpresa ||
-            cfg?.whatsapp || cfg?.telefoneEmpresa || cfg?.telefone || ''
+        const cfgPayload = mergeConfigPublicacao(
+          cfgApiPublica,
+          (encontrado as any)?.cfg,
+          (encontrado as any)?.config
+        )
+        const resolverTelefone = (cfg: Record<string, unknown>) =>
+          String(
+            cfg?.celularEmpresa ||
+              cfg?.celular ||
+              cfg?.whatsappEmpresa ||
+              cfg?.whatsapp ||
+              cfg?.telefoneEmpresa ||
+              cfg?.telefone ||
+              ''
           )
-        }
-        const telefoneResolvido = resolverTelefone(cfgPayload) || resolverTelefone(cfgLocal)
-        setConfig({ ...cfgLocal, ...cfgPayload, telefone: telefoneResolvido })
+        const telefoneResolvido = resolverTelefone(cfgPayload as Record<string, unknown>) || resolverTelefone(cfgLocal as Record<string, unknown>)
 
-        // Se o dono da empresa está abrindo (tem config no localStorage), republicar com cfg atualizado
-        if (encontrado && telefoneResolvido && typeof window !== 'undefined') {
+        const logoFinal = logoUrlAbsolutaPublica(cfgPayload.logoUrl) || cfgPayload.logoUrl
+
+        if (linkPublico) {
+          setConfig({
+            ...cfgLocal,
+            ...cfgPayload,
+            logoUrl: logoFinal || cfgPayload.logoUrl,
+            telefone: telefoneResolvido,
+            nomeEmpresa: cfgPayload.nomeEmpresa || cfgLocal.nomeEmpresa,
+          })
+        } else {
+          setConfig({ ...cfgLocal, ...cfgPayload, telefone: telefoneResolvido, logoUrl: logoFinal || cfgLocal.logoUrl })
+        }
+
+        const temConfigEmpresaSalva = (() => {
+          try {
+            const raw = localStorage.getItem(CONFIG_KEY)
+            if (!raw) return false
+            const parsed = JSON.parse(raw)
+            return Boolean(parsed?.nomeEmpresa && parsed.nomeEmpresa !== 'LOJA CONNECT')
+          } catch {
+            return false
+          }
+        })()
+
+        if (encontrado && telefoneResolvido && typeof window !== 'undefined' && temConfigEmpresaSalva && !linkPublico) {
           const tokenAtual = search.get('p') || search.get('token')
-          const cfgAtualizado = { ...cfgLocal, ...cfgPayload, telefone: telefoneResolvido }
+          const cfgAtualizado = mergeConfigPublicacao(cfgLocal, cfgPayload, { telefone: telefoneResolvido })
           try {
             fetch('/api/public-docs', {
               method: 'POST',
@@ -461,7 +569,7 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
                 tipo: 'orcamento',
                 documentoId: String(documentoIdPublico || encontrado.id || id),
                 token: tokenAtual || undefined,
-                payload: { ...encontrado, config: cfgAtualizado },
+                payload: { ...encontrado, config: cfgAtualizado, cfg: cfgAtualizado },
               }),
             }).catch(() => {})
           } catch {}
@@ -580,32 +688,58 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         ? new URLSearchParams(window.location.search).get('p') || new URLSearchParams(window.location.search).get('token')
         : ''
 
-      await fetch('/api/public-docs', {
+      const resp = await fetch('/api/public-docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          document_type: 'orcamento',
+          document_id: String((dados as any).id),
           tipo: 'orcamento',
           documentoId: String((dados as any).id),
           token: tokenAtual || undefined,
           payload: { ...dados, config },
         }),
       })
-    } catch {}
+
+      if (!resp.ok) {
+        const erro = await resp.json().catch(() => null)
+        console.error('[ORCAMENTO_PUBLICO] erro ao salvar aprovação:', {
+          status: resp.status,
+          body: erro,
+          documentoId: String((dados as any).id),
+        })
+        return false
+      }
+
+      console.log('[ORCAMENTO_PUBLICO] aprovação persistida em public-docs', {
+        documentoId: String((dados as any).id),
+        status: (dados as any).status,
+        aprovado: (dados as any).aprovado,
+      })
+      return true
+    } catch (error) {
+      console.error('[ORCAMENTO_PUBLICO] exceção ao salvar aprovação:', error)
+      return false
+    }
   }
 
-  function salvarOrcamentoAprovado(status: 'Aprovado' | 'Cancelado', assinatura?: string) {
+  async function salvarOrcamentoAprovado(status: 'Aprovado' | 'Cancelado', assinatura?: string) {
     if (!orc || typeof window === 'undefined') return null
+    const agora = new Date()
+    const dataAprovacao = agora.toLocaleString('pt-BR')
     const atualizado: Orcamento = {
       ...orc,
       status,
+      aprovado: status === 'Aprovado',
+      aprovadoEm: status === 'Aprovado' ? dataAprovacao : undefined,
       aprovacaoDigital: {
         status: status === 'Aprovado' ? 'aprovado' : 'recusado',
         nome: assinaturaNome.trim() || cliente,
-        data: new Date().toLocaleString('pt-BR'),
+        data: dataAprovacao,
         assinatura: assinatura || '',
         origem: 'link-publico',
       },
-      atualizadoEm: Date.now(),
+      atualizadoEm: agora.getTime(),
     } as Orcamento
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
@@ -619,7 +753,7 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
       window.dispatchEvent(new Event('connect-data-change'))
     } catch {}
     setOrc(atualizado)
-    void salvarAprovacaoPublica(atualizado)
+    await salvarAprovacaoPublica(atualizado)
     return atualizado
   }
 
@@ -666,7 +800,9 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
     } catch {}
   }
 
-  function avisarEmpresaWhatsapp(tipo: 'aprovado' | 'recusado') {
+  function urlAvisoEmpresaWhatsapp(tipo: 'aprovado' | 'recusado') {
+    const docProposta = String(orc?.tipoDocumento || '').toLowerCase() === 'proposta_comercial'
+    const rotulo = docProposta ? 'Proposta' : 'Orçamento'
     let numeroEmpresa = String(
       (config as any).celularEmpresa ||
       (config as any).celular ||
@@ -680,37 +816,44 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
     if (numeroEmpresa.startsWith('55')) numeroEmpresa = numeroEmpresa.slice(2)
     numeroEmpresa = numeroEmpresa.replace(/^0+/, '')
     if (numeroEmpresa.length > 11) numeroEmpresa = numeroEmpresa.slice(-11)
-    if (numeroEmpresa.length < 10) return
+    if (numeroEmpresa.length < 10) return ''
     const numeroFinal = '55' + numeroEmpresa
     const textoMensagem = tipo === 'aprovado'
-      ? '✅ Orçamento aprovado digitalmente!\n\nCliente: ' + cliente + '\nDocumento: ' + numeroDoc + '\nTotal: ' + moeda(total) + '\nAssinatura: ' + (assinaturaNome.trim() || cliente)
-      : '⚠️ Orçamento recusado pelo cliente.\n\nCliente: ' + cliente + '\nDocumento: ' + numeroDoc + '\nTotal: ' + moeda(total)
-    window.open('https://api.whatsapp.com/send/?phone=' + numeroFinal + '&text=' + encodeURIComponent(textoMensagem) + '&type=phone_number&app_absent=0', '_blank')
+      ? `✅ ${rotulo} aprovado digitalmente!\n\nCliente: ` + cliente + '\nDocumento: ' + numeroDoc + '\nTotal: ' + moeda(total) + '\nAssinatura: ' + (assinaturaNome.trim() || cliente)
+      : `⚠️ ${rotulo} recusado pelo cliente.\n\nCliente: ` + cliente + '\nDocumento: ' + numeroDoc + '\nTotal: ' + moeda(total)
+    return montarUrlWhatsapp(numeroFinal, textoMensagem)
   }
 
-  function confirmarAprovacaoDigital() {
+  async function confirmarAprovacaoDigital() {
     if (!orc) return
     if (!assinaturaNome.trim() && !assinaturaDesenhada) {
       setMensagemAprovacao('Informe o nome ou assine no quadro para aprovar.')
       return
     }
     const assinatura = assinaturaDesenhada ? canvasRef.current?.toDataURL('image/png') || '' : ''
-    const atualizado = salvarOrcamentoAprovado('Aprovado', assinatura)
+    const docProposta = String(orc.tipoDocumento || '').toLowerCase() === 'proposta_comercial'
+    const atualizado = await salvarOrcamentoAprovado('Aprovado', assinatura)
     if (atualizado) gerarOSDaAprovacao(atualizado)
+    const url = urlAvisoEmpresaWhatsapp('aprovado')
+    if (url) abrirWhatsappUrl(url)
     setModalAprovacao(false)
-    setMensagemAprovacao('Orçamento aprovado com sucesso. A empresa será avisada pelo WhatsApp.')
-    avisarEmpresaWhatsapp('aprovado')
+    setMensagemAprovacao(`${docProposta ? 'Proposta' : 'Orçamento'} aprovado com sucesso. A empresa será avisada pelo WhatsApp.`)
   }
 
-  function recusarOrcamentoDigital() {
-    salvarOrcamentoAprovado('Cancelado')
-    setMensagemAprovacao('Orçamento marcado como recusado. A empresa será avisada pelo WhatsApp.')
-    avisarEmpresaWhatsapp('recusado')
+  async function recusarOrcamentoDigital() {
+    const docProposta = String(orc?.tipoDocumento || '').toLowerCase() === 'proposta_comercial'
+    await salvarOrcamentoAprovado('Cancelado')
+    const url = urlAvisoEmpresaWhatsapp('recusado')
+    if (url) abrirWhatsappUrl(url)
+    setMensagemAprovacao(`${docProposta ? 'Proposta' : 'Orçamento'} marcado como recusado. A empresa será avisada pelo WhatsApp.`)
   }
 
 
-  if (loading) return <div className="orc-loading">Carregando orçamento...</div>
-  if (!orc) return <div className="orc-loading">Orçamento não encontrado.</div>
+  if (loading) return <div className="orc-loading">Carregando documento...</div>
+  if (!orc) return <div className="orc-loading">Documento não encontrado.</div>
+
+  const isProposta = String(orc.tipoDocumento || '').toLowerCase() === 'proposta_comercial'
+  const rotuloDocumento = isProposta ? 'proposta comercial' : 'orçamento'
 
   const empresa = texto(config.nomeEmpresa, 'LOJA CONNECT')
   const telefone = texto(
@@ -720,21 +863,28 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
   const email = texto(config.email, 'lojaconnect@hotmail.com')
   const endereco = texto(config.endereco, 'GILBERTO ROBERTO GOMES, 243')
   const cidade = texto(config.cidadeUf, 'PARNAMIRIM-RN')
-  const logo = logoPublicaOrcamento(texto(config.logoUrl, '/logo-connect.png'))
+  const logo = logoUrlAbsolutaPublica(config.logoUrl) || logoPublicaOrcamento(texto(config.logoUrl, ''))
   const cliente = texto(orc.cliente, 'Cliente não informado')
   const telCliente = clienteTelefone(orc.cliente, '')
   const emailCliente = clienteEmail(orc.cliente, '')
   const enderecoCliente = clienteEndereco(orc.cliente, '')
   const data = parseDataBR(orc.data)
-  const validade = texto(orc.validade, '7 dias')
+  const validade = texto(orc.validadeProposta || orc.validade, '7 dias')
   const entrega = texto(orc.prazoEntrega, '3 dias')
-  const pagamento = texto(orc.formaPagamento, 'A combinar')
-  const observacao = texto(orc.observacao, texto(config.rodapePdf, 'Obrigado pela preferência.'))
+  const pagamento = textoPagamentoOrcamento(orc)
+  const pagamentoLista = listaFormasPagamentoOrcamento(orc)
+  const ocultarM2 = Boolean(orc.ocultarValorUnitarioM2)
+  const descricaoProposta = texto(orc.descricaoProposta, '')
+  const observacao = texto(
+    orc.observacoesProposta || orc.observacao,
+    texto(config.rodapePdf, isProposta ? 'Aguardamos sua aprovação.' : 'Obrigado pela preferência.'),
+  )
   const numeroDoc = texto(orc.numero, String(orc.id || '').slice(-4).padStart(4, '0'))
   const corPrimaria = texto(config.corPrimaria, '#068b43')
   const corSecundaria = texto(config.corSecundaria, '#dcfce7')
   const itensParaMostrar = itens.length ? itens : [{ nome: 'Item não informado', quantidade: 1, valor: 0, total: 0 }]
   const statusAtual = texto(orc.status, 'Pendente')
+  const qrUrl = linkCompartilhamento ? urlQrCode(linkCompartilhamento, 92) : ''
 
   return (
     <main className="orc-page" style={{ '--pdf-primary': corPrimaria, '--pdf-soft': corSecundaria } as React.CSSProperties}>
@@ -747,26 +897,33 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
       </div>
 
       <section className="orc-sheet">
-        <header className="orc-company">
-          <div className="orc-brand">
-            <img src={logo} alt="Logo" onError={(e) => ((e.currentTarget.style.display = 'none'))} />
-            <div>
+        <header className="orc-hero">
+          <div className="orc-hero-left">
+            <img className="orc-hero-logo" src={logo} alt="Logo" onError={(e) => ((e.currentTarget.style.display = 'none'))} />
+            <div className="orc-hero-brand">
               <h1>{empresa}</h1>
-              <p>☎ {telefone} &nbsp; | &nbsp; ✉ {email}</p>
-              <p>📍 {endereco} • {cidade}</p>
+              {telefone ? <p>{telefone}</p> : null}
+              {email ? <p>{email}</p> : null}
+              {(endereco || cidade) ? <p>{[endereco, cidade].filter(Boolean).join(' • ')}</p> : null}
             </div>
           </div>
-
-          <div className="orc-company-right">
-            <p>{endereco}</p>
-            <p>{cidade}</p>
-            <strong>{telefone}</strong>
+          <div className="orc-hero-right">
+            {qrUrl ? (
+              <div className="orc-qr-box">
+                <img src={qrUrl} alt="QR Code do documento" width={92} height={92} />
+                <span>Digital / PDF</span>
+              </div>
+            ) : null}
+            <div className="orc-doc-pill">Doc. Nº {numeroDoc}</div>
           </div>
         </header>
 
-        <section className="orc-title">
-          <p>PROPOSTA COMERCIAL</p>
-          <h2>ORÇAMENTO COMERCIAL</h2>
+        <section className="orc-title-band">
+          <span className="orc-kicker">{isProposta ? 'PROPOSTA COMERCIAL' : 'ORÇAMENTO COMERCIAL'}</span>
+          <h2>{isProposta ? 'PROPOSTA COMERCIAL' : 'ORÇAMENTO COMERCIAL'}</h2>
+          {isProposta && texto(orc.tituloProposta || orc.titulo, '') ? (
+            <p className="orc-subtitle">{texto(orc.tituloProposta || orc.titulo, '')}</p>
+          ) : null}
         </section>
 
         <section className="orc-approval-status no-print">
@@ -805,39 +962,49 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           </section>
         )}
 
+        {isProposta && descricaoProposta ? (
+          <section className="orc-prose-block">
+            <h4>Descrição da proposta</h4>
+            <p>{descricaoProposta}</p>
+          </section>
+        ) : null}
+
         <section className="orc-table orc-table-screen">
-          <div className="orc-thead">
+          <div className={`orc-thead ${ocultarM2 ? 'orc-thead-hide-unit' : ''}`}>
             <span>Item</span>
             <span>Descrição</span>
             <span>Un.</span>
             <span>Qtde</span>
-            <span>Valor Unit.</span>
+            {!ocultarM2 ? <span>Valor Unit.</span> : null}
             <span>Subtotal</span>
           </div>
 
           {itensParaMostrar.map((item, index) => (
-            <div className="orc-row" key={String(item.id || index)}>
+            <div className={`orc-row ${ocultarM2 ? 'orc-row-hide-unit' : ''}`} key={String(item.id || index)}>
               <div className="orc-index">{String(index + 1).padStart(2, '0')}</div>
               <div className="orc-desc">
                 <strong>{texto(item.nome, 'Item')}</strong>
                 {texto(item.descricao, '') && <small>{texto(item.descricao, '')}</small>}
+                {ocultarUnitarioItem(item, ocultarM2) && (item.largura || item.altura) ? (
+                  <small>{Number(item.largura || 0).toLocaleString('pt-BR')} × {Number(item.altura || 0).toLocaleString('pt-BR')} m</small>
+                ) : null}
               </div>
               <div className="orc-unit"><span>{unidadeItem(item)}</span></div>
-              <div className="orc-center">{quantidadeItem(item)}</div>
-              <div className="orc-money">{moeda(valorUnitario(item))}</div>
+              <div className="orc-center">{quantidadeItem(item, ocultarM2)}</div>
+              {!ocultarUnitarioItem(item, ocultarM2) ? <div className="orc-money">{moeda(valorUnitario(item))}</div> : null}
               <div className="orc-line-total">{moeda(totalItem(item))}</div>
             </div>
           ))}
         </section>
 
-        <table className="orc-table-print">
+        <table className={`orc-table-print ${ocultarM2 ? 'orc-table-print-hide-unit' : ''}`}>
           <thead>
             <tr>
               <th>Item</th>
               <th>Descrição</th>
               <th>Un.</th>
               <th>Qtde</th>
-              <th>Valor Unit.</th>
+              {!ocultarM2 ? <th>Valor Unit.</th> : null}
               <th>Subtotal</th>
             </tr>
           </thead>
@@ -848,10 +1015,13 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
                 <td>
                   <strong>{itemNomePrint(item)}</strong>
                   {itemDescricaoPrint(item) && <small>{itemDescricaoPrint(item)}</small>}
+                  {ocultarUnitarioItem(item, ocultarM2) && (item.largura || item.altura) ? (
+                    <small>{Number(item.largura || 0).toLocaleString('pt-BR')} × {Number(item.altura || 0).toLocaleString('pt-BR')} m</small>
+                  ) : null}
                 </td>
                 <td>{unidadeItem(item)}</td>
-                <td>{quantidadeItem(item)}</td>
-                <td>{moeda(valorUnitario(item))}</td>
+                <td>{quantidadeItem(item, ocultarM2)}</td>
+                {!ocultarUnitarioItem(item, ocultarM2) ? <td>{moeda(valorUnitario(item))}</td> : null}
                 <td><strong>{moeda(totalItem(item))}</strong></td>
               </tr>
             ))}
@@ -868,14 +1038,32 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
             <div><span>Subtotal</span><strong>{moeda(subtotal)}</strong></div>
             <div><span>Frete</span><strong>{moeda(frete)}</strong></div>
             <div><span>Desconto</span><strong>{moeda(desconto)}</strong></div>
-            <div className="orc-grand"><span>💵 Total</span><strong>{moeda(total)}</strong></div>
+            <div className="orc-grand"><span>Valor total</span><strong>{moeda(total)}</strong></div>
           </article>
 
           <article className="orc-pay">
-            <h3>Pagamento</h3>
-            <strong>{pagamento}</strong>
+            <h3>Condições de pagamento</h3>
+            <div className="orc-pay-badges">
+              {pagamentoLista.formas.map((forma) => (
+                <span key={forma} className="orc-pay-badge">{iconeFormaPagamento(forma)} {forma}</span>
+              ))}
+            </div>
+            {pagamentoLista.observacao ? <p className="orc-pay-note">{pagamentoLista.observacao}</p> : null}
+            {!pagamentoLista.formas.length ? <strong>{pagamento}</strong> : null}
+            {validade ? <em>Validade: {validade}</em> : null}
           </article>
         </footer>
+
+        <div className="orc-signatures">
+          <div className="orc-sign-col">
+            <span>Assinatura do cliente</span>
+            <div className="orc-sign-line" />
+          </div>
+          <div className="orc-sign-col">
+            <span>{empresa}</span>
+            <div className="orc-sign-line" />
+          </div>
+        </div>
 
         <div className="orc-generated">
           Gerado pelo <strong>Connect Sistema Premium</strong> • {data}
@@ -888,8 +1076,8 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           <div className="approval-card">
             <button className="approval-close" onClick={() => setModalAprovacao(false)}>×</button>
             <p className="approval-kicker">Aprovação digital</p>
-            <h2>Aprovar orçamento Nº {numeroDoc}</h2>
-            <p className="approval-sub">Confirme o nome e assine no quadro. Ao aprovar, o orçamento fica marcado como aprovado e uma OS é gerada automaticamente no painel quando o documento existir neste navegador.</p>
+            <h2>Aprovar {rotuloDocumento} Nº {numeroDoc}</h2>
+            <p className="approval-sub">Confirme o nome e assine no quadro. Ao aprovar, o {rotuloDocumento} fica marcado como aprovado e uma OS é gerada automaticamente no painel quando o documento existir neste navegador.</p>
             <label>Nome do aprovador</label>
             <input value={assinaturaNome} onChange={(e) => setAssinaturaNome(e.target.value)} placeholder="Nome completo" />
             <label>Assinatura digital</label>
@@ -907,7 +1095,10 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
             />
             <div className="approval-row">
               <button onClick={limparAssinatura}>Limpar assinatura</button>
-              <p style={{margin:'0 0 10px',fontSize:12,color:'#64748b',fontWeight:800}}>Ao aprovar, sua ordem de serviço será gerada automaticamente.</p><button className="approval-confirm" onClick={confirmarAprovacaoDigital}>Aprovar orçamento</button>
+              <p style={{margin:'0 0 10px',fontSize:12,color:'#64748b',fontWeight:800}}>Ao aprovar, sua ordem de serviço será gerada automaticamente.</p>
+              <button className="approval-confirm" onClick={confirmarAprovacaoDigital}>
+                Aprovar {rotuloDocumento}
+              </button>
             </div>
             {mensagemAprovacao && <small>{mensagemAprovacao}</small>}
           </div>
@@ -941,16 +1132,23 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         .approval-row button { height: 42px; border-radius: 13px; border: 1px solid #cbd5e1; background: #fff; padding: 0 15px; font-weight: 950; cursor: pointer; }
         .approval-row .approval-confirm { background: #16a34a; border-color: #16a34a; color: #fff; }
         .approval-card small { display: block; margin-top: 10px; color: #166534; font-weight: 850; }
-        .orc-sheet { width: 1120px; max-width: 100%; margin: 0 auto; background: #fff; border: 1px solid #dbe5ef; border-radius: 22px; padding: 24px; box-shadow: 0 28px 80px rgba(15,23,42,.12); }
-        .orc-company { display: flex; justify-content: space-between; gap: 24px; border-bottom: 3px solid var(--pdf-primary); padding-bottom: 16px; }
-        .orc-brand { display: flex; gap: 16px; align-items: center; min-width: 0; }
-        .orc-brand img { width: 76px; height: 76px; object-fit: contain; border-radius: 16px; border: 1px solid #dbe5ef; padding: 6px; background: #fff; }
-        .orc-brand h1 { margin: 0; font-size: 30px; letter-spacing: -.03em; font-weight: 950; color: #0f172a; }
-        .orc-brand p, .orc-company-right p { margin: 5px 0; font-size: 13px; color: #475569; }
-        .orc-company-right { text-align: right; color: #1e293b; font-size: 14px; min-width: 220px; }
-        .orc-title { text-align: center; padding: 20px 0 18px; }
-        .orc-title p { margin: 0; display: inline-block; font-size: 14px; font-weight: 950; letter-spacing: 7px; color: var(--pdf-primary); }
-        .orc-title h2 { margin: 8px 0 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-weight: 950; color: #0f172a; }
+        .orc-sheet { width: 1120px; max-width: 100%; margin: 0 auto; background: #fff; border: 1px solid #dbe5ef; border-radius: 22px; padding: 20px 22px 18px; box-shadow: 0 28px 80px rgba(15,23,42,.12); }
+        .orc-hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; padding: 14px 16px; border-radius: 16px; background: linear-gradient(135deg, #f8fafc 0%, var(--pdf-soft) 100%); border: 1px solid #dbe5ef; margin-bottom: 12px; }
+        .orc-hero-left { display: flex; gap: 14px; align-items: center; min-width: 0; flex: 1; }
+        .orc-hero-logo { width: 92px; height: 92px; object-fit: contain; border-radius: 18px; border: 1px solid #dbe5ef; padding: 8px; background: #fff; flex-shrink: 0; }
+        .orc-hero-brand h1 { margin: 0; font-size: 26px; letter-spacing: -.03em; font-weight: 950; color: #0f172a; line-height: 1.05; }
+        .orc-hero-brand p { margin: 4px 0 0; font-size: 12.5px; color: #475569; font-weight: 700; line-height: 1.35; }
+        .orc-hero-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; }
+        .orc-qr-box { display: grid; place-items: center; gap: 4px; padding: 6px; border-radius: 12px; background: #fff; border: 1px solid #dbe5ef; }
+        .orc-qr-box span { font-size: 9px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; color: #64748b; }
+        .orc-doc-pill { padding: 8px 14px; border-radius: 999px; background: var(--pdf-primary); color: #fff; font-size: 12px; font-weight: 950; letter-spacing: .04em; }
+        .orc-title-band { text-align: center; padding: 14px 12px 12px; border-bottom: 2px solid var(--pdf-primary); margin-bottom: 10px; }
+        .orc-kicker { display: block; font-size: 11px; font-weight: 950; letter-spacing: .28em; color: var(--pdf-primary); margin-bottom: 6px; }
+        .orc-title-band h2 { margin: 0; font-size: 34px; line-height: 1; letter-spacing: -.04em; font-weight: 950; color: #0f172a; }
+        .orc-subtitle { margin: 8px 0 0; font-size: 14px; font-weight: 800; color: #475569; }
+        .orc-prose-block { margin: 8px 0 10px; padding: 12px 14px; border-radius: 14px; border: 1px solid #dbe5ef; background: linear-gradient(180deg,#fff,#f8fafc); }
+        .orc-prose-block h4 { margin: 0 0 6px; font-size: 11px; font-weight: 950; text-transform: uppercase; letter-spacing: .14em; color: var(--pdf-primary); }
+        .orc-prose-block p { margin: 0; font-size: 14px; line-height: 1.45; color: #334155; font-weight: 700; }
         .orc-info { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr 1fr; border: 1px solid #dbe5ef; border-radius: 14px; overflow: hidden; }
         .orc-info article { min-height: 76px; padding: 15px 16px; border-right: 1px solid #dbe5ef; }
         .orc-info article:last-child { border-right: 0; }
@@ -963,6 +1161,10 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
 
         .orc-table-print { display: none; }
         .orc-thead, .orc-row { display: grid; grid-template-columns: 70px 1fr 80px 90px 150px 170px; align-items: center; column-gap: 8px; }
+        .orc-thead-hide-unit, .orc-row-hide-unit { grid-template-columns: 70px 1fr 80px 120px 170px; }
+        .orc-pay-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+        .orc-pay-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--pdf-soft); color: var(--pdf-primary); font-size: 13px; font-weight: 900; border: 1px solid rgba(6,139,67,.18); }
+        .orc-pay-note { margin: 0 0 8px; color: #475569; font-size: 14px; line-height: 1.4; font-weight: 700; }
         .orc-thead { background: var(--pdf-primary); color: #fff; padding: 12px 16px; text-transform: uppercase; font-size: 13px; font-weight: 950; }
         .orc-row { padding: 12px 16px; border-top: 1px dashed #dbe5ef; }
         .orc-index { width: 34px; height: 34px; border-radius: 12px; background: #f1f5f9; display: grid; place-items: center; color: var(--pdf-primary); font-size: 16px; font-weight: 950; }
@@ -978,9 +1180,14 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         .orc-notes p { margin: 0; line-height: 1.45; color: #475569; font-size: 15px; }
         .orc-total-card div { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; font-size: 16px; }
         .orc-total-card strong { font-weight: 950; }
-        .orc-grand { margin-top: 8px; padding: 12px !important; border-radius: 12px; background: var(--pdf-soft); color: var(--pdf-primary); font-size: 23px !important; font-weight: 950; }
-        .orc-pay strong { font-size: 18px; color: #0f172a; }
-        .orc-generated { margin-top: 12px; padding-top: 10px; border-top: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 13px; }
+        .orc-grand { margin-top: 8px; padding: 14px 12px !important; border-radius: 14px; background: linear-gradient(135deg, var(--pdf-soft), #fffbeb); color: #0f172a; font-size: 24px !important; font-weight: 950; border: 2px solid var(--pdf-primary); box-shadow: inset 0 -8px 0 rgba(250,204,21,.25); }
+        .orc-grand strong { color: var(--pdf-primary); font-size: 26px !important; }
+        .orc-pay strong { display: block; font-size: 16px; color: #0f172a; line-height: 1.35; }
+        .orc-pay em { display: block; margin-top: 8px; font-size: 12px; font-style: normal; font-weight: 800; color: var(--pdf-primary); }
+        .orc-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 12px; padding-top: 10px; break-inside: avoid; page-break-inside: avoid; }
+        .orc-sign-col span { display: block; font-size: 10px; font-weight: 950; text-transform: uppercase; letter-spacing: .12em; color: #64748b; margin-bottom: 28px; }
+        .orc-sign-line { border-top: 2px solid #0f172a; height: 0; }
+        .orc-generated { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 12px; }
         .orc-generated strong { color: var(--pdf-primary); }
         @media (max-width: 760px) {
           .orc-page { padding: calc(env(safe-area-inset-top, 0px) + 74px) 8px calc(env(safe-area-inset-bottom, 0px) + 18px) 8px; touch-action: pan-y; }
@@ -993,8 +1200,9 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           .approval-row { flex-direction: column; }
           .approval-row button { width: 100%; }
           .orc-sheet { padding: 14px; border-radius: 16px; }
-          .orc-company, .orc-brand { flex-direction: column; align-items: flex-start; }
-          .orc-company-right { text-align: left; min-width: 0; }
+          .orc-hero { flex-direction: column; }
+          .orc-hero-right { align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
+          .orc-signatures { grid-template-columns: 1fr; gap: 16px; }
           .orc-info, .orc-footer { grid-template-columns: 1fr; }
           .orc-info article { border-right: 0; border-bottom: 1px solid #dbe5ef; }
           .orc-thead { display: none; }
@@ -1010,16 +1218,16 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           @page { size: A4; margin: 7mm; }
 
-          .orc-company { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 6px; border-bottom: 2px solid var(--pdf-primary); }
-          .orc-brand { gap: 9px; align-items: center; }
-          .orc-brand img { width: 48px; height: 48px; border-radius: 10px; padding: 4px; }
-          .orc-brand h1 { font-size: 20px; line-height: 1; }
-          .orc-brand p { font-size: 10.8px; line-height: 1.2; margin: 2px 0; }
-          .orc-company-right { display: none !important; }
-
-          .orc-title { padding: 8px 0 7px; }
-          .orc-title p { font-size: 10px; letter-spacing: 3.8px; }
-          .orc-title h2 { font-size: 26px; line-height: .95; }
+          .orc-hero { padding: 10px 12px !important; margin-bottom: 6px !important; }
+          .orc-hero-logo { width: 52px !important; height: 52px !important; }
+          .orc-hero-brand h1 { font-size: 18px !important; }
+          .orc-hero-brand p { font-size: 9.5px !important; }
+          .orc-qr-box img { width: 64px !important; height: 64px !important; }
+          .orc-title-band { padding: 6px 0 5px !important; }
+          .orc-kicker { font-size: 8.5px !important; }
+          .orc-title-band h2 { font-size: 22px !important; }
+          .orc-signatures { margin-top: 6px !important; }
+          .orc-sign-col span { margin-bottom: 18px !important; font-size: 8px !important; }
 
           .orc-info { grid-template-columns: 1.65fr .7fr .8fr .7fr .7fr; border-radius: 8px; }
           .orc-info article { min-height: 27px; padding: 4px 6px; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; }

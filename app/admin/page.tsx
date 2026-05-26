@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'
-import { ADMIN_EMAILS } from '@/lib/access'
+import { isAdminMaster } from '@/lib/access'
+import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetricas'
+import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
+import { abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
+import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
 
 type FiltroStatus = 'todos' | 'trial' | 'ativo' | 'bloqueado' | 'vencidos' | 'risco'
 type TipoNovoCliente = 'trial' | 'ativo'
@@ -166,9 +170,8 @@ function writeMeta(meta: Record<string, MetaCliente>) {
 function planoCliente(cliente: PerfilAdmin) {
   const valor = Number(cliente.valor_plano || 0)
   if (valor <= 0 || isPermanent(cliente)) return { nome: 'Founder', limite: 'Ilimitado', cor: '#22c55e' }
-  if (valor <= 39.9) return { nome: 'Básico', limite: '1 usuário', cor: '#60a5fa' }
-  if (valor <= 69.9) return { nome: 'Pro', limite: '2 usuários', cor: '#a78bfa' }
-  return { nome: 'Premium', limite: '5 usuários', cor: '#f97316' }
+  if (valor >= 400) return { nome: 'Anual', limite: 'Recorrência anual', cor: '#a78bfa' }
+  return { nome: 'Mensal', limite: 'Recorrência mensal', cor: '#60a5fa' }
 }
 
 function riscoCliente(cliente: PerfilAdmin) {
@@ -201,15 +204,23 @@ export default function AdminSaasMasterPage() {
   const [inviteLink, setInviteLink] = useState('')
   const [inviteText, setInviteText] = useState('')
   const [invitePhone, setInvitePhone] = useState('')
+  const [renovarOpen, setRenovarOpen] = useState(false)
+  const [renovarCliente, setRenovarCliente] = useState<PerfilAdmin | null>(null)
+  const [renovarProcessando, setRenovarProcessando] = useState(false)
+  const [renovarResultado, setRenovarResultado] = useState<{
+    mensagemWhatsapp: string
+    whatsappUrl: string
+    recibo: ReciboRenovacaoManual
+  } | null>(null)
   const [isMobileAdmin, setIsMobileAdmin] = useState(false)
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
   const [novoCliente, setNovoCliente] = useState<NovoClienteForm>({
     email: '',
     nome_empresa: '',
     telefone: '',
-    valor_plano: '39,90',
+    valor_plano: '49,90',
     tipo: 'trial',
-    sistema_cliente: 'Connect Pro',
+    sistema_cliente: 'Connect Sistema',
     observacoes: '',
     criar_acesso: true,
   })
@@ -240,7 +251,7 @@ export default function AdminSaasMasterPage() {
   }, [])
 
   function clienteSistema(cliente: PerfilAdmin) {
-    return cliente.sistema_cliente || metaLocal[cliente.id]?.sistema_cliente || 'Connect Pro'
+    return cliente.sistema_cliente || metaLocal[cliente.id]?.sistema_cliente || 'Connect Sistema'
   }
 
   function clienteObs(cliente: PerfilAdmin) {
@@ -272,7 +283,7 @@ export default function AdminSaasMasterPage() {
     }
 
     const email = (user.email || '').trim().toLowerCase()
-    if (!ADMIN_EMAILS.includes(email)) {
+    if (!isAdminMaster(email)) {
       router.push('/dashboard')
       return
     }
@@ -390,8 +401,61 @@ export default function AdminSaasMasterPage() {
     })
   }
 
-  async function marcarPago(id: string) {
-    await ativar(30, id)
+  function abrirRenovacaoManual(cliente: PerfilAdmin) {
+    setRenovarCliente(cliente)
+    setRenovarResultado(null)
+    setRenovarOpen(true)
+    setAcaoId(null)
+  }
+
+  async function confirmarRenovacaoManual(form: FormRenovacao) {
+    if (!renovarCliente) return
+    try {
+      setRenovarProcessando(true)
+      const { data: { session } } = await supabase.auth.getSession()
+      const accessToken = session?.access_token
+      if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
+
+      const valor = parseMoney(form.valor_pago)
+      const response = await fetch('/api/admin/clientes/renovar-manual', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          user_id: renovarCliente.id,
+          plano_tier: form.plano_tier,
+          valor_pago: valor,
+          forma_pagamento: form.forma_pagamento,
+          data_pagamento: form.data_pagamento,
+          proxima_validade: form.proxima_validade,
+          observacao: form.observacao,
+          admin_email: session?.user?.email || '',
+        }),
+      })
+
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload?.error || 'Não foi possível renovar o cliente.')
+
+      setRenovarResultado({
+        mensagemWhatsapp: String(payload.mensagemWhatsapp || ''),
+        whatsappUrl: String(payload.whatsappUrl || ''),
+        recibo: payload.recibo as ReciboRenovacaoManual,
+      })
+      await refreshClientes()
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Erro ao renovar.'
+      alert(msg)
+    } finally {
+      setRenovarProcessando(false)
+    }
+  }
+
+  function fecharRenovacaoManual() {
+    setRenovarOpen(false)
+    setRenovarCliente(null)
+    setRenovarResultado(null)
   }
 
   async function bloquear(id: string) {
@@ -460,10 +524,10 @@ export default function AdminSaasMasterPage() {
       '',
       'Para manter o acesso e o suporte em dia, me chama por aqui para regularizar.',
       '',
-      '— Connect Pro',
+      '— Connect Sistema',
     ].join('\n')
 
-    window.open(`https://wa.me/${whatsappDestino(cliente.telefone)}?text=${encodeURIComponent(mensagem)}`, '_blank')
+    abrirWhatsappUrl(montarUrlWhatsapp(whatsappDestino(cliente.telefone), mensagem))
   }
 
   function mensagemUpgrade(cliente: PerfilAdmin) {
@@ -471,19 +535,19 @@ export default function AdminSaasMasterPage() {
     const mensagem = [
       `Olá, ${nome}!`,
       '',
-      'Separei uma sugestão para melhorar seu plano no Connect Pro.',
-      'Com o plano Pro/Premium você ganha mais usuários, automações, controle de sessão, CRM e suporte prioritário.',
+      'Separei uma sugestão para manter seu Connect Sistema ativo.',
+      'Hoje trabalhamos com contratação mensal ou anual. O anual é o melhor custo-benefício para manter o sistema liberado o ano inteiro.',
       '',
       'Quer que eu te mostre as opções?',
       '',
-      '— Connect Pro',
+      '— Connect Sistema',
     ].join('\n')
-    window.open(`https://wa.me/${whatsappDestino(cliente.telefone)}?text=${encodeURIComponent(mensagem)}`, '_blank')
+    abrirWhatsappUrl(montarUrlWhatsapp(whatsappDestino(cliente.telefone), mensagem))
   }
 
   function copiarResumoExecutivo() {
     const texto = [
-      'Resumo SaaS Connect Pro',
+      'Resumo SaaS Connect Sistema',
       `Clientes: ${resumo.total}`,
       `Ativos: ${resumo.ativos}`,
       `Trial: ${resumo.trials}`,
@@ -544,10 +608,14 @@ export default function AdminSaasMasterPage() {
 
       if (whatsappUrl) {
         if (abaWhatsApp) {
-          abaWhatsApp.location.href = whatsappUrl
-          try { abaWhatsApp.focus() } catch {}
+          try {
+            abaWhatsApp.location.replace(whatsappUrl)
+            abaWhatsApp.focus()
+          } catch {
+            abrirWhatsappUrl(whatsappUrl)
+          }
         } else {
-          window.location.href = whatsappUrl
+          abrirWhatsappUrl(whatsappUrl)
         }
         alert(`Senha provisória gerada com sucesso.\n\nSenha: ${senha}\n\nTexto copiado e WhatsApp aberto.`)
       } else {
@@ -578,7 +646,7 @@ export default function AdminSaasMasterPage() {
       email: cliente.email || '',
       nome_empresa: cliente.nome_empresa || '',
       telefone: cliente.telefone || '',
-      valor_plano: String(cliente.valor_plano ?? '39.90').replace('.', ','),
+      valor_plano: String(cliente.valor_plano ?? '49.90').replace('.', ','),
       status: cliente.status || 'trial',
       vencimento: cliente.vencimento || '',
       sistema_cliente: clienteSistema(cliente),
@@ -598,7 +666,7 @@ export default function AdminSaasMasterPage() {
       setSavingEdit(true)
       const meta = readMeta()
       meta[editForm.id] = {
-        sistema_cliente: editForm.sistema_cliente || 'Connect Pro',
+        sistema_cliente: editForm.sistema_cliente || 'Connect Sistema',
         observacoes: editForm.observacoes || '',
       }
       writeMeta(meta)
@@ -612,7 +680,7 @@ export default function AdminSaasMasterPage() {
         status: editForm.status,
         ativo: editForm.status !== 'bloqueado',
         vencimento: editForm.vencimento || null,
-        sistema_cliente: editForm.sistema_cliente || 'Connect Pro',
+        sistema_cliente: editForm.sistema_cliente || 'Connect Sistema',
         observacoes: editForm.observacoes || null,
       })
 
@@ -660,7 +728,7 @@ export default function AdminSaasMasterPage() {
       if (id) {
         const meta = readMeta()
         meta[id] = {
-          sistema_cliente: novoCliente.sistema_cliente || 'Connect Pro',
+          sistema_cliente: novoCliente.sistema_cliente || 'Connect Sistema',
           observacoes: novoCliente.observacoes || '',
         }
         writeMeta(meta)
@@ -671,7 +739,7 @@ export default function AdminSaasMasterPage() {
       const textoFinal = String(payload?.inviteText || [
         `Olá, ${novoCliente.nome_empresa || novoCliente.email}!`,
         '',
-        `Seu acesso ao ${novoCliente.sistema_cliente || 'Connect Pro'} foi criado com sucesso.`,
+        `Seu acesso ao ${novoCliente.sistema_cliente || 'Connect Sistema'} foi criado com sucesso.`,
         '',
         `Login: ${novoCliente.email.trim().toLowerCase()}`,
         payload?.temporaryPassword ? `Senha provisória: ${payload.temporaryPassword}` : '',
@@ -691,9 +759,9 @@ export default function AdminSaasMasterPage() {
         email: '',
         nome_empresa: '',
         telefone: '',
-        valor_plano: '39,90',
+        valor_plano: '49,90',
         tipo: 'trial',
-        sistema_cliente: 'Connect Pro',
+        sistema_cliente: 'Connect Sistema',
         observacoes: '',
         criar_acesso: true,
       })
@@ -727,13 +795,24 @@ export default function AdminSaasMasterPage() {
     const mrr = clientes
       .filter((c) => String(c.status || '').toLowerCase() !== 'bloqueado' && c.ativo !== false)
       .reduce((acc, c) => acc + Number(c.valor_plano || 0), 0)
-    const recebidoMes = clientes
-      .filter((c) => String(c.status_pagamento || '').toLowerCase() === 'em_dia')
+    const faturamentoAnual = clientes
+      .filter((c) => String(c.status || '').toLowerCase() !== 'bloqueado' && c.ativo !== false && Number(c.valor_plano || 0) >= 400)
       .reduce((acc, c) => acc + Number(c.valor_plano || 0), 0)
+    const recebidoMes = clientes
+      .filter((c) => ['em_dia', 'pago'].includes(String(c.status_pagamento || '').toLowerCase()))
+      .reduce((acc, c) => acc + Number(c.valor_plano || 0), 0)
+    const novos30 = clientes.filter((c) => {
+      const criado = c.data_criacao ? new Date(c.data_criacao) : null
+      return !!criado && !Number.isNaN(criado.getTime()) && Date.now() - criado.getTime() <= 30 * 86400000
+    }).length
+    const renovacoesRecentes = clientes
+      .filter((c) => !!c.ultimo_pagamento)
+      .sort((a, b) => new Date(b.ultimo_pagamento || '').getTime() - new Date(a.ultimo_pagamento || '').getTime())
+      .slice(0, 6)
     const arpa = ativos > 0 ? mrr / ativos : 0
     const conversaoTrial = trials + ativos > 0 ? Math.round((ativos / (trials + ativos)) * 100) : 0
     const churnRisco = total > 0 ? Math.round((risco / total) * 100) : 0
-    return { total, ativos, trials, bloqueados, vencidos, vencendo7, risco, mrr, recebidoMes, arpa, conversaoTrial, churnRisco }
+    return { total, ativos, trials, bloqueados, vencidos, vencendo7, risco, mrr, faturamentoAnual, recebidoMes, novos30, renovacoesRecentes, arpa, conversaoTrial, churnRisco }
   }, [clientes])
 
   const sistemasDisponiveis = useMemo(() => {
@@ -786,7 +865,7 @@ export default function AdminSaasMasterPage() {
         <section style={{ ...styles.heroMaster, ...(isMobileAdmin ? styles.heroMasterMobile : {}) }}>
           <div style={styles.heroContent}>
             <div style={styles.kicker}>Painel dono do sistema • SaaS Master</div>
-            <h1 style={{ ...styles.title, ...(isMobileAdmin ? styles.titleMobile : {}) }}>Central Admin Connect Pro</h1>
+            <h1 style={{ ...styles.title, ...(isMobileAdmin ? styles.titleMobile : {}) }}>Central Admin Connect Sistema</h1>
             <p style={{ ...styles.subtitle, ...(isMobileAdmin ? styles.subtitleMobile : {}) }}>Controle clientes, planos, bloqueios, sessões, trial, cobrança, uso e crescimento do seu SaaS em uma única tela.</p>
             <div style={{ ...styles.heroActions, ...(isMobileAdmin ? styles.heroActionsMobile : {}) }}>
               <button
@@ -799,9 +878,9 @@ export default function AdminSaasMasterPage() {
                     email: '',
                     nome_empresa: '',
                     telefone: '',
-                    valor_plano: '39,90',
+                    valor_plano: '49,90',
                     tipo: 'trial',
-                    sistema_cliente: 'Connect Pro',
+                    sistema_cliente: 'Connect Sistema',
                     observacoes: '',
                     criar_acesso: true,
                   })
@@ -810,6 +889,7 @@ export default function AdminSaasMasterPage() {
               >
                 + Novo cliente
               </button>
+              <button style={styles.clientPanelButton} onClick={() => router.push('/dashboard')}>Painel Cliente</button>
               <button style={styles.secondaryHeroButton} onClick={() => void carregarTudo()}>Atualizar painel</button>
               <button style={styles.secondaryHeroButton} onClick={copiarResumoExecutivo}>Copiar resumo</button>
             </div>
@@ -824,13 +904,15 @@ export default function AdminSaasMasterPage() {
           </div>
         </section>
 
+        <AdminAssinaturasMetricas />
+
         <section style={{ ...styles.kpiGrid, ...(isMobileAdmin ? styles.kpiGridMobile : {}) }}>
           <KpiCard titulo="Clientes" valor={String(resumo.total)} detalhe={`${resumo.ativos} ativos`} cor="#60a5fa" icone="👥" />
           <KpiCard titulo="MRR" valor={toMoney(resumo.mrr)} detalhe={`ARPA ${toMoney(resumo.arpa)}`} cor="#22c55e" icone="💰" />
-          <KpiCard titulo="Recebido" valor={toMoney(resumo.recebidoMes)} detalhe="mês atual" cor="#a78bfa" icone="✅" />
-          <KpiCard titulo="Risco" valor={`${resumo.churnRisco}%`} detalhe={`${resumo.risco} contas atenção`} cor="#fb7185" icone="🚨" />
+          <KpiCard titulo="Recebido" valor={toMoney(resumo.recebidoMes)} detalhe="pagamentos confirmados" cor="#a78bfa" icone="✅" />
+          <KpiCard titulo="Anual" valor={toMoney(resumo.faturamentoAnual)} detalhe="contratos anuais ativos" cor="#f59e0b" icone="🏆" />
           <KpiCard titulo="Trials" valor={String(resumo.trials)} detalhe={`${resumo.conversaoTrial}% conversão base`} cor="#facc15" icone="🧪" />
-          <KpiCard titulo="Sessões" valor={String(sessoes.length)} detalhe="dispositivos ativos" cor="#38bdf8" icone="📱" />
+          <KpiCard titulo="Novos" valor={String(resumo.novos30)} detalhe="clientes em 30 dias" cor="#38bdf8" icone="📈" />
         </section>
 
         {isMobileAdmin ? (
@@ -863,7 +945,7 @@ export default function AdminSaasMasterPage() {
             <div style={{ ...styles.quickActions, ...(isMobileAdmin ? styles.quickActionsMobile : {}) }}>
               <button style={styles.quickButton} onClick={() => { setFiltro('risco'); if (isMobileAdmin) setMobileDrawerOpen(false) }}>Ver clientes em risco</button>
               <button style={styles.quickButton} onClick={() => { setFiltro('trial'); if (isMobileAdmin) setMobileDrawerOpen(false) }}>Ver trials</button>
-              <button style={styles.quickButton} onClick={() => { setAba('sessoes'); if (isMobileAdmin) setMobileDrawerOpen(false) }}>Sessões ativas</button>
+              <button style={styles.quickButton} onClick={() => { setFiltro('vencidos'); if (isMobileAdmin) setMobileDrawerOpen(false) }}>Cobrança vencidos</button>
               <button style={styles.quickButton} onClick={() => { setAba('metricas'); if (isMobileAdmin) setMobileDrawerOpen(false) }}>Uso do sistema</button>
             </div>
           </div>
@@ -956,7 +1038,8 @@ export default function AdminSaasMasterPage() {
                             <button style={styles.menuItem} disabled={loadingAction} onClick={() => trial7(cliente.id)}>Trial 7 dias</button>
                             <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => ativar(30, cliente.id)}>Ativar +30 dias</button>
                             <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => ativar(60, cliente.id)}>Ativar +60 dias</button>
-                            <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => marcarPago(cliente.id)}>Marcar pago</button>
+                            <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => ativar(365, cliente.id)}>Renovar anual</button>
+                            <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => abrirRenovacaoManual(cliente)}>Renovar sistema / Marcar pago</button>
                             <button style={styles.menuItem} onClick={() => mensagemUpgrade(cliente)}>Oferta upgrade</button>
                             <button style={styles.menuDanger} disabled={loadingAction || isPermanent(cliente)} onClick={() => { if (confirm('Bloquear este cliente?')) void bloquear(cliente.id) }}>Bloquear</button>
                             <button style={styles.menuDelete} disabled={loadingAction} onClick={() => void excluirCliente(cliente)}>Excluir cliente</button>
@@ -1014,6 +1097,25 @@ export default function AdminSaasMasterPage() {
               <UsageCard label="Financeiro" value={uso.financeiro} icon="📊" />
               <UsageCard label="CRM/interações" value={uso.crm} icon="🤖" />
             </div>
+            <div style={styles.paymentsPanel}>
+              <div>
+                <h3 style={styles.paymentsTitle}>Últimos pagamentos e renovações</h3>
+                <p style={styles.panelSub}>Baseado nos clientes liberados pelo painel master e pelo webhook Mercado Pago.</p>
+              </div>
+              <div style={styles.paymentsList}>
+                {resumo.renovacoesRecentes.length > 0 ? resumo.renovacoesRecentes.map((cliente) => (
+                  <div key={cliente.id} style={styles.paymentRow}>
+                    <div>
+                      <strong>{cliente.nome_empresa || cliente.email || 'Cliente'}</strong>
+                      <span>{cliente.ultimo_pagamento ? new Date(cliente.ultimo_pagamento).toLocaleDateString('pt-BR') : '-'}</span>
+                    </div>
+                    <b>{toMoney(cliente.valor_plano || 0)}</b>
+                  </div>
+                )) : (
+                  <div style={styles.emptyPayments}>Nenhum pagamento confirmado ainda.</div>
+                )}
+              </div>
+            </div>
           </section>
         )}
       </div>
@@ -1021,14 +1123,14 @@ export default function AdminSaasMasterPage() {
       {modalOpen && (
         <Modal maxWidth={820} onClose={() => { setModalOpen(false); setInviteLink(''); setInviteText(''); setInvitePhone('') }}>
           <div style={styles.modalTitle}>Novo cliente SaaS</div>
-          <div style={styles.modalSub}>Cadastre um cliente do Connect Pro ou de outro sistema para controlar assinatura, WhatsApp e cobrança.</div>
+          <div style={styles.modalSub}>Cadastre um cliente do Connect Sistema ou de outro sistema para controlar assinatura, WhatsApp e cobrança.</div>
 
           <div style={styles.formGrid}>
             <Input label="E-mail do cliente" value={novoCliente.email} onChange={(v) => setNovoCliente((prev) => ({ ...prev, email: v }))} placeholder="cliente@email.com" />
             <Input label="Nome da empresa" value={novoCliente.nome_empresa} onChange={(v) => setNovoCliente((prev) => ({ ...prev, nome_empresa: v }))} placeholder="Nome da empresa" />
             <Input label="Telefone / WhatsApp" value={novoCliente.telefone} onChange={(v) => setNovoCliente((prev) => ({ ...prev, telefone: v }))} placeholder="84999999999" />
-            <Input label="Sistema contratado" value={novoCliente.sistema_cliente} onChange={(v) => setNovoCliente((prev) => ({ ...prev, sistema_cliente: v }))} placeholder="Connect Pro, Agenda, Loja..." />
-            <Input label="Valor mensal" value={novoCliente.valor_plano} onChange={(v) => setNovoCliente((prev) => ({ ...prev, valor_plano: v }))} placeholder="39,90" />
+            <Input label="Sistema contratado" value={novoCliente.sistema_cliente} onChange={(v) => setNovoCliente((prev) => ({ ...prev, sistema_cliente: v }))} placeholder="Connect Sistema, Agenda, Loja..." />
+            <Input label="Valor mensal" value={novoCliente.valor_plano} onChange={(v) => setNovoCliente((prev) => ({ ...prev, valor_plano: v }))} placeholder="49,90" />
             <div>
               <div style={styles.inputLabel}>Tipo inicial</div>
               <select style={{ ...styles.input, width: '100%' }} value={novoCliente.tipo} onChange={(e) => setNovoCliente((prev) => ({ ...prev, tipo: e.target.value as TipoNovoCliente }))}>
@@ -1040,7 +1142,7 @@ export default function AdminSaasMasterPage() {
 
           <label style={styles.checkboxRow}>
             <input type="checkbox" checked={novoCliente.criar_acesso} onChange={(e) => setNovoCliente((prev) => ({ ...prev, criar_acesso: e.target.checked }))} />
-            <span><b>Criar acesso no Connect Pro</b><small>Desmarque para cadastrar cliente de outro sistema somente para cobrança e controle financeiro.</small></span>
+            <span><b>Criar acesso no Connect Sistema</b><small>Desmarque para cadastrar cliente de outro sistema somente para cobrança e controle financeiro.</small></span>
           </label>
 
           <div style={{ marginTop: 14 }}>
@@ -1062,7 +1164,7 @@ export default function AdminSaasMasterPage() {
               <textarea readOnly value={inviteText} style={{ ...styles.inviteTextarea, minHeight: 140 }} />
               <div style={styles.inviteButtons}>
                 <button style={styles.whatsButton} onClick={() => void copiarTexto(inviteText, 'Texto copiado com sucesso.')}>Copiar texto</button>
-                <button style={styles.copyButton} onClick={() => window.open(`https://wa.me/${whatsappDestino(invitePhone || novoCliente.telefone)}?text=${encodeURIComponent(inviteText)}`, '_blank')}>Enviar WhatsApp</button>
+                <button style={styles.copyButton} onClick={() => abrirWhatsappUrl(montarUrlWhatsapp(whatsappDestino(invitePhone || novoCliente.telefone), inviteText))}>Enviar WhatsApp</button>
               </div>
             </div>
           ) : null}
@@ -1083,8 +1185,8 @@ export default function AdminSaasMasterPage() {
             <Input label="E-mail" value={editForm.email} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, email: v }) : prev)} placeholder="cliente@email.com" />
             <Input label="Nome / empresa" value={editForm.nome_empresa} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, nome_empresa: v }) : prev)} placeholder="Nome da empresa" />
             <Input label="Telefone / WhatsApp" value={editForm.telefone} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, telefone: v }) : prev)} placeholder="84999999999" />
-            <Input label="Sistema contratado" value={editForm.sistema_cliente} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, sistema_cliente: v }) : prev)} placeholder="Connect Pro" />
-            <Input label="Valor mensal" value={editForm.valor_plano} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, valor_plano: v }) : prev)} placeholder="39,90" />
+            <Input label="Sistema contratado" value={editForm.sistema_cliente} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, sistema_cliente: v }) : prev)} placeholder="Connect Sistema" />
+            <Input label="Valor mensal" value={editForm.valor_plano} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, valor_plano: v }) : prev)} placeholder="49,90" />
             <Input label="Vencimento" value={editForm.vencimento} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, vencimento: v }) : prev)} placeholder="2026-05-30" />
             <div>
               <div style={styles.inputLabel}>Status</div>
@@ -1107,6 +1209,15 @@ export default function AdminSaasMasterPage() {
           </div>
         </Modal>
       )}
+
+      <ModalRenovacaoManual
+        aberto={renovarOpen}
+        cliente={renovarCliente}
+        processando={renovarProcessando}
+        onFechar={fecharRenovacaoManual}
+        onConfirmar={confirmarRenovacaoManual}
+        resultado={renovarResultado}
+      />
     </div>
   )
 }
@@ -1201,6 +1312,7 @@ const styles: Record<string, CSSProperties> = {
   subtitle: { margin: '16px 0 0', color: '#dbeafe', fontSize: 16, lineHeight: 1.55, fontWeight: 750 },
   heroActions: { display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 20 },
   primaryHeroButton: { height: 46, borderRadius: 999, border: 'none', padding: '0 18px', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontWeight: 950, cursor: 'pointer', boxShadow: '0 16px 34px rgba(34,197,94,0.26)' },
+  clientPanelButton: { height: 46, borderRadius: 999, border: '1px solid rgba(147,197,253,0.42)', padding: '0 18px', background: 'linear-gradient(135deg,#2563eb,#0f172a)', color: '#fff', fontWeight: 950, cursor: 'pointer', boxShadow: '0 16px 34px rgba(37,99,235,0.24)' },
   secondaryHeroButton: { height: 46, borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', padding: '0 18px', background: 'rgba(255,255,255,0.08)', color: '#fff', fontWeight: 900, cursor: 'pointer' },
   heroSide: { minWidth: 290, display: 'grid', gap: 12, alignContent: 'space-between' },
   logoutButton: { justifySelf: 'end', height: 40, borderRadius: 999, border: '1px solid rgba(248,113,113,0.35)', background: 'linear-gradient(135deg,rgba(127,29,29,0.62),rgba(185,28,28,0.22))', color: '#fee2e2', padding: '0 16px', fontWeight: 900, cursor: 'pointer' },
@@ -1264,6 +1376,11 @@ const styles: Record<string, CSSProperties> = {
   usageGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 },
   usageCard: { minHeight: 150, borderRadius: 24, padding: 20, display: 'grid', alignContent: 'center', gap: 8, background: 'linear-gradient(135deg,rgba(59,130,246,0.16),rgba(15,23,42,0.44))', border: '1px solid rgba(147,197,253,0.18)' },
   usageIcon: { fontSize: 28 },
+  paymentsPanel: { marginTop: 16, borderRadius: 24, padding: 18, background: 'rgba(15,23,42,0.30)', border: '1px solid rgba(255,255,255,0.12)', display: 'grid', gap: 12 },
+  paymentsTitle: { margin: 0, color: '#ffffff', fontSize: 20, fontWeight: 950 },
+  paymentsList: { display: 'grid', gap: 9 },
+  paymentRow: { minHeight: 54, borderRadius: 16, padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.10)' },
+  emptyPayments: { borderRadius: 16, padding: 14, color: '#cbd5e1', background: 'rgba(255,255,255,0.06)', fontWeight: 850 },
   overlay: { position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.68)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom))', zIndex: 999 },
   modal: { width: '100%', borderRadius: 26, padding: 24, background: 'linear-gradient(135deg, rgba(51,65,85,0.98), rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.16)', boxShadow: '0 26px 80px rgba(15,23,42,0.48)', maxHeight: '90vh', overflow: 'auto' },
   modalCloseButton: { position: 'absolute', top: 16, right: 16, width: 40, height: 40, borderRadius: 14, border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(15,23,42,0.72)', color: '#fff', fontSize: 18, fontWeight: 950, cursor: 'pointer', boxShadow: '0 10px 24px rgba(2,6,23,0.28)' },

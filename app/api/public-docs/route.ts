@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { configRowSupabaseToPublica, mergeConfigPublicacao } from '@/lib/documentosPublicos'
+import { camposEmpresaNoPayload, enriquecerPayloadDocumentoPublico, timestampVersaoPublica } from '@/lib/empresaPublica'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
@@ -437,15 +439,47 @@ export async function POST(req: NextRequest) {
       ''
     ).trim()
 
-    const payload = {
-      ...(existente?.payload || {}),
-      ...payloadRecebido,
-      token,
-      user_id: userId || null,
-      owner_user_id: userId || null,
+    let configEmpresaPublica: ReturnType<typeof mergeConfigPublicacao> | null = null
+
+    if (userId) {
+      const { data: rowCfg } = await supabaseAdmin
+        .from('configuracoes_empresa')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      if (rowCfg) {
+        configEmpresaPublica = mergeConfigPublicacao(
+          payloadRecebido?.config,
+          payloadRecebido?.cfg,
+          configRowSupabaseToPublica(rowCfg as Record<string, unknown>)
+        )
+      }
     }
 
+    if (!configEmpresaPublica) {
+      configEmpresaPublica = mergeConfigPublicacao(payloadRecebido?.config, payloadRecebido?.cfg)
+    }
+
+    const versao = timestampVersaoPublica(existente?.updated_at || Date.now())
+    const empresaCampos = camposEmpresaNoPayload(configEmpresaPublica, {
+      token,
+      userId: userId || undefined,
+      v: versao,
+    })
+
+    const payload = enriquecerPayloadDocumentoPublico(
+      {
+        ...(existente?.payload || {}),
+        ...payloadRecebido,
+        ...empresaCampos,
+      },
+      configEmpresaPublica,
+      { token, userId: userId || undefined, v: versao }
+    )
+
     const dadosSalvar = linhaPublicDocument(tipo, documentoId, token, payload, userId ? { user_id: userId } : undefined)
+    dadosSalvar.updated_at = new Date().toISOString()
 
     if (process.env.NODE_ENV === 'development') {
       console.error('[PUBLIC_DOCS_POST] row', dadosSalvar)
@@ -461,16 +495,38 @@ export async function POST(req: NextRequest) {
 
       const insertResult = await supabaseAdmin.from('public_documents').insert(dadosSalvar)
 
+      if (!insertResult.error) return insertResult
+
       if (insertResult.error?.code === '23505') {
-        console.warn('[INSERT_PUBLIC_DOCS] Conflito único, tentando update por document_type+document_id', {
-          document_type: tipo,
-          document_id: documentoId,
-        })
-        return supabaseAdmin
+        console.warn('[INSERT_PUBLIC_DOCS] Conflito único, tentando update', { tipo, documentoId })
+
+        const porToken = token
+          ? await supabaseAdmin.from('public_documents').update(dadosSalvar).eq('token', token)
+          : { error: null }
+
+        if (!porToken.error) return porToken
+
+        const porNovasColunas = await supabaseAdmin
           .from('public_documents')
           .update(dadosSalvar)
           .eq('document_type', tipo)
           .eq('document_id', documentoId)
+
+        if (!porNovasColunas.error) return porNovasColunas
+
+        if (tipo === 'ordem_servico') {
+          return supabaseAdmin
+            .from('public_documents')
+            .update(dadosSalvar)
+            .in('tipo', ['ordem_servico', 'os'])
+            .eq('documento_id', documentoId)
+        }
+
+        return supabaseAdmin
+          .from('public_documents')
+          .update(dadosSalvar)
+          .eq('tipo', tipo)
+          .eq('documento_id', documentoId)
       }
 
       return insertResult
@@ -490,6 +546,22 @@ export async function POST(req: NextRequest) {
       return erroApi(erroSalvar)
     }
 
+    if (tipo === 'contrato') {
+      const assinaturaPayload = (payload as Record<string, unknown>)?.assinatura as Record<string, unknown> | undefined
+      const assinado =
+        assinaturaPayload?.status === 'assinado' ||
+        (payload as Record<string, unknown>)?.assinado === true
+      if (assinado) {
+        const { error: errContrato } = await supabaseAdmin
+          .from('contratos')
+          .update({ status: 'Assinado' })
+          .eq('id', documentoId)
+        if (errContrato) {
+          console.warn('[PUBLIC_DOCS_POST] contrato status:', errContrato.message)
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       token,
@@ -498,6 +570,9 @@ export async function POST(req: NextRequest) {
       documentoId,
       document_id: documentoId,
       user_id: userId || null,
+      updated_at: dadosSalvar.updated_at,
+      empresa_nome: payload.empresa_nome,
+      empresa_logo_og: payload.empresa_logo_og,
     })
   } catch (error) {
     return erroApi(error)
