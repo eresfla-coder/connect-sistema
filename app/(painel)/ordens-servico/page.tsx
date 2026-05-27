@@ -76,10 +76,42 @@ type OrdemServico = {
 
 const STORAGE_KEY = 'connect_ordens_servico_salvas'
 const OS_SYNC_PENDING_KEY = 'connect_os_sync_pendentes'
+const OS_DELETED_PREFIX = 'connect_os_deleted_'
 const CLIENTES_KEY = 'connect_clientes'
 const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || '').replace(/\/$/, '')
 const PUBLIC_OS_PREFIX = 'connect_public_os_'
+
+function hashNumeroDeterministico(seed: string) {
+  let hash = 0
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash)
+}
+
+function idDeterministicoOs(seed: string) {
+  return 1100000000 + (hashNumeroDeterministico(seed) % 700000000)
+}
+
+function textoDedupe(value: unknown) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function assinaturaOs(item: OrdemServico) {
+  const numero = textoDedupe(item.numero || '')
+  const cliente = textoDedupe(item.cliente || '')
+  const equipamento = textoDedupe(item.equipamento || '')
+  const valor = Number(item.valor || 0).toFixed(2)
+  const data = textoDedupe(item.data || '')
+  return `${numero}|${cliente}|${equipamento}|${valor}|${data}`
+}
 
 function baseUrlAtual() {
   if (typeof window !== 'undefined') return window.location.origin
@@ -361,7 +393,14 @@ function osParaUpsertSupabase(os: OrdemServico, userId: string): OsSupabaseUpser
 
 function osDeRowSupabase(row: OsRow): OrdemServico {
   const payload = row.payload && typeof row.payload === 'object' ? (row.payload as Partial<OrdemServico>) : null
-  const localId = Number(row.local_id || payload?.id || 0) || Date.now()
+  const fallbackSeed = JSON.stringify({
+    numero: row.numero || payload?.numero || '',
+    cliente: row.cliente || row.cliente_nome || payload?.cliente || '',
+    equipamento: row.equipamento || payload?.equipamento || '',
+    valor: row.valor || payload?.valor || 0,
+    data: payload?.data || '',
+  })
+  const localId = Number(row.local_id || payload?.id || 0) || idDeterministicoOs(fallbackSeed)
 
   if (payload && (payload.numero || payload.cliente)) {
     return {
@@ -411,6 +450,26 @@ function osDeRowSupabase(row: OsRow): OrdemServico {
   }
 }
 
+function chaveOsDeleted(userId?: string | null) {
+  return `${OS_DELETED_PREFIX}${userId || 'anon'}`
+}
+
+function lerDeletedOs(userId?: string | null) {
+  try {
+    const raw = localStorage.getItem(chaveOsDeleted(userId))
+    const lista = raw ? (JSON.parse(raw) as string[]) : []
+    return new Set(lista.map((item) => String(item)))
+  } catch {
+    return new Set<string>()
+  }
+}
+
+function salvarDeletedOs(ids: Set<string>, userId?: string | null) {
+  try {
+    localStorage.setItem(chaveOsDeleted(userId), JSON.stringify(Array.from(ids)))
+  } catch {}
+}
+
 export default function OrdemServicoPage() {
   const router = useRouter()
   const [isMobile, setIsMobile] = useState(false)
@@ -433,6 +492,7 @@ export default function OrdemServicoPage() {
   const syncOsPublicaRodandoRef = useRef(false)
   const osLoadSeqRef = useRef(0)
   const osSyncRodandoRef = useRef(false)
+  const userIdOsRef = useRef<string | null>(null)
   const ultimaSyncOsPublicaRef = useRef(0)
   const [osScrollLeft, setOsScrollLeft] = useState(0)
   const [osScrollMax, setOsScrollMax] = useState(1)
@@ -587,30 +647,75 @@ export default function OrdemServicoPage() {
       if (!salvo) return [] as OrdemServico[]
       const listaSalva = JSON.parse(salvo)
       if (!Array.isArray(listaSalva)) return [] as OrdemServico[]
-      return listaSalva.map((item) => normalizarItem(item))
+      const deletedIds = lerDeletedOs(userIdOsRef.current)
+      return listaSalva
+        .map((item) => normalizarItem(item))
+        .filter((item) => !deletedIds.has(String(item?.id || '')))
     } catch (e) {
       console.error('[ordens_servico] erro ao ler localStorage:', e)
       return [] as OrdemServico[]
     }
   }
 
-  function mesclarListasOs(cloud: OrdemServico[], local: OrdemServico[]) {
+  function scoreOs(item: OrdemServico) {
+    let score = Number(item.id || 0)
+    if (item.numero) score += 10
+    if (item.cliente) score += 10
+    if (item.equipamento) score += 8
+    if (item.status && item.status !== 'Aberta') score += 4
+    if (item.orcamentoId) score += 5
+    return score
+  }
+
+  function deduplicarOsForte(lista: OrdemServico[]) {
+    const porId = new Map<string, OrdemServico>()
+    for (const item of lista) {
+      if (!item?.id) continue
+      const chave = String(item.id)
+      const existente = porId.get(chave)
+      if (!existente || scoreOs(item) >= scoreOs(existente)) {
+        porId.set(chave, item)
+      }
+    }
+
+    const porAssinatura = new Map<string, OrdemServico>()
+    for (const item of porId.values()) {
+      const assinatura = assinaturaOs(item)
+      const existente = porAssinatura.get(assinatura)
+      if (!existente || scoreOs(item) >= scoreOs(existente)) {
+        porAssinatura.set(assinatura, item)
+      }
+    }
+
+    return Array.from(porAssinatura.values()).sort((a, b) => Number(b.id) - Number(a.id))
+  }
+
+  function mesclarListasOs(cloud: OrdemServico[], local: OrdemServico[], userId?: string | null) {
+    const deletedIds = lerDeletedOs(userId)
     const mapa = new Map<string, OrdemServico>()
     for (const item of cloud) {
-      if (item?.id) mapa.set(String(item.id), item)
+      if (!item?.id) continue
+      const id = String(item.id)
+      if (deletedIds.has(id)) continue
+      mapa.set(id, item)
     }
     for (const item of local) {
       if (!item?.id) continue
       const id = String(item.id)
+      if (deletedIds.has(id)) continue
       if (!mapa.has(id)) mapa.set(id, item)
     }
-    return Array.from(mapa.values()).sort((a, b) => Number(b.id) - Number(a.id))
+    return deduplicarOsForte(Array.from(mapa.values()))
   }
 
   /** Nunca apaga localStorage quando a nuvem veio vazia mas o aparelho ainda tem OS salvas. */
   function aplicarListaOs(lista: OrdemServico[], contexto: string, permitirSubstituirPorVazio = false) {
+    const deletedIds = lerDeletedOs(userIdOsRef.current)
+    const listaFiltrada = deduplicarOsForte(
+      lista.filter((item) => !deletedIds.has(String(item?.id || '')))
+    )
     const localAtual = lerOsLocalStorage()
-    if (lista.length === 0 && localAtual.length > 0 && !permitirSubstituirPorVazio) {
+    if (listaFiltrada.length === 0 && localAtual.length > 0 && !permitirSubstituirPorVazio) {
       console.warn(
         '[ordens_servico] Supabase retornou lista vazia — localStorage NÃO foi apagado.',
         { contexto, mantidas: localAtual.length, idsLocais: localAtual.map((o) => o.id).slice(0, 8) }
@@ -619,10 +724,10 @@ export default function OrdemServicoPage() {
       setForm(ordemVazia(localAtual))
       return false
     }
-    setLista(lista)
-    setForm(ordemVazia(lista))
+    setLista(listaFiltrada)
+    setForm(ordemVazia(listaFiltrada))
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(lista))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(listaFiltrada))
     } catch (e) {
       console.error('[ordens_servico] erro ao gravar localStorage:', contexto, e)
     }
@@ -630,7 +735,11 @@ export default function OrdemServicoPage() {
   }
 
   function salvarLista(novaLista: OrdemServico[], origem = 'salvarLista') {
-    if (novaLista.length === 0 && origem !== 'excluir') {
+    const deletedIds = lerDeletedOs(userIdOsRef.current)
+    const normalizada = deduplicarOsForte(
+      novaLista.filter((item) => !deletedIds.has(String(item?.id || '')))
+    )
+    if (normalizada.length === 0 && origem !== 'excluir') {
       const localAtual = lerOsLocalStorage()
       if (localAtual.length > 0) {
         console.warn('[ordens_servico] salvarLista([]) bloqueado — havia', localAtual.length, 'OS no localStorage. origem:', origem)
@@ -638,14 +747,15 @@ export default function OrdemServicoPage() {
         return
       }
     }
-    setLista(novaLista)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(novaLista))
+    setLista(normalizada)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizada))
     window.dispatchEvent(new Event('connect-local-saved'))
   }
 
   async function obterUserIdSupabase() {
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
     if (sessionData?.session?.user?.id) {
+      userIdOsRef.current = sessionData.session.user.id
       return sessionData.session.user.id
     }
     if (sessionError) {
@@ -654,6 +764,7 @@ export default function OrdemServicoPage() {
 
     const { data: userData, error: userError } = await supabase.auth.getUser()
     if (userData?.user?.id) {
+      userIdOsRef.current = userData.user.id
       return userData.user.id
     }
     if (userError) {
@@ -662,6 +773,19 @@ export default function OrdemServicoPage() {
 
     console.error('[ordens_servico] usuário anônimo / sem sessão — persistência na nuvem indisponível (comum no PWA antes do token restaurar).')
     return null
+  }
+
+  function marcarOsComoDeletada(id: number | string, userId?: string | null) {
+    const deletedIds = lerDeletedOs(userId)
+    deletedIds.add(String(id))
+    salvarDeletedOs(deletedIds, userId)
+  }
+
+  function removerOsDeDeleted(id: number | string, userId?: string | null) {
+    const deletedIds = lerDeletedOs(userId)
+    if (deletedIds.delete(String(id))) {
+      salvarDeletedOs(deletedIds, userId)
+    }
   }
 
   function carregarOsLocalFallback() {
@@ -682,6 +806,7 @@ export default function OrdemServicoPage() {
     for (let attempt = 0; attempt < maxTentativas; attempt += 1) {
       const { data: sessionWrap, error: sessionError } = await supabase.auth.getSession()
       if (sessionWrap?.session?.user?.id) {
+        userIdOsRef.current = String(sessionWrap.session.user.id)
         return {
           userId: String(sessionWrap.session.user.id),
           email: sessionWrap.session.user.email || '',
@@ -693,6 +818,7 @@ export default function OrdemServicoPage() {
 
       const { data: userWrap, error: userError } = await supabase.auth.getUser()
       if (userWrap?.user?.id) {
+        userIdOsRef.current = String(userWrap.user.id)
         return {
           userId: String(userWrap.user.id),
           email: userWrap.user.email || '',
@@ -742,6 +868,8 @@ export default function OrdemServicoPage() {
 
   async function persistirOsSupabase(os: OrdemServico, _userId?: string | null) {
     try {
+      const userIdAtual = _userId || userIdOsRef.current || (await obterUserIdSupabase())
+      removerOsDeDeleted(os.id, userIdAtual)
       const token = await obterTokenSessaoOS(10)
       if (!token) {
         console.warn('[ordens_servico] sync API: sem token de sessão (aguardando login no aparelho).', {
@@ -817,6 +945,7 @@ export default function OrdemServicoPage() {
         console.error('[ordens_servico] não foi possível excluir: usuário não autenticado.')
         return
       }
+      marcarOsComoDeletada(os.id, userId)
 
       const { error } = await supabase
         .from('ordens_servico')
@@ -865,7 +994,7 @@ export default function OrdemServicoPage() {
 
       const normalizados = ((rows || []) as OsRow[]).map((row) => normalizarItem(osDeRowSupabase(row)))
 
-      const mesclada = mesclarListasOs(normalizados, localList)
+      const mesclada = mesclarListasOs(normalizados, localList, userId)
       aplicarListaOs(mesclada, 'sincronizarOsLocaisAntigos')
     } finally {
       osSyncRodandoRef.current = false
@@ -882,8 +1011,10 @@ export default function OrdemServicoPage() {
         carregarOsLocalFallback()
         return
       }
+      userIdOsRef.current = userId
 
       const localList = lerOsLocalStorage()
+      const deletedIds = lerDeletedOs(userId)
 
       const { data, error, count } = await supabase
         .from('ordens_servico')
@@ -904,7 +1035,9 @@ export default function OrdemServicoPage() {
         throw error
       }
 
-      const normalizados = ((data || []) as OsRow[]).map((row) => normalizarItem(osDeRowSupabase(row)))
+      const normalizados = ((data || []) as OsRow[])
+        .map((row) => normalizarItem(osDeRowSupabase(row)))
+        .filter((item) => !deletedIds.has(String(item?.id || '')))
 
       if (normalizados.length === 0) {
         console.warn('[ordens_servico] Supabase retornou lista vazia', {
@@ -921,7 +1054,7 @@ export default function OrdemServicoPage() {
         return
       }
 
-      const listaFinal = mesclarListasOs(normalizados, localList)
+      const listaFinal = mesclarListasOs(normalizados, localList, userId)
       aplicarListaOs(listaFinal, 'carregarOsSupabase')
 
       if (localList.length > normalizados.length) {
@@ -1621,6 +1754,8 @@ export default function OrdemServicoPage() {
   async function excluir(id: number) {
     if (!confirm('Deseja excluir esta OS?')) return
 
+    const userId = userIdOsRef.current || (await obterUserIdSupabase())
+    marcarOsComoDeletada(id, userId)
     const atual = lista.find((item) => item.id === id)
     const novaLista = lista.filter((item) => item.id !== id)
 

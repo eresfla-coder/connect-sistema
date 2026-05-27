@@ -178,6 +178,7 @@ export async function PATCH(req: Request) {
       'ultimo_pagamento',
       'sistema_cliente',
       'observacoes',
+      'plano_tier',
     ]
 
     const safeUpdates: Record<string, any> = {}
@@ -193,6 +194,28 @@ export async function PATCH(req: Request) {
         { error: 'Nenhum dado válido para atualizar.' },
         { status: 400 }
       )
+    }
+
+    const statusNorm = String(safeUpdates.status || '').toLowerCase()
+    const pagamentoNorm = String(safeUpdates.status_pagamento || '').toLowerCase()
+    const virouPagante =
+      statusNorm === 'ativo' ||
+      statusNorm === 'active' ||
+      pagamentoNorm === 'pago' ||
+      pagamentoNorm === 'em_dia'
+
+    if (virouPagante) {
+      safeUpdates.ativo = safeUpdates.ativo ?? true
+      const tierAtual = String(safeUpdates.plano_tier || '').toLowerCase()
+      if (!tierAtual || tierAtual === 'trial') {
+        safeUpdates.plano_tier = 'starter'
+      }
+      if (!safeUpdates.status_pagamento) {
+        safeUpdates.status_pagamento = 'em_dia'
+      }
+      if (!safeUpdates.ultimo_pagamento) {
+        safeUpdates.ultimo_pagamento = dataMaisDias(0).slice(0, 10)
+      }
     }
 
     const updateCompleto = await supabaseAdmin
@@ -229,7 +252,11 @@ export async function PATCH(req: Request) {
           )
         }
 
-        return NextResponse.json({ ok: true, cliente: retry.data })
+        const clienteRetry = retry.data
+        if (clienteRetry && virouPagante) {
+          await sincronizarAssinaturaPagante(id, safeUpdates, clienteRetry)
+        }
+        return NextResponse.json({ ok: true, cliente: clienteRetry })
       }
 
       return NextResponse.json(
@@ -238,7 +265,12 @@ export async function PATCH(req: Request) {
       )
     }
 
-    return NextResponse.json({ ok: true, cliente: updateCompleto.data })
+    const clienteAtualizado = updateCompleto.data
+    if (clienteAtualizado && virouPagante) {
+      await sincronizarAssinaturaPagante(id, safeUpdates, clienteAtualizado)
+    }
+
+    return NextResponse.json({ ok: true, cliente: clienteAtualizado })
   } catch (error: any) {
     return NextResponse.json(
       {
@@ -246,6 +278,38 @@ export async function PATCH(req: Request) {
       },
       { status: 500 }
     )
+  }
+}
+
+async function sincronizarAssinaturaPagante(
+  userId: string,
+  updates: Record<string, unknown>,
+  perfil: Record<string, unknown>
+) {
+  const tier = String(updates.plano_tier || perfil.plano_tier || 'starter')
+  const vencimento = String(updates.vencimento || perfil.vencimento || dataMaisDias(30)).slice(0, 10)
+  const valorMensal = Number(updates.valor_plano ?? perfil.valor_plano ?? 0)
+
+  try {
+    await supabaseAdmin.from('assinaturas').upsert(
+      {
+        user_id: userId,
+        plano: `${tier}_mensal`,
+        plano_tier: tier,
+        status: 'ativa',
+        data_fim: `${vencimento}T23:59:59.999Z`,
+        data_trial_fim: null,
+        proxima_cobranca: vencimento,
+        trial_dias: 0,
+        renovacao_automatica: false,
+        valor_mensal: valorMensal > 0 ? valorMensal : null,
+        gateway: 'manual',
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    )
+  } catch (assinaturaErro) {
+    console.warn('[ADMIN CLIENTES] assinaturas sync:', assinaturaErro)
   }
 }
 

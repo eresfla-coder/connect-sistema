@@ -13,6 +13,11 @@ import {
   montarFormasPagamentoOrcamento,
   OPCOES_PAGAMENTO_ORCAMENTO,
 } from '@/lib/orcamento-pagamento'
+import {
+  OBSERVACAO_PADRAO_ORCAMENTO,
+  orcamentoDeveOcultarM2Cliente,
+} from '@/lib/orcamentoTextos'
+import { lerLocalStorageUsuario, obterUserIdPainel } from '@/lib/connect-user-storage'
 type TipoPessoaCliente = 'PF' | 'PJ'
 
 type Cliente = {
@@ -76,6 +81,7 @@ type OrcamentoSalvo = {
   ocultarValorUnitarioM2?: boolean
   validade: string
   prazoEntrega: string
+  enderecoEntrega?: string
   observacao: string
   status: StatusOrcamento
   data: string
@@ -190,10 +196,105 @@ type Toast = {
 const CONFIG_KEY = 'connect_configuracoes'
 const FORMAS_KEY = 'connect_formas_pagamento'
 const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
+const ORCAMENTOS_DELETED_PREFIX = 'connect_orcamentos_deleted_'
 const OS_KEY = 'connect_ordens_servico_salvas'
 const VENDAS_KEY = 'connect_vendas_salvas'
 const PRODUTOS_KEY = 'connect_produtos'
 const CLIENTES_KEY = 'connect_clientes'
+
+let orcamentoIdSeq = 0
+
+function gerarIdOrcamentoUnico() {
+  orcamentoIdSeq += 1
+  return Date.now() * 10 + (orcamentoIdSeq % 10)
+}
+
+function hashNumeroDeterministico(seed: string) {
+  let hash = 0
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash)
+}
+
+function idDeterministicoOrcamento(seed: string) {
+  return 1000000000 + (hashNumeroDeterministico(seed) % 800000000)
+}
+
+function textoDedupe(value: unknown) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function assinaturaOrcamento(item: OrcamentoSalvo) {
+  const cliente = textoDedupe(item.cliente?.nome || '')
+  const numero = textoDedupe(item.numero || '')
+  const total = Number(item.total || 0).toFixed(2)
+  const data = textoDedupe(item.data || '')
+  return `${numero}|${cliente}|${total}|${data}`
+}
+
+function scoreOrcamento(item: OrcamentoSalvo) {
+  let score = Number(item.atualizadoEm || 0)
+  if (item.cliente?.nome) score += 10
+  if (item.numero) score += 10
+  if ((item.itens || []).length > 0) score += 12
+  if (item.link) score += 4
+  if (item.status && item.status !== 'Pendente') score += 4
+  return score
+}
+
+function deduplicarOrcamentosPorId(lista: OrcamentoSalvo[]) {
+  const mapa = new Map<string, OrcamentoSalvo>()
+  for (const item of lista) {
+    if (!item?.id) continue
+    const chave = String(item.id)
+    const existente = mapa.get(chave)
+    if (!existente || scoreOrcamento(item) >= scoreOrcamento(existente)) {
+      mapa.set(chave, item)
+    }
+  }
+
+  const porAssinatura = new Map<string, OrcamentoSalvo>()
+  for (const item of mapa.values()) {
+    const assinatura = assinaturaOrcamento(item)
+    const existente = porAssinatura.get(assinatura)
+    if (!existente || scoreOrcamento(item) >= scoreOrcamento(existente)) {
+      porAssinatura.set(assinatura, item)
+    }
+  }
+
+  return Array.from(porAssinatura.values()).sort((a, b) => Number(b.id) - Number(a.id))
+}
+
+function logOrcamentoSave(payload: Record<string, unknown>) {
+  console.log('[ORCAMENTO_SAVE]', { ...payload, timestamp: new Date().toISOString() })
+}
+
+function chaveOrcamentosDeleted(userId?: string | null) {
+  return `${ORCAMENTOS_DELETED_PREFIX}${userId || 'anon'}`
+}
+
+function lerDeletedOrcamentos(userId?: string | null) {
+  try {
+    const raw = localStorage.getItem(chaveOrcamentosDeleted(userId))
+    const lista = raw ? (JSON.parse(raw) as string[]) : []
+    return new Set(lista.map((item) => String(item)))
+  } catch {
+    return new Set<string>()
+  }
+}
+
+function salvarDeletedOrcamentos(ids: Set<string>, userId?: string | null) {
+  try {
+    localStorage.setItem(chaveOrcamentosDeleted(userId), JSON.stringify(Array.from(ids)))
+  } catch {}
+}
 
 const NOVO_CLIENTE_INICIAL = {
   nome: '',
@@ -287,6 +388,7 @@ function serializarCompactoOrcamento(dados: any, config: any) {
     om2: Boolean(dados?.ocultarValorUnitarioM2),
     vd: String(dados?.validade || ''),
     pe: String(dados?.prazoEntrega || ''),
+    eden: String(dados?.enderecoEntrega || ''),
     ob: String(dados?.observacao || ''),
     td: String(dados?.tipoDocumento || ''),
     tp: String(dados?.tituloProposta || ''),
@@ -771,7 +873,13 @@ function orcamentoParaUpsertSupabase(orc: OrcamentoSalvo, userId: string): Orcam
 
 function orcamentoDeRowSupabase(row: OrcamentoRow, local?: OrcamentoSalvo | null): OrcamentoSalvo {
   const payload = row.payload && typeof row.payload === 'object' ? row.payload as Partial<OrcamentoSalvo> : null
-  const localId = Number(row.local_id || payload?.id || 0) || Date.now()
+  const fallbackSeed = JSON.stringify({
+    numero: payload?.numero || '',
+    cliente: row.cliente_nome || '',
+    total: row.total || payload?.total || 0,
+    data: row.data || payload?.data || '',
+  })
+  const localId = Number(row.local_id || payload?.id || 0) || idDeterministicoOrcamento(fallbackSeed)
 
   if (payload?.numero) {
     return aplicarStatusResolvido(
@@ -879,7 +987,7 @@ export default function OrcamentoPage() {
     cidadeUf: 'PARNAMIRIM-RN',
     responsavel: 'ERES FAUSTINO',
     tituloPdf: 'Orçamento Comercial',
-    rodapePdf: 'Obrigado pela preferência.',
+    rodapePdf: OBSERVACAO_PADRAO_ORCAMENTO,
     validadePadrao: '7 dias',
     prazoEntregaPadrao: '3 dias',
     formaPagamentoPadrao: 'CARTAO 1X',
@@ -914,17 +1022,23 @@ export default function OrcamentoPage() {
 
   const [itens, setItens] = useState<ItemOrcamento[]>([])
   const [tituloPdf, setTituloPdf] = useState('Orçamento Comercial')
-  const [observacao, setObservacao] = useState('Obrigado pela preferência.')
+  const [observacao, setObservacao] = useState(OBSERVACAO_PADRAO_ORCAMENTO)
   const [modeloOrcamento, setModeloOrcamento] = useState<ModeloOrcamento>('recibo_profissional')
   const [mostrarEscolhaModelo, setMostrarEscolhaModelo] = useState(false)
   const [formAberto, setFormAberto] = useState(false)
   const [formaPagamento, setFormaPagamento] = useState('PIX')
   const [formasPagamentoSelecionadas, setFormasPagamentoSelecionadas] = useState<string[]>(['Pix'])
-  const [observacaoFormasPagamento, setObservacaoFormasPagamento] = useState('')
-  const [ocultarValorUnitarioM2, setOcultarValorUnitarioM2] = useState(false)
+  const [ocultarValorUnitarioM2, setOcultarValorUnitarioM2] = useState(true)
   const [parcelasBoleto, setParcelasBoleto] = useState('')
   const [validade, setValidade] = useState('')
+
+  useEffect(() => {
+    if (itens.some((item) => item.tipoCalculo === 'm2')) {
+      setOcultarValorUnitarioM2(true)
+    }
+  }, [itens])
   const [prazoEntrega, setPrazoEntrega] = useState('')
+  const [enderecoEntrega, setEnderecoEntrega] = useState('')
   const [valorEntrega, setValorEntrega] = useState(0)
   const [descontoTipo, setDescontoTipo] = useState<'valor' | 'percentual'>('valor')
   const [descontoInput, setDescontoInput] = useState('')
@@ -940,8 +1054,12 @@ export default function OrcamentoPage() {
   const osAprovacaoCriadasRef = useRef<Set<string>>(new Set())
   const syncOrcamentosRodandoRef = useRef(false)
   const syncOrcamentosPendenteRef = useRef(false)
+  const userIdOrcamentosRef = useRef<string | null>(null)
   const ultimaCargaOrcamentosRef = useRef(0)
   const orcamentosCountRef = useRef(0)
+  const salvandoRef = useRef(false)
+  const rascunhoOrcamentoIdRef = useRef<number | null>(null)
+  const [salvandoOrcamento, setSalvandoOrcamento] = useState(false)
 
   const [mostrarNovoCliente, setMostrarNovoCliente] = useState(false)
   const [tipoPessoa, setTipoPessoa] = useState<TipoPessoaCliente>('PF')
@@ -962,14 +1080,45 @@ export default function OrcamentoPage() {
   const [propostaValidade, setPropostaValidade] = useState('')
   const [propostaObservacoes, setPropostaObservacoes] = useState('')
 
+  function obterIdOrcamentoAtivo(origem: string) {
+    if (editandoOrcamentoId !== null) return editandoOrcamentoId
+    if (rascunhoOrcamentoIdRef.current === null) {
+      rascunhoOrcamentoIdRef.current = gerarIdOrcamentoUnico()
+      logOrcamentoSave({ origem: `${origem}:rascunho-novo`, id: rascunhoOrcamentoIdRef.current, numero: null })
+    }
+    return rascunhoOrcamentoIdRef.current
+  }
+
+  function upsertOrcamentoNaLista(orcamento: OrcamentoSalvo, origem: string) {
+    const idx = orcamentosSalvos.findIndex((item) => String(item.id) === String(orcamento.id))
+    const listaAtualizada =
+      idx >= 0
+        ? orcamentosSalvos.map((item) => (String(item.id) === String(orcamento.id) ? orcamento : item))
+        : [orcamento, ...orcamentosSalvos]
+    logOrcamentoSave({
+      origem,
+      id: orcamento.id,
+      numero: orcamento.numero,
+      acao: idx >= 0 ? 'update-lista' : 'insert-lista',
+      totalLista: listaAtualizada.length,
+    })
+    salvarListaOrcamentos(listaAtualizada)
+    return listaAtualizada
+  }
+
   function carregarOrcamentosLocalFallback() {
     try {
       const salvos = localStorage.getItem(ORCAMENTOS_KEY)
       if (salvos) {
         const lista = JSON.parse(salvos)
         if (Array.isArray(lista)) {
+          const deletedIds = lerDeletedOrcamentos(userIdOrcamentosRef.current)
           setOrcamentosSalvos(
-            lista.map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+            deduplicarOrcamentosPorId(
+              lista
+                .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+                .filter((item) => !deletedIds.has(String(item?.id || '')))
+            )
           )
         }
       }
@@ -981,26 +1130,51 @@ export default function OrcamentoPage() {
       const salvos = localStorage.getItem(ORCAMENTOS_KEY)
       const lista = salvos ? JSON.parse(salvos) : []
       if (!Array.isArray(lista)) return [] as OrcamentoSalvo[]
-      return lista.map((item) => ({ ...item, status: normalizarStatus(item.status) })) as OrcamentoSalvo[]
+      const deletedIds = lerDeletedOrcamentos(userIdOrcamentosRef.current)
+      const normalizados = lista
+        .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+        .filter((item) => !deletedIds.has(String(item?.id || ''))) as OrcamentoSalvo[]
+      return deduplicarOrcamentosPorId(normalizados)
     } catch (error) {
       console.error('[orcamentos] erro ao ler localStorage:', error)
       return [] as OrcamentoSalvo[]
     }
   }
 
-  function mesclarOrcamentos(cloud: OrcamentoSalvo[], local: OrcamentoSalvo[]) {
+  function marcarOrcamentoComoDeletado(id: number, userId?: string | null) {
+    const deletedIds = lerDeletedOrcamentos(userId)
+    deletedIds.add(String(id))
+    salvarDeletedOrcamentos(deletedIds, userId)
+  }
+
+  function removerOrcamentoDeDeleted(id: number, userId?: string | null) {
+    const deletedIds = lerDeletedOrcamentos(userId)
+    if (deletedIds.delete(String(id))) {
+      salvarDeletedOrcamentos(deletedIds, userId)
+    }
+  }
+
+  function mesclarOrcamentos(cloud: OrcamentoSalvo[], local: OrcamentoSalvo[], userId?: string | null) {
+    const deletedIds = lerDeletedOrcamentos(userId)
     const mapaCloud = new Map<string, OrcamentoSalvo>()
     const mapaLocal = new Map<string, OrcamentoSalvo>()
 
     for (const item of cloud) {
-      if (item?.id) mapaCloud.set(String(item.id), item)
+      if (!item?.id) continue
+      const chave = String(item.id)
+      if (deletedIds.has(chave)) continue
+      mapaCloud.set(chave, item)
     }
     for (const item of local) {
-      if (item?.id) mapaLocal.set(String(item.id), item)
+      if (!item?.id) continue
+      const chave = String(item.id)
+      if (deletedIds.has(chave)) continue
+      mapaLocal.set(chave, item)
     }
 
     const ids = new Set([...mapaCloud.keys(), ...mapaLocal.keys()])
-    return Array.from(ids)
+    return deduplicarOrcamentosPorId(
+      Array.from(ids)
       .map((id) => {
         const remoto = mapaCloud.get(id)
         const itemLocal = mapaLocal.get(id)
@@ -1008,10 +1182,15 @@ export default function OrcamentoPage() {
         return aplicarStatusResolvido((remoto || itemLocal) as OrcamentoSalvo, itemLocal || null)
       })
       .sort((a, b) => Number(b.id) - Number(a.id))
+    )
   }
 
   function aplicarOrcamentos(lista: OrcamentoSalvo[], contexto: string) {
-    const locais = lerOrcamentosLocalStorage().map((item) => aplicarStatusResolvido(item))
+    const userId = userIdOrcamentosRef.current
+    const deletedIds = lerDeletedOrcamentos(userId)
+    const locais = lerOrcamentosLocalStorage()
+      .map((item) => aplicarStatusResolvido(item))
+      .filter((item) => !deletedIds.has(String(item.id)))
     if (lista.length === 0 && locais.length > 0) {
       console.warn('[orcamentos] Supabase retornou vazio, mantendo cache local.', {
         contexto,
@@ -1027,7 +1206,11 @@ export default function OrcamentoPage() {
       return false
     }
 
-    const listaNormalizada = mesclarOrcamentos(lista, locais)
+    const listaNormalizada = mesclarOrcamentos(
+      lista.filter((item) => !deletedIds.has(String(item?.id || ''))),
+      locais,
+      userId,
+    )
     setOrcamentosSalvos(listaNormalizada)
     try {
       localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(listaNormalizada))
@@ -1058,6 +1241,7 @@ export default function OrcamentoPage() {
           userId: sessionData.session.user.id,
           email: sessionData.session.user.email || '',
         }
+        userIdOrcamentosRef.current = auth.userId
         return auth
       }
       if (sessionError) console.error('[Orcamentos] getSession falhou:', sessionError.message)
@@ -1068,6 +1252,7 @@ export default function OrcamentoPage() {
           userId: userData.user.id,
           email: userData.user.email || '',
         }
+        userIdOrcamentosRef.current = auth.userId
         return auth
       }
       if (userError) console.error('[Orcamentos] getUser falhou:', userError.message)
@@ -1101,8 +1286,10 @@ export default function OrcamentoPage() {
         carregarOrcamentosLocalFallback()
         return
       }
+      userIdOrcamentosRef.current = userId
 
       const locais = locaisAntes.length ? locaisAntes : lerOrcamentosLocalStorage()
+      const deletedIds = lerDeletedOrcamentos(userId)
 
       const { data, error } = await supabase
         .from('orcamentos')
@@ -1116,7 +1303,7 @@ export default function OrcamentoPage() {
         const localId = String(row.local_id || (row.payload as Partial<OrcamentoSalvo> | undefined)?.id || '')
         const itemLocal = locais.find((item) => String(item.id) === localId)
         return orcamentoDeRowSupabase(row, itemLocal)
-      })
+      }).filter((item) => !deletedIds.has(String(item?.id || '')))
 
       if (normalizados.length === 0 && locais.length > 0) {
         console.warn('[Orcamentos] Supabase retornou lista vazia. Tentando subir cache local antes de exibir.')
@@ -1127,7 +1314,7 @@ export default function OrcamentoPage() {
         return
       }
 
-      const listaFinal = mesclarOrcamentos(normalizados, locais)
+      const listaFinal = mesclarOrcamentos(normalizados, locais, userId)
       aplicarOrcamentos(listaFinal, 'carregarOrcamentosSupabase')
       ultimaCargaOrcamentosRef.current = Date.now()
     } catch (error) {
@@ -1158,6 +1345,22 @@ export default function OrcamentoPage() {
       }
 
       const row = orcamentoParaUpsertSupabase(orcamento, userId)
+      removerOrcamentoDeDeleted(Number(orcamento.id), userId)
+
+      const { data: existente } = await supabase
+        .from('orcamentos')
+        .select('local_id')
+        .eq('user_id', userId)
+        .eq('local_id', row.local_id)
+        .maybeSingle()
+
+      logOrcamentoSave({
+        origem: 'supabase-upsert',
+        id: row.local_id,
+        numero: orcamento.numero,
+        jaExistia: Boolean(existente?.local_id),
+      })
+
       const { data, error } = await supabase
         .from('orcamentos')
         .upsert(row, { onConflict: 'user_id,local_id' })
@@ -1350,6 +1553,7 @@ export default function OrcamentoPage() {
       const { data } = await supabase.auth.getUser()
       const userId = data?.user?.id
       if (!userId) return
+      marcarOrcamentoComoDeletado(Number(orcamento.id), userId)
 
       const { error } = await supabase
         .from('orcamentos')
@@ -1425,7 +1629,7 @@ export default function OrcamentoPage() {
         const dados = JSON.parse(salvoConfig)
         setConfig((anterior) => ({ ...anterior, ...dados }))
         setTituloPdf(dados.tituloPdf || 'Orçamento Comercial')
-        setObservacao(dados.rodapePdf || 'Obrigado pela preferência.')
+        setObservacao(dados.rodapePdf || OBSERVACAO_PADRAO_ORCAMENTO)
         setFormaPagamento(dados.formaPagamentoPadrao || 'PIX')
         setValidade(dados.validadePadrao || '')
         setPrazoEntrega(dados.prazoEntregaPadrao || '')
@@ -1466,10 +1670,9 @@ export default function OrcamentoPage() {
 
     void carregarOrcamentosSupabase('abertura-painel')
 
-    const salvosProdutos = localStorage.getItem(PRODUTOS_KEY)
-    if (salvosProdutos) {
+    void obterUserIdPainel().then((userId) => {
       try {
-        const lista = JSON.parse(salvosProdutos)
+        const lista = lerLocalStorageUsuario<unknown[]>(PRODUTOS_KEY, userId, [])
         if (Array.isArray(lista) && lista.length > 0) {
           const normalizados = lista
             .map((produto: any, index: number): Produto => ({
@@ -1485,7 +1688,7 @@ export default function OrcamentoPage() {
           if (normalizados.length > 0) setProdutos(normalizados)
         }
       } catch {}
-    }
+    })
 
     const salvosClientes = localStorage.getItem(CLIENTES_KEY)
     if (salvosClientes) {
@@ -1525,10 +1728,9 @@ export default function OrcamentoPage() {
         }
       } catch {}
       void carregarOrcamentosSupabase('connect-cloud-hydrated')
-      try {
-        const salvosProdutos = localStorage.getItem(PRODUTOS_KEY)
-        if (salvosProdutos) {
-          const lista = JSON.parse(salvosProdutos)
+      void obterUserIdPainel().then((userId) => {
+        try {
+          const lista = lerLocalStorageUsuario<unknown[]>(PRODUTOS_KEY, userId, [])
           if (Array.isArray(lista) && lista.length > 0) {
             const normalizados = lista.map((produto: any, index: number): Produto => ({
               id: Number(produto?.id ?? index + 1),
@@ -1540,8 +1742,8 @@ export default function OrcamentoPage() {
             })).filter((produto: Produto) => Boolean(produto.nome))
             if (normalizados.length > 0) setProdutos(normalizados)
           }
-        }
-      } catch {}
+        } catch {}
+      })
       try {
         const salvosClientes = localStorage.getItem(CLIENTES_KEY)
         if (salvosClientes) {
@@ -1884,7 +2086,18 @@ export default function OrcamentoPage() {
   }
 
   function salvarListaOrcamentos(lista: OrcamentoSalvo[]) {
-    const listaNormalizada = lista.map((item) => aplicarStatusResolvido(item))
+    const deletedIds = lerDeletedOrcamentos(userIdOrcamentosRef.current)
+    const listaSemDuplicatas = deduplicarOrcamentosPorId(
+      lista.filter((item) => !deletedIds.has(String(item?.id || '')))
+    )
+    const listaNormalizada = listaSemDuplicatas.map((item) => aplicarStatusResolvido(item))
+    if (listaSemDuplicatas.length !== lista.length) {
+      logOrcamentoSave({
+        origem: 'dedupe-lista',
+        removidos: lista.length - listaSemDuplicatas.length,
+        total: listaNormalizada.length,
+      })
+    }
     setOrcamentosSalvos(listaNormalizada)
     localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(listaNormalizada))
     window.dispatchEvent(new Event('connect-data-change'))
@@ -2066,7 +2279,7 @@ export default function OrcamentoPage() {
     }
 
     setTituloPdf(config.tituloPdf || 'Orçamento Comercial')
-    setObservacao(config.rodapePdf || 'Obrigado pela preferência.')
+    setObservacao(config.rodapePdf || OBSERVACAO_PADRAO_ORCAMENTO)
   }
 
   function limparCamposItem() {
@@ -2104,6 +2317,11 @@ export default function OrcamentoPage() {
   }
 
   async function salvarPropostaComercial() {
+    if (salvandoRef.current) {
+      logOrcamentoSave({ origem: 'salvar-proposta-bloqueado', motivo: 'salvando' })
+      return
+    }
+
     const valor = parseValorMoedaInput(propostaValorTotal)
     if (!propostaCliente?.nome?.trim()) {
       notificar('Selecione o cliente da proposta.', 'error')
@@ -2118,8 +2336,11 @@ export default function OrcamentoPage() {
       return
     }
 
-    const id = Date.now()
-    const itemPrincipal: ItemOrcamento = {
+    salvandoRef.current = true
+    setSalvandoOrcamento(true)
+    try {
+      const id = obterIdOrcamentoAtivo('salvar-proposta')
+      const itemPrincipal: ItemOrcamento = {
       id: 1,
       nome: propostaServicoPrincipal.trim(),
       descricao: propostaDescricao.trim(),
@@ -2169,7 +2390,7 @@ export default function OrcamentoPage() {
       link: gerarLinkDocumento(id, prepararOrcamentoCliente(novoBase)),
     }
 
-    salvarListaOrcamentos([novo, ...orcamentosSalvos])
+    upsertOrcamentoNaLista(novo, 'salvar-proposta')
     const okNuvem = await persistirOrcamentoSupabase(novo)
     notificar(
       okNuvem
@@ -2177,24 +2398,31 @@ export default function OrcamentoPage() {
         : 'Proposta salva no aparelho. A sincronização com a nuvem será tentada novamente.',
       okNuvem ? 'success' : 'info',
     )
+    setEditandoOrcamentoId(id)
     setModalPropostaAberto(false)
+    } finally {
+      salvandoRef.current = false
+      setSalvandoOrcamento(false)
+    }
   }
 
   function novoOrcamento() {
+    rascunhoOrcamentoIdRef.current = gerarIdOrcamentoUnico()
+    logOrcamentoSave({ origem: 'novo-orcamento', id: rascunhoOrcamentoIdRef.current, numero: null })
     setClienteSelecionado(null)
     setClienteBusca('')
     limparCamposItem()
     setItens([])
     setModeloOrcamento('recibo_profissional')
     setTituloPdf(config.tituloPdf || 'Orçamento Comercial')
-    setObservacao(config.rodapePdf || 'Obrigado pela preferência.')
+    setObservacao(config.rodapePdf || OBSERVACAO_PADRAO_ORCAMENTO)
     setFormaPagamento(config.formaPagamentoPadrao || formasPagamento[0] || 'PIX')
     setFormasPagamentoSelecionadas([config.formaPagamentoPadrao || formasPagamento[0] || 'Pix'])
-    setObservacaoFormasPagamento('')
-    setOcultarValorUnitarioM2(false)
+    setOcultarValorUnitarioM2(true)
     setParcelasBoleto('')
     setValidade(config.validadePadrao || '')
     setPrazoEntrega(config.prazoEntregaPadrao || '')
+    setEnderecoEntrega('')
     setValorEntrega(0)
     setDescontoTipo('valor')
     setDescontoInput('')
@@ -2207,6 +2435,7 @@ export default function OrcamentoPage() {
   function selecionarCliente(cliente: Cliente) {
     setClienteSelecionado(cliente)
     setClienteBusca(cliente.nome)
+    setEnderecoEntrega(cliente.endereco || '')
     setMostrarBuscaCliente(false)
   }
 
@@ -2525,17 +2754,77 @@ export default function OrcamentoPage() {
   }
 
   async function salvarOrcamento() {
+    if (salvandoRef.current) {
+      logOrcamentoSave({ origem: 'salvar-orcamento-bloqueado', motivo: 'salvando' })
+      return
+    }
+
     if (itens.length === 0) {
       notificar('Adicione pelo menos um item.', 'error')
       return
     }
 
-    if (editandoOrcamentoId !== null) {
-      const atual = orcamentosSalvos.find((item) => item.id === editandoOrcamentoId)
+    salvandoRef.current = true
+    setSalvandoOrcamento(true)
 
-      const atualizadoBase: OrcamentoSalvo = {
-        id: editandoOrcamentoId,
-        numero: atual?.numero || gerarNumeroDocumentoIgnorandoAtual(),
+    try {
+      if (editandoOrcamentoId !== null) {
+        const atual = orcamentosSalvos.find((item) => item.id === editandoOrcamentoId)
+
+        const atualizadoBase: OrcamentoSalvo = {
+          id: editandoOrcamentoId,
+          numero: atual?.numero || gerarNumeroDocumentoIgnorandoAtual(),
+          titulo: tituloPdf,
+          modelo: modeloOrcamento,
+          cliente: clienteSelecionado,
+          itens,
+          subtotal,
+          entrega: valorEntrega,
+          desconto: valorDesconto,
+          total,
+          formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
+          formasPagamentoLista: formasPagamentoSelecionadas,
+          observacaoPagamento: '',
+          ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
+          validade,
+          prazoEntrega,
+          enderecoEntrega: enderecoEntrega.trim() || undefined,
+          observacao,
+          status: atual?.status || 'Pendente',
+          data: new Date().toLocaleDateString('pt-BR'),
+          link: '',
+          atualizadoEm: Date.now(),
+        }
+
+        const atualizado: OrcamentoSalvo = {
+          ...atualizadoBase,
+          link: gerarLinkDocumento(editandoOrcamentoId, prepararOrcamentoCliente(atualizadoBase)),
+        }
+
+        upsertOrcamentoNaLista(atualizado, 'salvar-orcamento-update')
+        const okNuvem = await persistirOrcamentoSupabase(atualizado)
+        gerarFinanceiroDeOrcamento(atualizado)
+        logOrcamentoSave({
+          origem: 'salvar-orcamento-update',
+          id: atualizado.id,
+          numero: atualizado.numero,
+          okNuvem,
+        })
+        notificar(
+          okNuvem
+            ? 'Orçamento atualizado com sucesso! Parcelas financeiras atualizadas.'
+            : 'Orçamento salvo no aparelho. A sincronização com a nuvem será tentada novamente.',
+          okNuvem ? 'success' : 'info'
+        )
+        setFormAberto(false)
+        novoOrcamento()
+        return
+      }
+
+      const id = obterIdOrcamentoAtivo('salvar-orcamento-novo')
+      const novoBase: OrcamentoSalvo = {
+        id,
+        numero: gerarNumeroDocumentoIgnorandoAtual(),
         titulo: tituloPdf,
         modelo: modeloOrcamento,
         cliente: clienteSelecionado,
@@ -2544,79 +2833,46 @@ export default function OrcamentoPage() {
         entrega: valorEntrega,
         desconto: valorDesconto,
         total,
-        formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
+        formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
         formasPagamentoLista: formasPagamentoSelecionadas,
-        observacaoPagamento: observacaoFormasPagamento,
-        ocultarValorUnitarioM2,
+        observacaoPagamento: '',
+        ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
         validade,
         prazoEntrega,
+        enderecoEntrega: enderecoEntrega.trim() || undefined,
         observacao,
-        status: atual?.status || 'Pendente',
+        status: 'Pendente',
         data: new Date().toLocaleDateString('pt-BR'),
         link: '',
+        atualizadoEm: Date.now(),
       }
 
-      const atualizado: OrcamentoSalvo = {
-        ...atualizadoBase,
-        link: gerarLinkDocumento(editandoOrcamentoId, prepararOrcamentoCliente(atualizadoBase)),
+      const novo: OrcamentoSalvo = {
+        ...novoBase,
+        link: gerarLinkDocumento(id, prepararOrcamentoCliente(novoBase)),
       }
 
-      const listaAtualizada = orcamentosSalvos.map((item) =>
-        item.id === editandoOrcamentoId ? atualizado : item
-      )
-      salvarListaOrcamentos(listaAtualizada)
-      const okNuvem = await persistirOrcamentoSupabase(atualizado)
-      gerarFinanceiroDeOrcamento(atualizado)
+      upsertOrcamentoNaLista(novo, 'salvar-orcamento-novo')
+      const okNuvem = await persistirOrcamentoSupabase(novo)
+      gerarFinanceiroDeOrcamento(novo)
+      logOrcamentoSave({
+        origem: 'salvar-orcamento-novo',
+        id: novo.id,
+        numero: novo.numero,
+        okNuvem,
+      })
       notificar(
         okNuvem
-          ? 'Orçamento atualizado com sucesso! Parcelas financeiras atualizadas.'
+          ? 'Orçamento salvo com sucesso! Parcelas financeiras geradas.'
           : 'Orçamento salvo no aparelho. A sincronização com a nuvem será tentada novamente.',
         okNuvem ? 'success' : 'info'
       )
+      setEditandoOrcamentoId(id)
       setFormAberto(false)
-      novoOrcamento()
-      return
+    } finally {
+      salvandoRef.current = false
+      setSalvandoOrcamento(false)
     }
-
-    const id = Date.now()
-    const novoBase: OrcamentoSalvo = {
-      id,
-      numero: gerarNumeroDocumentoIgnorandoAtual(),
-      titulo: tituloPdf,
-      modelo: modeloOrcamento,
-      cliente: clienteSelecionado,
-      itens,
-      subtotal,
-      entrega: valorEntrega,
-      desconto: valorDesconto,
-      total,
-              formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
-        formasPagamentoLista: formasPagamentoSelecionadas,
-        observacaoPagamento: observacaoFormasPagamento,
-        ocultarValorUnitarioM2,
-      validade,
-      prazoEntrega,
-      observacao,
-      status: 'Pendente',
-      data: new Date().toLocaleDateString('pt-BR'),
-      link: '',
-    }
-
-    const novo: OrcamentoSalvo = {
-      ...novoBase,
-        link: gerarLinkDocumento(id, prepararOrcamentoCliente(novoBase)),
-    }
-
-    salvarListaOrcamentos([novo, ...orcamentosSalvos])
-    const okNuvem = await persistirOrcamentoSupabase(novo)
-    gerarFinanceiroDeOrcamento(novo)
-    notificar(
-      okNuvem
-        ? 'Orçamento salvo com sucesso! Parcelas financeiras geradas.'
-        : 'Orçamento salvo no aparelho. A sincronização com a nuvem será tentada novamente.',
-      okNuvem ? 'success' : 'info'
-    )
-    setFormAberto(false)
   }
 
   function alterarStatusOrcamento(id: number, status: StatusOrcamento, mensagem: string) {
@@ -2717,6 +2973,7 @@ export default function OrcamentoPage() {
   }
 
   function editarOrcamento(orc: OrcamentoSalvo) {
+    rascunhoOrcamentoIdRef.current = orc.id
     setEditandoOrcamentoId(orc.id)
     setFormAberto(true)
     setClienteSelecionado(orc.cliente)
@@ -2728,12 +2985,12 @@ export default function OrcamentoPage() {
     setObservacao(orc.observacao || '')
     const pagExtraido = extrairFormasPagamentoOrcamento(orc)
     setFormasPagamentoSelecionadas(pagExtraido.formas.length ? pagExtraido.formas : ['Pix'])
-    setObservacaoFormasPagamento(pagExtraido.observacao)
     setFormaPagamento(pagExtraido.formas[0] || 'Pix')
     setParcelasBoleto(String(orc.formaPagamento || '').includes('(') ? String(orc.formaPagamento || '').match(/\(([^)]+)\)/)?.[1] || '' : '')
     setOcultarValorUnitarioM2(Boolean(orc.ocultarValorUnitarioM2))
     setValidade(orc.validade || '')
     setPrazoEntrega(orc.prazoEntrega || '')
+    setEnderecoEntrega(orc.enderecoEntrega || orc.cliente?.endereco || '')
     setValorEntrega(Number(orc.entrega || 0))
     setDescontoTipo('valor')
     setDescontoInput(Number(orc.desconto || 0) > 0 ? formatarDecimalVisual(Number(orc.desconto || 0)) : '')
@@ -2741,9 +2998,11 @@ export default function OrcamentoPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function excluirOrcamento(id: number) {
+  async function excluirOrcamento(id: number) {
     const confirmar = window.confirm('Deseja excluir este orçamento?')
     if (!confirmar) return
+    const userId = userIdOrcamentosRef.current || (await obterUserIdOrcamentos(2))
+    marcarOrcamentoComoDeletado(id, userId)
     const orcamento = orcamentosSalvos.find((item) => item.id === id)
     const listaAtualizada = orcamentosSalvos.filter((item) => item.id !== id)
     salvarListaOrcamentos(listaAtualizada)
@@ -2848,11 +3107,11 @@ export default function OrcamentoPage() {
       return
     }
 
+    const baseId = obterIdOrcamentoAtivo('enviar-whatsapp')
     const numero = telefoneWhatsappBrasil(clienteSelecionado?.telefone || '')
-    const baseId = editandoOrcamentoId ?? Date.now()
     const numeroDocumento = editandoOrcamentoId !== null
       ? (orcamentosSalvos.find((item) => item.id === editandoOrcamentoId)?.numero || gerarNumeroDocumentoIgnorandoAtual())
-      : gerarNumeroDocumentoIgnorandoAtual()
+      : (orcamentosSalvos.find((item) => item.id === baseId)?.numero || gerarNumeroDocumentoIgnorandoAtual())
 
     const dadosLinkPublico: OrcamentoSalvo = {
       id: baseId,
@@ -2864,12 +3123,13 @@ export default function OrcamentoPage() {
       entrega: valorEntrega,
       desconto: valorDesconto,
       total,
-              formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
-        formasPagamentoLista: formasPagamentoSelecionadas,
-        observacaoPagamento: observacaoFormasPagamento,
-        ocultarValorUnitarioM2,
+      formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
+      formasPagamentoLista: formasPagamentoSelecionadas,
+      observacaoPagamento: '',
+        ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
       validade,
       prazoEntrega,
+      enderecoEntrega: enderecoEntrega.trim() || undefined,
       observacao,
       status: 'Pendente',
       data: new Date().toLocaleDateString('pt-BR'),
@@ -2888,7 +3148,7 @@ export default function OrcamentoPage() {
 `
       mensagem += `Total: ${moeda(total)}
 `
-      mensagem += `Pagamento: ${pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto)}
+      mensagem += `Pagamento: ${pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto)}
 `
       if (formasPagamentoSelecionadas.some((f) => f.toLowerCase().includes('boleto')) && parcelasBoleto) {
         mensagem += `${montarTextoBoleto(parcelasBoleto)}
@@ -2897,6 +3157,9 @@ export default function OrcamentoPage() {
       if (validade) mensagem += `Validade: ${validade}
 `
       if (prazoEntrega) mensagem += `Prazo de entrega: ${prazoEntrega}
+`
+      const entregaEndereco = enderecoEntrega.trim()
+      if (entregaEndereco) mensagem += `Endereço de entrega: ${entregaEndereco}
 `
       if (observacao) mensagem += `Obs.: ${observacao}
 `
@@ -2938,7 +3201,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
       return
     }
 
-    const idParaAbrir = editandoOrcamentoId ?? Date.now()
+    const idParaAbrir = obterIdOrcamentoAtivo('gerar-pdf')
     let dadosParaAbrir: OrcamentoSalvo | null = null
 
     if (editandoOrcamentoId !== null) {
@@ -2955,16 +3218,18 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         entrega: valorEntrega,
         desconto: valorDesconto,
         total,
-        formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
+        formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
         formasPagamentoLista: formasPagamentoSelecionadas,
-        observacaoPagamento: observacaoFormasPagamento,
-        ocultarValorUnitarioM2,
+        observacaoPagamento: '',
+        ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
         validade,
         prazoEntrega,
+        enderecoEntrega: enderecoEntrega.trim() || undefined,
         observacao,
         status: atual?.status || 'Pendente',
         data: new Date().toLocaleDateString('pt-BR'),
         link: '',
+        atualizadoEm: Date.now(),
       }
 
       const atualizado: OrcamentoSalvo = {
@@ -2973,15 +3238,12 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
       }
 
       dadosParaAbrir = atualizado
-
-      const listaAtualizada = orcamentosSalvos.map((item) =>
-        item.id === editandoOrcamentoId ? atualizado : item
-      )
-      salvarListaOrcamentos(listaAtualizada)
+      upsertOrcamentoNaLista(atualizado, 'gerar-pdf-update')
     } else {
+      const existente = orcamentosSalvos.find((item) => item.id === idParaAbrir)
       const novoBase: OrcamentoSalvo = {
         id: idParaAbrir,
-        numero: gerarNumeroDocumentoIgnorandoAtual(),
+        numero: existente?.numero || gerarNumeroDocumentoIgnorandoAtual(),
         titulo: tituloPdf,
         modelo: modeloOrcamento,
         cliente: clienteSelecionado,
@@ -2990,16 +3252,18 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         entrega: valorEntrega,
         desconto: valorDesconto,
         total,
-        formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, observacaoFormasPagamento, parcelasBoleto),
+        formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
         formasPagamentoLista: formasPagamentoSelecionadas,
-        observacaoPagamento: observacaoFormasPagamento,
-        ocultarValorUnitarioM2,
+        observacaoPagamento: '',
+        ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
         validade,
         prazoEntrega,
+        enderecoEntrega: enderecoEntrega.trim() || undefined,
         observacao,
-        status: 'Pendente',
+        status: existente?.status || 'Pendente',
         data: new Date().toLocaleDateString('pt-BR'),
         link: '',
+        atualizadoEm: Date.now(),
       }
 
       const novo: OrcamentoSalvo = {
@@ -3008,8 +3272,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
       }
 
       dadosParaAbrir = novo
-
-      salvarListaOrcamentos([novo, ...orcamentosSalvos])
+      upsertOrcamentoNaLista(novo, 'gerar-pdf-novo')
       setEditandoOrcamentoId(idParaAbrir)
     }
 
@@ -3125,7 +3388,18 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
       os: { background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#fff', boxShadow: '0 8px 18px rgba(249,115,22,0.18)' },
       gravar: { background: 'linear-gradient(135deg,#059669,#047857)', color: '#fff', boxShadow: '0 8px 18px rgba(5,150,105,0.18)' },
     }
-    return { ...buttonBase, ...map[variant], width: '100%' }
+    return {
+      ...buttonBase,
+      ...map[variant],
+      width: '100%',
+      minHeight: 44,
+      height: 44,
+      padding: '0 16px',
+      fontSize: 13,
+      lineHeight: 1.15,
+      alignItems: 'center',
+      justifyContent: 'center',
+    }
   }
 
   const totalBoxStyle: React.CSSProperties = {
@@ -3638,7 +3912,19 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     <div style={{ fontSize: 13, color: colors.muted }}>📞 {clienteSelecionado.telefone || 'Sem telefone'}</div>
                     <div style={{ fontSize: 13, color: colors.muted }}>🪪 {clienteSelecionado.tipoPessoa === 'PJ' ? 'PJ' : 'PF'} {clienteSelecionado.cpf ? `• CPF: ${clienteSelecionado.cpf}` : ''} {clienteSelecionado.cnpj ? `• CNPJ: ${clienteSelecionado.cnpj}` : ''}</div>
                     {clienteSelecionado.email ? <div style={{ fontSize: 13, color: colors.muted }}>✉️ {clienteSelecionado.email}</div> : null}
-                    {clienteSelecionado.endereco ? <div style={{ fontSize: 13, color: colors.muted }}>📍 {clienteSelecionado.endereco}</div> : null}
+                    {clienteSelecionado.endereco ? <div style={{ fontSize: 13, color: colors.muted }}>📍 Endereço do cliente: {clienteSelecionado.endereco}</div> : null}
+                  </div>
+                )}
+
+                {clienteSelecionado && (
+                  <div style={{ marginTop: 10 }}>
+                    <label style={labelStyle}>📦 Endereço de entrega</label>
+                    <input
+                      value={enderecoEntrega}
+                      onChange={(e) => setEnderecoEntrega(e.target.value)}
+                      placeholder="Preencha se for diferente do cadastro (ex.: trabalho, outro bairro)"
+                      style={inputStyle}
+                    />
                   </div>
                 )}
 
@@ -3975,39 +4261,77 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                   )}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : usaCampoM2 ? 'minmax(0,1fr) 120px 120px auto' : 'minmax(0,1fr) 140px auto', gap: 8 }}>
-                  <input
-                    value={produtoBusca}
-                    onChange={(e) => {
-                      setProdutoBusca(e.target.value)
-                      setProdutoSelecionadoId(null)
-                      setMostrarBuscaProduto(true)
+                {usaCampoM2 ? (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gap: 8,
+                      gridTemplateColumns: isMobile ? '1fr 1fr' : 'minmax(180px, 1fr) minmax(108px, 0.7fr) minmax(108px, 0.7fr) minmax(150px, auto)',
+                      alignItems: 'stretch',
                     }}
-                    onFocus={() => setMostrarBuscaProduto(true)}
-                    placeholder={filtroItem === 'servico' ? 'Pesquisar serviço...' : filtroItem === 'peso' ? 'Pesquisar produto por kg/peso...' : filtroItem === 'm2' ? 'Pesquisar produto por m²...' : 'Pesquisar produto...'}
-                    style={inputStyle}
-                  />
-
-                  {usaCampoM2 ? (
-                    <>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={formatarDecimalVisual(larguraItem)}
-                        onChange={(e) => setLarguraItem(textoParaNumeroDecimal(e.target.value))}
-                        placeholder="Largura"
-                        style={inputStyle}
-                      />
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={formatarDecimalVisual(alturaItem)}
-                        onChange={(e) => setAlturaItem(textoParaNumeroDecimal(e.target.value))}
-                        placeholder="Altura"
-                        style={inputStyle}
-                      />
-                    </>
-                  ) : (
+                  >
+                    <input
+                      value={produtoBusca}
+                      onChange={(e) => {
+                        setProdutoBusca(e.target.value)
+                        setProdutoSelecionadoId(null)
+                        setMostrarBuscaProduto(true)
+                      }}
+                      onFocus={() => setMostrarBuscaProduto(true)}
+                      placeholder={filtroItem === 'm2' ? 'Pesquisar produto por m²...' : 'Pesquisar produto...'}
+                      style={{ ...inputStyle, gridColumn: isMobile ? '1 / -1' : undefined, minWidth: 0 }}
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={formatarDecimalVisual(larguraItem)}
+                      onChange={(e) => setLarguraItem(textoParaNumeroDecimal(e.target.value))}
+                      placeholder="Largura"
+                      style={{ ...inputStyle, minWidth: 0 }}
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={formatarDecimalVisual(alturaItem)}
+                      onChange={(e) => setAlturaItem(textoParaNumeroDecimal(e.target.value))}
+                      placeholder="Altura"
+                      style={{ ...inputStyle, minWidth: 0 }}
+                    />
+                    <button
+                      onClick={confirmarItemSelecionado}
+                      style={{
+                        ...buttonBase,
+                        background: 'linear-gradient(135deg,#22c55e,#16a34a)',
+                        color: '#fff',
+                        minHeight: 44,
+                        height: 44,
+                        width: isMobile ? '100%' : 'auto',
+                        gridColumn: isMobile ? '1 / -1' : undefined,
+                      }}
+                    >
+                      {editandoId !== null ? 'Atualizar item' : 'Adicionar item'}
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gap: 8,
+                      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(110px, 140px) minmax(150px, auto)',
+                      alignItems: 'stretch',
+                    }}
+                  >
+                    <input
+                      value={produtoBusca}
+                      onChange={(e) => {
+                        setProdutoBusca(e.target.value)
+                        setProdutoSelecionadoId(null)
+                        setMostrarBuscaProduto(true)
+                      }}
+                      onFocus={() => setMostrarBuscaProduto(true)}
+                      placeholder={filtroItem === 'servico' ? 'Pesquisar serviço...' : filtroItem === 'peso' ? 'Pesquisar produto por kg/peso...' : 'Pesquisar produto...'}
+                      style={{ ...inputStyle, minWidth: 0 }}
+                    />
                     <input
                       type={usaCampoPeso ? 'text' : 'number'}
                       inputMode={usaCampoPeso ? 'decimal' : 'numeric'}
@@ -4024,14 +4348,23 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                         setQuantidade(Number(e.target.value || 0))
                       }}
                       placeholder={usaCampoPeso ? 'Ex: 0,65 ou 650' : modoItem === 'servico' ? 'Qtd.' : 'Qtd.'}
-                      style={inputStyle}
+                      style={{ ...inputStyle, minWidth: 0 }}
                     />
-                  )}
-
-                  <button onClick={confirmarItemSelecionado} style={{ ...buttonBase, background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', minWidth: 140 }}>
-                    {editandoId !== null ? 'Atualizar item' : 'Adicionar item'}
-                  </button>
-                </div>
+                    <button
+                      onClick={confirmarItemSelecionado}
+                      style={{
+                        ...buttonBase,
+                        background: 'linear-gradient(135deg,#22c55e,#16a34a)',
+                        color: '#fff',
+                        minHeight: 44,
+                        height: 44,
+                        width: isMobile ? '100%' : 'auto',
+                      }}
+                    >
+                      {editandoId !== null ? 'Atualizar item' : 'Adicionar item'}
+                    </button>
+                  </div>
+                )}
 
                 {produtoSelecionado && (
                   <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: darkMode ? '#172554' : '#eff6ff', border: '1px solid #3b82f6', color: darkMode ? '#dbeafe' : '#1e3a8a', fontWeight: 800 }}>
@@ -4248,22 +4581,13 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                       })}
                     
                     </div>
-                    <div style={{ marginTop: 10 }}>
-                      <label style={{ ...labelStyle, fontSize: 12 }}>Observação de pagamento</label>
-                      <input
-                        value={observacaoFormasPagamento}
-                        onChange={(e) => setObservacaoFormasPagamento(e.target.value)}
-                        placeholder="Ex: Parcelamos em até 10x"
-                        style={inputStyle}
-                      />
-                    </div>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontWeight: 800, color: colors.muted, fontSize: 13 }}>
                       <input
                         type="checkbox"
                         checked={ocultarValorUnitarioM2}
                         onChange={(e) => setOcultarValorUnitarioM2(e.target.checked)}
                       />
-                      Ocultar valor unitário/m² no orçamento (cliente vê metragem e total)
+                      No PDF/WhatsApp para o cliente, itens m² mostram só descrição e valor final (cálculo interno no painel)
                     </label>
                   </div>
                   {formasPagamentoSelecionadas.some((f) => f.toLowerCase().includes('boleto')) && (
@@ -4320,14 +4644,16 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               </div>
 
               <div style={cardStyle}>
-                <label style={labelStyle}>📝 Observação</label>
+                <label style={{ ...labelStyle, color: '#dc2626' }}>📝 Observação</label>
                 <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} style={{ ...inputStyle, minHeight: 90, resize: 'vertical' }} />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', justifyContent: isMobile ? 'stretch' : 'stretch', gap: 8, alignItems: 'stretch' }}>
-                <button onClick={novoOrcamento} style={{ ...buttonBase, width: '100%', background: '#e5e7eb', color: '#111827' }}>Limpar</button>
-                <button onClick={salvarOrcamento} style={actionButtonStyle('os')}>{editandoOrcamentoId !== null ? 'Atualizar orçamento' : 'Salvar orçamento'}</button>
-                <button onClick={gerarPDF} style={actionButtonStyle('editar')}>Gerar PDF</button>
+                <button type="button" disabled={salvandoOrcamento} onClick={novoOrcamento} style={{ ...buttonBase, width: '100%', background: '#e5e7eb', color: '#111827', opacity: salvandoOrcamento ? 0.6 : 1 }}>Limpar</button>
+                <button type="button" disabled={salvandoOrcamento} onClick={() => void salvarOrcamento()} style={{ ...actionButtonStyle('os'), opacity: salvandoOrcamento ? 0.7 : 1, cursor: salvandoOrcamento ? 'wait' : 'pointer' }}>
+                  {salvandoOrcamento ? 'Salvando…' : editandoOrcamentoId !== null ? 'Atualizar orçamento' : 'Salvar orçamento'}
+                </button>
+                <button type="button" disabled={salvandoOrcamento} onClick={gerarPDF} style={{ ...actionButtonStyle('editar'), opacity: salvandoOrcamento ? 0.7 : 1 }}>Gerar PDF</button>
               </div>
             </div>
           </div>
@@ -4494,8 +4820,10 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               <textarea value={propostaObservacoes} onChange={(e) => setPropostaObservacoes(e.target.value)} rows={2} style={{ ...inputStyle, minHeight: 70, resize: 'vertical', marginBottom: 14 }} />
 
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
-                <button type="button" onClick={() => setModalPropostaAberto(false)} style={{ ...buttonBase, background: darkMode ? '#2b313a' : '#e5e7eb', color: colors.text }}>Cancelar</button>
-                <button type="button" onClick={() => void salvarPropostaComercial()} style={actionButtonStyle('os')}>Salvar proposta</button>
+                <button type="button" disabled={salvandoOrcamento} onClick={() => setModalPropostaAberto(false)} style={{ ...buttonBase, background: darkMode ? '#2b313a' : '#e5e7eb', color: colors.text, opacity: salvandoOrcamento ? 0.6 : 1 }}>Cancelar</button>
+                <button type="button" disabled={salvandoOrcamento} onClick={() => void salvarPropostaComercial()} style={{ ...actionButtonStyle('os'), opacity: salvandoOrcamento ? 0.7 : 1, cursor: salvandoOrcamento ? 'wait' : 'pointer' }}>
+                  {salvandoOrcamento ? 'Salvando…' : 'Salvar proposta'}
+                </button>
               </div>
             </div>
           </div>

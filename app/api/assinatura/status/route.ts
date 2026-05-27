@@ -54,15 +54,16 @@ export async function GET(request: NextRequest) {
 
     await garantirTrialAssinatura(user.id, user.email)
 
+    const atualizado = await obterAssinaturaUsuario(user.id)
     const snapshotFinal = {
-      ...snapshot,
-      documentosUsados: documentosUsados || snapshot.documentosUsados,
+      ...atualizado.snapshot,
+      documentosUsados: documentosUsados || atualizado.snapshot.documentosUsados,
     }
 
     return NextResponse.json({
       ok: true,
-      perfil,
-      assinatura,
+      perfil: atualizado.perfil,
+      assinatura: atualizado.assinatura,
       snapshot: snapshotFinal,
       catalogo: PLANOS_CATALOGO,
       dica: 'Envie x-connect-docs-count no header para contagem de documentos do cliente.',

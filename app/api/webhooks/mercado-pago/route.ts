@@ -2,18 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { chamarMercadoPago } from '@/lib/mercadoPago'
-import { montarPayloadAtivacao } from '@/lib/assinaturaServer'
+import { ativarPagamentoAprovado, resolverPagamentoLocal } from '@/lib/pagamentoAtivacao'
 import { parsePlanoPagamento } from '@/lib/assinaturaAcesso'
-import { diasPlano, resolverCheckout, type PlanoTier, type RecorrenciaPlano } from '@/lib/planosSaaS'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-function adicionarDias(base: Date, dias: number) {
-  const data = new Date(base)
-  data.setDate(data.getDate() + dias)
-  return data
-}
 
 async function registrarEvento(eventId: string, payload: unknown, status: string, error?: string) {
   try {
@@ -80,57 +73,6 @@ function validarAssinaturaMercadoPago(request: NextRequest, resourceId: string) 
   }
 }
 
-async function ativarPagamentoAprovado(pagamento: { id: string; user_id: string; valor: number; plano?: string | null }, pagamentoMp: any) {
-  const supabase = getSupabaseAdmin()
-  const parsed = parsePlanoPagamento(pagamento.plano, pagamento.valor)
-  let tier: PlanoTier = parsed.tier === 'trial' ? 'starter' : parsed.tier
-  let recorrencia: RecorrenciaPlano = parsed.recorrencia
-
-  const metadata = pagamentoMp?.metadata || {}
-  if (metadata?.tier) {
-    const resolvido = resolverCheckout({ tier: metadata.tier, recorrencia: metadata.recorrencia })
-    tier = resolvido.tier
-    recorrencia = resolvido.recorrencia
-  }
-
-  const agora = new Date()
-  const { data: perfil } = await supabase.from('perfis').select('id,vencimento').eq('id', pagamento.user_id).maybeSingle()
-
-  const vencimentoAtual = perfil?.vencimento ? new Date(perfil.vencimento) : null
-  const baseVencimento =
-    vencimentoAtual && !Number.isNaN(vencimentoAtual.getTime()) && vencimentoAtual > agora ? vencimentoAtual : agora
-
-  const dias = diasPlano(tier, recorrencia)
-  const novoVencimento = adicionarDias(baseVencimento, dias).toISOString()
-  const payloadAtivacao = montarPayloadAtivacao({
-    userId: pagamento.user_id,
-    tier,
-    recorrencia,
-    vencimentoIso: novoVencimento,
-    gatewayAssinaturaId: String(pagamentoMp?.id || ''),
-    gatewayClienteId: String(pagamentoMp?.payer?.id || ''),
-    valorPago: Number(pagamentoMp?.transaction_amount || pagamento.valor || 0),
-  })
-
-  await supabase
-    .from('pagamentos')
-    .update({
-      status: 'pago',
-      metodo: String(pagamentoMp?.payment_method_id || pagamentoMp?.payment_type_id || 'mercado_pago'),
-      gateway_pagamento_id: String(pagamentoMp?.id || ''),
-      paid_amount: Number(pagamentoMp?.transaction_amount || pagamento.valor || 0),
-      plano: `${tier}_${recorrencia}`,
-      recorrencia,
-      data_pagamento: pagamentoMp?.date_approved || agora.toISOString(),
-    })
-    .eq('id', pagamento.id)
-
-  await supabase.from('assinaturas').upsert(payloadAtivacao.assinatura, { onConflict: 'user_id' })
-  await supabase.from('perfis').update(payloadAtivacao.perfil).eq('id', pagamento.user_id)
-
-  return { tier, recorrencia, novoVencimento }
-}
-
 export async function POST(request: NextRequest) {
   let eventId = ''
 
@@ -177,24 +119,18 @@ export async function POST(request: NextRequest) {
 
       if (status === 'authorized' || status === 'active') {
         const parsed = parsePlanoPagamento(pagamento.plano, pagamento.valor)
-        const tier = parsed.tier === 'trial' ? 'starter' : parsed.tier
-        const recorrencia = parsed.recorrencia
-        const novoVencimento = adicionarDias(new Date(), diasPlano(tier, recorrencia)).toISOString()
-        const payloadAtivacao = montarPayloadAtivacao({
-          userId: pagamento.user_id,
-          tier,
-          recorrencia,
-          vencimentoIso: novoVencimento,
-          gatewayAssinaturaId: resourceId,
-          gatewayClienteId: String(preapproval?.payer_id || ''),
-        })
-
-        await supabase.from('assinaturas').upsert(payloadAtivacao.assinatura, { onConflict: 'user_id' })
-        await supabase.from('perfis').update(payloadAtivacao.perfil).eq('id', pagamento.user_id)
+        const pagamentoMpSintetico = {
+          id: resourceId,
+          metadata: {
+            tier: parsed.tier === 'trial' ? 'starter' : parsed.tier,
+            recorrencia: parsed.recorrencia,
+          },
+        }
+        const resultado = await ativarPagamentoAprovado(pagamento, pagamentoMpSintetico)
         await supabase.from('pagamentos').update({ status: 'pago' }).eq('id', pagamento.id)
 
         await registrarEvento(eventId, { body, preapproval }, 'processed')
-        return NextResponse.json({ ok: true, status: 'assinatura_ativa', vencimento: novoVencimento })
+        return NextResponse.json({ ok: true, status: 'assinatura_ativa', vencimento: resultado.novoVencimento })
       }
 
       await registrarEvento(eventId, { body, preapproval }, status || 'ignored')
@@ -210,13 +146,9 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdmin()
-    const { data: pagamento, error: pagamentoError } = await supabase
-      .from('pagamentos')
-      .select('id,user_id,valor,status,plano')
-      .eq('id', externalReference)
-      .maybeSingle()
+    let pagamento = await resolverPagamentoLocal(pagamentoMp as Record<string, unknown>, externalReference)
 
-    if (pagamentoError || !pagamento?.id) {
+    if (!pagamento?.id) {
       await registrarEvento(eventId, { body, pagamentoMp }, 'error', 'Pagamento local não encontrado.')
       return NextResponse.json({ ok: false, message: 'Pagamento local não encontrado.' }, { status: 404 })
     }

@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { isAdminEmail } from '@/lib/access'
-import { seedDemoData } from '@/lib/connect-demo'
+import { ativarModoDemo, marcarSessaoReal, sairDemoMode } from '@/lib/connect-demo'
 
 type ModoAuth = 'entrar' | 'criar'
 
@@ -74,6 +74,20 @@ export default function LoginPage() {
     return () => clearInterval(timer)
   }, [cooldown])
 
+  useEffect(() => {
+    let ativo = true
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!ativo || !session?.user) return
+      marcarSessaoReal()
+      sairDemoMode()
+    })
+
+    return () => {
+      ativo = false
+    }
+  }, [])
+
   function iniciarCooldown(segundos: number) {
     setCooldown(segundos)
   }
@@ -110,7 +124,7 @@ export default function LoginPage() {
   function handleDemo() {
     limparAvisos()
     try {
-      seedDemoData(true)
+      ativarModoDemo()
       setMensagem('Modo demonstração carregado com dados fictícios.')
       router.replace('/boas-vindas')
     } catch (err: any) {
@@ -149,6 +163,9 @@ export default function LoginPage() {
 
         return
       }
+
+      marcarSessaoReal()
+      sairDemoMode()
 
       if (isAdminEmail(emailNormalizado)) {
         router.replace('/admin')
@@ -215,18 +232,24 @@ export default function LoginPage() {
 
       const userId = data.user?.id
 
+      if (data.session?.user) {
+        marcarSessaoReal()
+        sairDemoMode()
+      }
+
       if (userId) {
         const { error: perfilError } = await supabase.from('perfis').upsert(
           [
             {
               id: userId,
-              email: email.trim(),
+              email: email.trim().toLowerCase(),
               ativo: true,
               status: 'trial',
+              plano_tier: 'trial',
               vencimento: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             },
           ],
-          { onConflict: 'email' }
+          { onConflict: 'id' }
         )
 
         if (perfilError) {

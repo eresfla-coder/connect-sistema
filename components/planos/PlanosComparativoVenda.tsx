@@ -31,7 +31,7 @@ export function PlanosComparativoVenda({ tierDestaqueUrl, planoAtual, logado, di
   const tiers = useMemo(() => (['starter', 'pro', 'empresa'] as const), [])
 
   function hrefCta(tier: PlanoTier) {
-    const q = new URLSearchParams({ escolher: tier, recorrencia })
+    const q = new URLSearchParams({ escolher: tier, recorrencia, modo: 'cartao' })
     if (logado) return `/assinatura?${q.toString()}`
     return `/login?redirect=${encodeURIComponent(`/assinatura?${q.toString()}`)}`
   }

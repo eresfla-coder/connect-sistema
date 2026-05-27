@@ -9,6 +9,7 @@ import { parsePlanoPagamento } from '@/lib/assinaturaAcesso'
 import { PLANOS_CATALOGO, obterPlanoConfig, type PlanoTier, type RecorrenciaPlano } from '@/lib/planosSaaS'
 import ConnectLoading from '@/components/ui/ConnectLoading'
 import { showConnectToast } from '@/components/ui/ConnectToast'
+import { PixPagamentoPanel, type PixCheckoutDados } from '@/components/assinatura/PixPagamentoPanel'
 
 const PAGAMENTOS_KEY = 'connect_saas_pagamentos'
 
@@ -62,11 +63,14 @@ export default function AssinaturaPage() {
   const [cancelando, setCancelando] = useState(false)
   const [historico, setHistorico] = useState<PagamentoHistorico[]>([])
   const [extras, setExtras] = useState<{ ultimoPagamento?: string; planoRaw?: string; valorMensal?: number }>({})
+  const [pixAberto, setPixAberto] = useState(false)
+  const [pixDados, setPixDados] = useState<PixCheckoutDados | null>(null)
   const checkoutAutoRef = useRef(false)
 
   const pagamentoOk = params.get('pagamento') === 'aprovado' || params.get('checkout') === 'ok'
   const escolherTier = params.get('escolher') as PlanoTier | null
   const escolherRec = (params.get('recorrencia') as RecorrenciaPlano) || 'mensal'
+  const modoPagamentoUrl = params.get('modo') === 'pix' || params.get('pix') === '1' ? 'pix' : 'cartao'
   const mostrarTroca = params.get('trocar') === '1' || !!escolherTier
 
   useEffect(() => {
@@ -113,18 +117,47 @@ export default function AssinaturaPage() {
     if (!escolherTier || loading || checkoutAutoRef.current) return
     if (!['starter', 'pro', 'empresa'].includes(escolherTier)) return
     checkoutAutoRef.current = true
-    void iniciarCheckout(escolherTier, escolherRec)
-  }, [escolherTier, escolherRec, loading])
+    if (modoPagamentoUrl === 'pix' && escolherRec === 'mensal') {
+      void iniciarPix(escolherTier)
+    } else {
+      void iniciarCheckoutCartao(escolherTier, escolherRec)
+    }
+  }, [escolherTier, escolherRec, loading, modoPagamentoUrl])
 
-  async function iniciarCheckout(tier: PlanoTier, recorrencia: RecorrenciaPlano) {
-    setProcessando(`${tier}_${recorrencia}`)
-    try {
-      const { data: session } = await supabase.auth.getSession()
-      const token = session?.session?.access_token
-      if (!token) {
-        router.push(`/login?redirect=${encodeURIComponent(`/assinatura?escolher=${tier}&recorrencia=${recorrencia}`)}`)
-        return
+  async function obterTokenOuRedirect(tier: PlanoTier, recorrencia: RecorrenciaPlano, modo: 'cartao' | 'pix') {
+    const { data: session } = await supabase.auth.getSession()
+    const token = session?.session?.access_token
+    if (!token) {
+      const q = new URLSearchParams({ escolher: tier, recorrencia })
+      if (modo === 'pix') {
+        q.set('modo', 'pix')
+        q.set('pix', '1')
+      } else {
+        q.set('modo', 'cartao')
       }
+      router.push(`/login?redirect=${encodeURIComponent(`/assinatura?${q.toString()}`)}`)
+      return null
+    }
+    return token
+  }
+
+  function limparModoPixDaUrl() {
+    if (typeof window === 'undefined') return
+    const q = new URLSearchParams(window.location.search)
+    if (!q.has('pix') && q.get('modo') !== 'pix') return
+    q.delete('pix')
+    q.set('modo', 'cartao')
+    router.replace(`/assinatura?${q.toString()}`, { scroll: false })
+  }
+
+  async function iniciarCheckoutCartao(tier: PlanoTier, recorrencia: RecorrenciaPlano) {
+    setPixAberto(false)
+    setPixDados(null)
+    limparModoPixDaUrl()
+    setProcessando(`${tier}_${recorrencia}_cartao`)
+    try {
+      const token = await obterTokenOuRedirect(tier, recorrencia, 'cartao')
+      if (!token) return
 
       const res = await fetch('/api/pagamentos/checkout', {
         method: 'POST',
@@ -132,16 +165,62 @@ export default function AssinaturaPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ tier, recorrencia }),
+        body: JSON.stringify({ tier, recorrencia, metodo: 'cartao' }),
       })
       const payload = await res.json().catch(() => null)
       if (!res.ok || !payload?.checkoutUrl) {
         showConnectToast(payload?.message || 'Não foi possível iniciar o checkout.', 'error')
         return
       }
+      if (payload.qrCode) {
+        showConnectToast('Fluxo de cartão indisponível. Tente novamente.', 'error')
+        return
+      }
       window.location.href = payload.checkoutUrl
     } catch {
       showConnectToast('Erro ao processar pagamento.', 'error')
+    } finally {
+      setProcessando(null)
+    }
+  }
+
+  async function iniciarPix(tier: PlanoTier) {
+    setProcessando(`${tier}_mensal_pix`)
+    try {
+      const token = await obterTokenOuRedirect(tier, 'mensal', 'pix')
+      if (!token) return
+
+      const res = await fetch('/api/mercado-pago/pix', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tier, recorrencia: 'mensal' }),
+      })
+      const payload = await res.json().catch(() => null)
+      if (!res.ok || !payload?.qrCode) {
+        showConnectToast(payload?.message || 'Não foi possível gerar o PIX.', 'error')
+        return
+      }
+
+      if (payload.aprovado) {
+        showConnectToast('Pagamento já confirmado!', 'success')
+        await atualizar()
+        return
+      }
+
+      setPixDados({
+        pagamentoId: payload.pagamentoId,
+        paymentId: payload.paymentId,
+        qrCode: payload.qrCode,
+        qrCodeBase64: payload.qrCodeBase64,
+        valor: Number(payload.valor || 0),
+        tier: payload.tier || tier,
+      })
+      setPixAberto(true)
+    } catch {
+      showConnectToast('Erro ao gerar PIX.', 'error')
     } finally {
       setProcessando(null)
     }
@@ -190,6 +269,8 @@ export default function AssinaturaPage() {
       ? Math.min(100, Math.round((snapshot.documentosUsados / snapshot.limiteDocumentos) * 100))
       : 0
 
+  const rotuloCartao = snapshot?.emTrial ? 'Assinar no cartão' : 'Renovar com cartão'
+
   if (loading) return <ConnectLoading label="Carregando assinatura..." />
 
   return (
@@ -226,8 +307,11 @@ export default function AssinaturaPage() {
         </div>
 
         <div style={{ marginTop: 18, display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-          <button type="button" onClick={() => void iniciarCheckout(tierAtual, 'mensal')} disabled={!!processando} style={btnAcao('#fff', '#0f172a')}>
-            {processando?.includes(tierAtual) ? 'Abrindo checkout...' : 'Renovar plano'}
+          <button type="button" onClick={() => void iniciarCheckoutCartao(tierAtual, 'mensal')} disabled={!!processando} style={btnAcao('#fff', '#0f172a')}>
+            {processando === `${tierAtual}_mensal_cartao` ? 'Abrindo checkout...' : rotuloCartao}
+          </button>
+          <button type="button" onClick={() => void iniciarPix(tierAtual)} disabled={!!processando} style={btnAcao('#22c55e', '#fff')}>
+            {processando === `${tierAtual}_mensal_pix` ? 'Gerando PIX...' : 'Pagar com PIX'}
           </button>
           <Link href="/planos" style={{ ...btnAcao('rgba(255,255,255,.12)', '#fff'), textDecoration: 'none', border: '1px solid rgba(255,255,255,.35)' }}>
             Comparar e trocar plano
@@ -253,7 +337,7 @@ export default function AssinaturaPage() {
         <section style={{ marginTop: 20, borderRadius: 20, padding: 20, background: '#fff', border: '1px solid #e2e8f0', boxShadow: '0 12px 30px rgba(15,23,42,.06)' }}>
           <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 950, color: '#0f172a' }}>Assinar ou trocar plano</h2>
           <p style={{ margin: '0 0 14px', color: '#64748b', fontWeight: 700, fontSize: 14 }}>
-            Checkout Mercado Pago · mensal com renovação automática quando disponível.
+            Cartão: renovação automática no Mercado Pago. PIX: pagamento mensal avulso — 30 dias de acesso após confirmação.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
             {(Object.keys(PLANOS_CATALOGO) as Array<keyof typeof PLANOS_CATALOGO>).map((key) => {
@@ -264,11 +348,29 @@ export default function AssinaturaPage() {
                   <div style={{ fontWeight: 950, fontSize: 16 }}>{plano.nome}</div>
                   <div style={{ fontSize: 13, color: '#64748b', fontWeight: 700, margin: '6px 0 10px' }}>{formatarPreco(plano.precos.mensal)}/mês</div>
                   <div style={{ display: 'grid', gap: 6 }}>
-                    <button type="button" disabled={!!processando} onClick={() => void iniciarCheckout(key, 'mensal')} style={btnStyle(processando === `${key}_mensal`)}>
-                      {processando === `${key}_mensal` ? 'Abrindo...' : 'Mensal'}
+                    <button
+                      type="button"
+                      disabled={!!processando}
+                      onClick={() => void iniciarCheckoutCartao(key, 'mensal')}
+                      style={btnStyle(processando === `${key}_mensal_cartao`)}
+                    >
+                      {processando === `${key}_mensal_cartao` ? 'Abrindo...' : 'Assinar no cartão (mensal)'}
                     </button>
-                    <button type="button" disabled={!!processando} onClick={() => void iniciarCheckout(key, 'anual')} style={{ ...btnStyle(processando === `${key}_anual`), background: '#0f172a' }}>
-                      {processando === `${key}_anual` ? 'Abrindo...' : `Anual ${formatarPreco(plano.precos.anual)}`}
+                    <button
+                      type="button"
+                      disabled={!!processando}
+                      onClick={() => void iniciarPix(key)}
+                      style={{ ...btnStyle(processando === `${key}_mensal_pix`), background: '#16a34a' }}
+                    >
+                      {processando === `${key}_mensal_pix` ? 'Gerando...' : 'Pagar com PIX'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!!processando}
+                      onClick={() => void iniciarCheckoutCartao(key, 'anual')}
+                      style={{ ...btnStyle(processando === `${key}_anual_cartao`), background: '#0f172a' }}
+                    >
+                      {processando === `${key}_anual_cartao` ? 'Abrindo...' : `Anual ${formatarPreco(plano.precos.anual)}`}
                     </button>
                   </div>
                 </div>
@@ -307,6 +409,16 @@ export default function AssinaturaPage() {
           </div>
         )}
       </section>
+
+      <PixPagamentoPanel
+        aberto={pixAberto}
+        dados={pixDados}
+        onFechar={() => setPixAberto(false)}
+        onAprovado={() => {
+          void atualizar()
+          router.replace('/assinatura?pagamento=aprovado')
+        }}
+      />
     </div>
   )
 }

@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
-import { abrirWhatsappUrl } from '@/lib/abrirExterno'
+import { abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
+import {
+  abrirPdfReciboRenovacao,
+  montarMensagemWhatsappReciboRenovacao,
+  prepararLinkPublicoReciboRenovacao,
+  reciboRenovacaoParaEmitido,
+} from '@/lib/reciboRenovacaoFlow'
+import { normalizarTelefoneWhatsapp } from '@/lib/recibo-publico'
 import {
   formatarDataBr,
   formatarMoedaBr,
@@ -177,6 +184,10 @@ const btnCancelSmStyle: CSSProperties = {
 export default function ModalRenovacaoManual({ aberto, cliente, processando, onFechar, onConfirmar, resultado }: Props) {
   const reciboRef = useRef<HTMLDivElement>(null)
   const [mounted, setMounted] = useState(false)
+  const [linkPublicoRecibo, setLinkPublicoRecibo] = useState('')
+  const [preparandoRecibo, setPreparandoRecibo] = useState(false)
+  const [erroRecibo, setErroRecibo] = useState('')
+  const [pdfBloqueado, setPdfBloqueado] = useState(false)
   const [form, setForm] = useState<FormRenovacao>({
     plano_tier: 'starter',
     valor_pago: '49,90',
@@ -211,25 +222,93 @@ export default function ModalRenovacaoManual({ aberto, cliente, processando, onF
     }
   }, [form.plano_tier, aberto])
 
+  useEffect(() => {
+    if (!resultado?.recibo) {
+      setLinkPublicoRecibo('')
+      setErroRecibo('')
+      setPdfBloqueado(false)
+      return
+    }
+    let vivo = true
+    setPreparandoRecibo(true)
+    setErroRecibo('')
+    const dadosEmitidos = reciboRenovacaoParaEmitido(resultado.recibo, {
+      telefoneCliente: cliente?.telefone,
+    })
+    void prepararLinkPublicoReciboRenovacao(dadosEmitidos)
+      .then((link) => {
+        if (vivo) setLinkPublicoRecibo(link)
+      })
+      .catch((err) => {
+        console.error('[RECIBO_RENOVACAO] falha ao publicar recibo:', err)
+        if (vivo) setErroRecibo('Não foi possível salvar o link público. PDF e visualização local ainda funcionam.')
+      })
+      .finally(() => {
+        if (vivo) setPreparandoRecibo(false)
+      })
+    return () => {
+      vivo = false
+    }
+  }, [resultado?.recibo?.numero, cliente?.id])
+
   if (!mounted || !aberto || !cliente) return null
 
-  function imprimirRecibo() {
-    if (!reciboRef.current) return
-    const html = reciboRef.current.innerHTML
-    const janela = window.open('', '_blank', 'noopener,noreferrer')
-    if (!janela) return
-    janela.document.write(`<!DOCTYPE html><html><head><title>Recibo renovação</title><style>
-      body{font-family:system-ui,sans-serif;padding:24px;color:#1e293b;background:#fff}
-      h1{font-size:22px;margin:0 0 8px;color:#0f172a;font-weight:900}
-      .muted{color:#475569;font-size:13px}
-      table{width:100%;border-collapse:collapse;margin-top:16px}
-      td{padding:8px 0;border-bottom:1px solid #e2e8f0;font-size:14px;color:#1e293b}
-      td:first-child{font-weight:800;width:38%;color:#475569}
-      .ok{color:#166534;font-weight:900;margin-top:16px}
-    </style></head><body>${html}</body></html>`)
-    janela.document.close()
-    janela.focus()
-    janela.print()
+  function dadosEmitidosAtual() {
+    if (!resultado?.recibo) return null
+    return reciboRenovacaoParaEmitido(resultado.recibo, {
+      telefoneCliente: cliente?.telefone,
+    })
+  }
+
+  function abrirPdfRecibo() {
+    const dados = dadosEmitidosAtual()
+    if (!dados) {
+      setErroRecibo('Recibo não encontrado ou dados incompletos.')
+      return
+    }
+    const ok = abrirPdfReciboRenovacao(dados)
+    if (!ok) {
+      setPdfBloqueado(true)
+      setErroRecibo('Pop-up bloqueado. Use "Visualizar recibo" ou libere pop-ups e tente de novo.')
+      console.warn('[RECIBO_RENOVACAO] PDF bloqueado pelo navegador')
+      return
+    }
+    setPdfBloqueado(false)
+  }
+
+  async function visualizarRecibo() {
+    const dados = dadosEmitidosAtual()
+    if (!dados) {
+      setErroRecibo('Recibo não encontrado ou dados incompletos.')
+      return
+    }
+    setPreparandoRecibo(true)
+    setErroRecibo('')
+    try {
+      const link = linkPublicoRecibo || (await prepararLinkPublicoReciboRenovacao(dados))
+      setLinkPublicoRecibo(link)
+      const abriu = window.open(link, '_blank', 'noopener,noreferrer')
+      if (!abriu) {
+        setErroRecibo('Pop-up bloqueado. Copie o link abaixo ou toque em "Abrir recibo".')
+      }
+    } catch (err) {
+      console.error('[RECIBO_RENOVACAO] visualizar:', err)
+      setErroRecibo('Não foi possível abrir o recibo. Tente baixar o PDF.')
+    } finally {
+      setPreparandoRecibo(false)
+    }
+  }
+
+  function enviarWhatsappRecibo() {
+    if (!resultado?.recibo) return
+    const msg = montarMensagemWhatsappReciboRenovacao(resultado.recibo, linkPublicoRecibo)
+    const tel = normalizarTelefoneWhatsapp(cliente.telefone)
+    if (!tel) {
+      alert('Cliente sem telefone cadastrado. Copie a mensagem e envie manualmente.')
+      return
+    }
+    const url = montarUrlWhatsapp(tel, msg)
+    abrirWhatsappUrl(url)
   }
 
   const ui = (
@@ -391,6 +470,12 @@ export default function ModalRenovacaoManual({ aberto, cliente, processando, onF
                   </tr>
                   <tr>
                     <td className="crm-recibo-label" style={{ padding: '8px 0', borderBottom: '1px solid #e2e8f0', fontWeight: 800, color: '#475569' }}>
+                      Telefone
+                    </td>
+                    <td style={{ padding: '8px 0', borderBottom: '1px solid #e2e8f0', color: '#1e293b' }}>{cliente.telefone || '—'}</td>
+                  </tr>
+                  <tr>
+                    <td className="crm-recibo-label" style={{ padding: '8px 0', borderBottom: '1px solid #e2e8f0', fontWeight: 800, color: '#475569' }}>
                       Plano
                     </td>
                     <td style={{ padding: '8px 0', borderBottom: '1px solid #e2e8f0', color: '#1e293b' }}>{resultado.recibo.plano}</td>
@@ -426,17 +511,37 @@ export default function ModalRenovacaoManual({ aberto, cliente, processando, onF
                 </tbody>
               </table>
             </div>
+            {preparandoRecibo ? (
+              <p className="crm-muted" style={{ marginTop: 12, fontSize: 13, color: '#64748b' }}>
+                Preparando recibo e link público…
+              </p>
+            ) : null}
+            {erroRecibo ? (
+              <p style={{ marginTop: 12, fontSize: 13, color: '#b45309', fontWeight: 800 }}>{erroRecibo}</p>
+            ) : null}
+            {linkPublicoRecibo ? (
+              <p style={{ marginTop: 10, fontSize: 12, color: '#475569', wordBreak: 'break-all' }}>
+                Link:{' '}
+                <a href={linkPublicoRecibo} target="_blank" rel="noopener noreferrer">
+                  {linkPublicoRecibo}
+                </a>
+              </p>
+            ) : null}
             <textarea
               readOnly
               className="crm-input"
-              value={resultado.mensagemWhatsapp}
+              value={montarMensagemWhatsappReciboRenovacao(resultado.recibo, linkPublicoRecibo) || resultado.mensagemWhatsapp}
               style={{ ...inputStyle, minHeight: 100, marginTop: 14, width: '100%' }}
             />
             <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="crm-btn-cancel"
-                onClick={() => void navigator.clipboard.writeText(resultado.mensagemWhatsapp).then(() => alert('Mensagem copiada.'))}
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(montarMensagemWhatsappReciboRenovacao(resultado.recibo, linkPublicoRecibo) || resultado.mensagemWhatsapp)
+                    .then(() => alert('Mensagem copiada.'))
+                }
                 style={btnCancelSmStyle}
               >
                 Copiar mensagem
@@ -444,17 +549,33 @@ export default function ModalRenovacaoManual({ aberto, cliente, processando, onF
               <button
                 type="button"
                 className="crm-btn-whatsapp"
-                onClick={() => {
-                  if (resultado.whatsappUrl) abrirWhatsappUrl(resultado.whatsappUrl)
-                  else alert('Cliente sem telefone cadastrado.')
-                }}
+                onClick={enviarWhatsappRecibo}
                 style={{ padding: '9px 14px', borderRadius: 10, border: 'none', background: '#22c55e', color: '#ffffff', fontWeight: 900, cursor: 'pointer' }}
               >
                 Enviar WhatsApp
               </button>
-              <button type="button" className="crm-btn-cancel" onClick={imprimirRecibo} style={btnCancelSmStyle}>
-                Baixar / Imprimir recibo
+              <button
+                type="button"
+                className="crm-btn-cancel"
+                onClick={() => void visualizarRecibo()}
+                disabled={preparandoRecibo}
+                style={btnCancelSmStyle}
+              >
+                Visualizar recibo
               </button>
+              <button type="button" className="crm-btn-cancel" onClick={abrirPdfRecibo} style={btnCancelSmStyle}>
+                Baixar / Imprimir PDF
+              </button>
+              {pdfBloqueado && linkPublicoRecibo ? (
+                <button
+                  type="button"
+                  className="crm-btn-cancel"
+                  onClick={() => window.open(linkPublicoRecibo, '_blank', 'noopener,noreferrer')}
+                  style={btnCancelSmStyle}
+                >
+                  Abrir recibo (link)
+                </button>
+              ) : null}
               <button type="button" className="crm-btn-cancel" onClick={onFechar} style={btnCancelSmStyle}>
                 Fechar
               </button>

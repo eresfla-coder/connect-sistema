@@ -83,13 +83,17 @@ export default function ConnectAIPage() {
   const [dados, setDados] = useState({ orcamentos: [] as any[], os: [] as any[], financeiro: [] as any[], clientes: [] as any[], produtos: [] as any[] })
 
   useEffect(() => {
-    setDados({
-      orcamentos: lerLista(ORCAMENTOS_KEY),
-      os: lerLista(OS_KEY),
-      financeiro: lerLista(FINANCEIRO_KEY),
-      clientes: lerLista(CLIENTES_KEY),
-      produtos: lerLista(PRODUTOS_KEY),
-    })
+    void (async () => {
+      const { lerLocalStorageUsuario, obterUserIdPainel } = await import('@/lib/connect-user-storage')
+      const userId = await obterUserIdPainel()
+      setDados({
+        orcamentos: lerLista(ORCAMENTOS_KEY),
+        os: lerLista(OS_KEY),
+        financeiro: lerLista(FINANCEIRO_KEY),
+        clientes: lerLista(CLIENTES_KEY),
+        produtos: lerLocalStorageUsuario(PRODUTOS_KEY, userId, []),
+      })
+    })()
     setHistorico(lerLista<HistoricoIA>(AI_HISTORY_KEY).slice(0, 12))
   }, [])
 

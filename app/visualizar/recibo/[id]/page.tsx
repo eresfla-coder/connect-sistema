@@ -91,7 +91,30 @@ function ReciboPublicoInner() {
   if (erro || !dados) {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'linear-gradient(180deg,#f4f7fb 0%,#eaf1fb 100%)', padding: 24, textAlign: 'center' }}>
-        <div style={{ maxWidth: 420, color: '#334155', fontSize: 16, lineHeight: 1.5, fontWeight: 600 }}>{erro || 'Recibo não encontrado.'}</div>
+        <div style={{ maxWidth: 420 }}>
+          <div style={{ color: '#334155', fontSize: 16, lineHeight: 1.5, fontWeight: 600, marginBottom: 16 }}>
+            {erro || 'Recibo não encontrado ou dados incompletos.'}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.history.length > 1) window.history.back()
+              else window.location.href = '/'
+            }}
+            style={{
+              height: 40,
+              padding: '0 18px',
+              borderRadius: 10,
+              border: '1px solid #cbd5e1',
+              background: '#fff',
+              color: '#0f172a',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            Voltar
+          </button>
+        </div>
       </div>
     )
   }

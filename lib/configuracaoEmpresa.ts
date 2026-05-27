@@ -51,12 +51,24 @@ const LOCAL_KEY = 'connect_configuracoes'
 // HELPERS DE SERIALIZAÇÃO
 // ============================
 
+function telefoneWhatsappDeRow(row: Record<string, unknown>) {
+  const telefone = String(row.telefone || '').trim()
+  const whatsapp = String(row.whatsapp_empresa || row.whatsapp || '').trim()
+  const legadoCelular = String(row.celular_empresa || '').trim()
+  return {
+    telefone: telefone || whatsapp || legadoCelular,
+    whatsapp: whatsapp || telefone || legadoCelular,
+    celular: legadoCelular || whatsapp || telefone,
+  }
+}
+
 function dbToApp(row: any): ConfiguracaoEmpresa {
+  const contatos = telefoneWhatsappDeRow(row || {})
   return {
     nomeEmpresa: row.nome_empresa || CONFIG_PADRAO.nomeEmpresa,
-    telefone: row.telefone || '',
-    celularEmpresa: row.celular_empresa || '',
-    whatsappEmpresa: row.whatsapp_empresa || '',
+    telefone: contatos.telefone,
+    celularEmpresa: contatos.celular,
+    whatsappEmpresa: contatos.whatsapp,
     email: row.email || '',
     endereco: row.endereco || '',
     cidadeUf: row.cidade_uf || '',
@@ -74,11 +86,14 @@ function dbToApp(row: any): ConfiguracaoEmpresa {
 }
 
 function appToDb(cfg: ConfiguracaoEmpresa): Record<string, any> {
+  const celular = String(cfg.celularEmpresa || '').trim()
+  const telefone = String(cfg.telefone || '').trim() || celular
+  const whatsapp = String(cfg.whatsappEmpresa || '').trim() || celular || telefone
+
   return {
     nome_empresa: cfg.nomeEmpresa,
-    telefone: cfg.telefone,
-    celular_empresa: cfg.celularEmpresa,
-    whatsapp_empresa: cfg.whatsappEmpresa,
+    telefone,
+    whatsapp_empresa: whatsapp,
     email: cfg.email,
     endereco: cfg.endereco,
     cidade_uf: cfg.cidadeUf,

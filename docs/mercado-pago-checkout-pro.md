@@ -29,13 +29,22 @@ Se `MERCADO_PAGO_WEBHOOK_SECRET` estiver configurado, o webhook valida os header
 
 ## Fluxo implementado
 
-1. O cliente escolhe `Mensal` ou `Anual` em `/planos`.
-2. O Connect chama `/api/pagamentos/checkout`.
+### Cartão (recorrente ou Checkout Pro)
+
+1. O cliente escolhe plano em `/assinatura` ou `/planos`.
+2. **Assinar no cartão** chama `POST /api/pagamentos/checkout`.
 3. A API cria um registro pendente em `pagamentos`.
-4. A API cria a preferência no Mercado Pago Checkout Pro.
-5. O cliente é redirecionado para o link oficial do Mercado Pago.
-6. O webhook consulta o pagamento no Mercado Pago usando `MERCADO_PAGO_ACCESS_TOKEN`.
-7. Se aprovado, o webhook atualiza `pagamentos`, `assinaturas` e libera o acesso em `perfis`.
+4. Mensal: assinatura recorrente (preapproval). Anual: Checkout Pro.
+5. O cliente é redirecionado para o Mercado Pago.
+6. O webhook processa `payment` ou `preapproval`.
+7. Se aprovado, atualiza `pagamentos`, `assinaturas` e `perfis`.
+
+### PIX mensal (avulso)
+
+1. **Pagar com PIX** chama `POST /api/mercado-pago/pix`.
+2. A API cria pagamento com `payment_method_id: pix` e exibe QR Code na tela.
+3. O webhook `payment` com `metadata.tipo = pix` ativa o plano por **30 dias** sem renovação automática.
+4. O cliente pode consultar status com `GET /api/mercado-pago/pix?pagamentoId=...`.
 
 ## Observação de segurança
 

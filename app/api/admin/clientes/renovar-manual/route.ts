@@ -163,7 +163,7 @@ export async function POST(req: Request) {
       await supabaseAdmin.from('pagamentos').insert({
         user_id: userId,
         valor: valorPago,
-        status: 'aprovado',
+        status: 'pago',
         forma_pagamento: formaPagamento,
         data_pagamento: dataPagamentoIso,
         gateway: 'manual',

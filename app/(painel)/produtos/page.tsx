@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { CalculadoraPrecoM2Modal } from '@/components/produtos/CalculadoraPrecoM2Modal'
 import { ProdutosFabMenu } from '@/components/produtos/ProdutosFabMenu'
+import {
+  lerLocalStorageUsuario,
+  obterUserIdPainel,
+  salvarLocalStorageUsuario,
+} from '@/lib/connect-user-storage'
 
 type Categoria = { id: number; nome: string; ativa: boolean }
 type TipoCalculoProduto = 'unidade' | 'm2' | 'peso'
@@ -143,6 +148,7 @@ function calcularPrecoInteligente(custo: number, impostoPct: number, taxaCartaoP
 
 export default function ProdutosPage() {
   const [isMobile, setIsMobile] = useState(false)
+  const [userIdPainel, setUserIdPainel] = useState<string | null>(null)
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [produtos, setProdutos] = useState<Produto[]>([])
   const [salvando, setSalvando] = useState(false)
@@ -174,18 +180,26 @@ export default function ProdutosPage() {
   }, [])
 
   useEffect(() => {
-    carregarCategorias()
-    carregarProdutos()
+    let ativo = true
+    obterUserIdPainel().then((id) => {
+      if (!ativo) return
+      setUserIdPainel(id)
+      carregarCategorias(id)
+      carregarProdutos(id)
+    })
+    return () => {
+      ativo = false
+    }
   }, [])
 
-  function carregarCategorias() {
-    const salvo = localStorage.getItem(CATEGORIAS_KEY)
+  function carregarCategorias(userId?: string | null) {
+    const salvo = lerLocalStorageUsuario<Categoria[] | null>(CATEGORIAS_KEY, userId ?? userIdPainel, null)
     if (!salvo) {
       setCategorias(categoriasPadrao)
       return
     }
     try {
-      const lista = JSON.parse(salvo)
+      const lista = salvo
       const normalizadas: Categoria[] = Array.isArray(lista)
         ? lista
             .map((item: any, index: number) => typeof item === 'string'
@@ -233,23 +247,14 @@ export default function ProdutosPage() {
     }
   }
 
-  function carregarProdutos() {
-    const salvo = localStorage.getItem(PRODUTOS_KEY)
-    if (!salvo) {
-      setProdutos([])
-      return
-    }
-    try {
-      const lista = JSON.parse(salvo)
-      setProdutos(Array.isArray(lista) ? lista.map(enriquecerProduto) : [])
-    } catch {
-      setProdutos([])
-    }
+  function carregarProdutos(userId?: string | null) {
+    const lista = lerLocalStorageUsuario<Produto[]>(PRODUTOS_KEY, userId ?? userIdPainel, [])
+    setProdutos(Array.isArray(lista) ? lista.map(enriquecerProduto) : [])
   }
 
   function salvarListaProdutos(lista: Produto[]) {
     setProdutos(lista)
-    localStorage.setItem(PRODUTOS_KEY, JSON.stringify(lista))
+    salvarLocalStorageUsuario(PRODUTOS_KEY, userIdPainel, lista)
   }
 
   function limparFormulario() {

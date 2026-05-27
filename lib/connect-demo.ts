@@ -1,5 +1,6 @@
 export const DEMO_FLAG_KEY = 'connect_demo_ativo'
 export const DEMO_SEEDED_KEY = 'connect_demo_seeded_v94'
+export const REAL_SESSION_KEY = 'connect_real_session'
 
 const hoje = new Date()
 const iso = (dias = 0) => {
@@ -8,8 +9,35 @@ const iso = (dias = 0) => {
   return data.toISOString().split('T')[0]
 }
 
+export function marcarSessaoReal() {
+  if (typeof window === 'undefined') return
+  window.sessionStorage.setItem(REAL_SESSION_KEY, 'sim')
+  window.localStorage.setItem(REAL_SESSION_KEY, 'sim')
+}
+
+export function limparSessaoReal() {
+  if (typeof window === 'undefined') return
+  window.sessionStorage.removeItem(REAL_SESSION_KEY)
+  window.localStorage.removeItem(REAL_SESSION_KEY)
+}
+
+export function temSessaoRealMarcada() {
+  if (typeof window === 'undefined') return false
+  return (
+    window.sessionStorage.getItem(REAL_SESSION_KEY) === 'sim' ||
+    window.localStorage.getItem(REAL_SESSION_KEY) === 'sim'
+  )
+}
+
+export function isRotaDemoExplicita() {
+  if (typeof window === 'undefined') return false
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === 'true') return true
+  return window.location.pathname.startsWith('/demo')
+}
+
 export function seedDemoData(force = false) {
   if (typeof window === 'undefined') return
+  if (temSessaoRealMarcada()) return
   if (!force && window.localStorage.getItem(DEMO_SEEDED_KEY) === 'sim') return
 
   const clientes = [
@@ -59,11 +87,6 @@ export function resetDemoData() {
   seedDemoData(true)
 }
 
-export function isDemoMode() {
-  if (typeof window === 'undefined') return false
-  return window.localStorage.getItem(DEMO_FLAG_KEY) === 'sim'
-}
-
 export function sairDemoMode() {
   if (typeof window === 'undefined') return
   window.localStorage.removeItem(DEMO_FLAG_KEY)
@@ -71,6 +94,24 @@ export function sairDemoMode() {
   window.sessionStorage.removeItem('connect_trial_notice')
 }
 
+/** Modo demo só quando não há sessão real e o usuário entrou explicitamente na demo. */
+export function isDemoMode() {
+  if (typeof window === 'undefined') return false
+  if (temSessaoRealMarcada()) return false
+
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === 'true') return true
+  if (window.location.pathname.startsWith('/demo')) return true
+
+  const flagDemo = window.localStorage.getItem(DEMO_FLAG_KEY) === 'sim'
+  const demoSeeded = window.localStorage.getItem(DEMO_SEEDED_KEY) === 'sim'
+  return flagDemo && demoSeeded
+}
+
+export function ativarModoDemo() {
+  if (typeof window === 'undefined') return
+  limparSessaoReal()
+  seedDemoData(true)
+}
 
 export const DEMO_BLOCKED_ACTION_MESSAGE =
   'Modo demonstração: esta ação é bloqueada para segurança. Crie uma conta grátis de 7 dias para salvar, enviar WhatsApp e gerar links reais.'
@@ -78,6 +119,30 @@ export const DEMO_BLOCKED_ACTION_MESSAGE =
 export function avisoDemoBloqueado() {
   if (typeof window === 'undefined') return
   window.alert(DEMO_BLOCKED_ACTION_MESSAGE)
+}
+
+export function logContextoAcessoSeguro(ctx: {
+  userId?: string | null
+  email?: string | null
+  isDemo?: boolean
+  isTrial?: boolean
+  isAdmin?: boolean
+  perfilStatus?: string | null
+}) {
+  if (typeof window === 'undefined') return
+  const email = String(ctx.email || '').trim()
+  const emailMascarado = email
+    ? email.replace(/^(.{2}).+(@.+)$/, '$1***$2')
+    : null
+
+  console.info('[Connect Acesso]', {
+    userId: ctx.userId || null,
+    email: emailMascarado,
+    isDemo: !!ctx.isDemo,
+    isTrial: !!ctx.isTrial,
+    isAdmin: !!ctx.isAdmin,
+    perfilStatus: ctx.perfilStatus || null,
+  })
 }
 
 function textoDoElemento(element: Element | null) {

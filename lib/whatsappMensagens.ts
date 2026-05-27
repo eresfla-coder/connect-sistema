@@ -16,6 +16,23 @@ export function rotuloDocumentoWhatsapp(tipo?: string | null): string {
   return String(tipo || '').toLowerCase() === 'proposta_comercial' ? 'proposta comercial' : 'orçamento'
 }
 
+export function mensagemOrcamentoAprovadoParaEmpresa(params: {
+  numero: string
+  nomeCliente?: string | null
+  totalFormatado: string
+}) {
+  const numero = String(params.numero || '').trim() || '—'
+  const cliente = String(params.nomeCliente || 'cliente').trim() || 'cliente'
+  const valor = String(params.totalFormatado || '').trim() || '—'
+
+  return [
+    `Olá, acabei de aprovar o orçamento Nº ${numero}.`,
+    `Cliente: ${cliente}`,
+    `Valor: ${valor}`,
+    'Pode seguir com os próximos passos.',
+  ].join('\n')
+}
+
 export function mensagemDocumentoComercial(params: {
   nomeEmpresa?: string
   nomeCliente?: string | null

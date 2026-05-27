@@ -42,6 +42,7 @@ async function criarCheckoutRecorrente(params: {
         currency_id: 'BRL',
       },
       back_url: `${baseUrl}/assinatura?checkout=ok`,
+      notification_url: `${baseUrl}/api/webhooks/mercado-pago`,
       status: 'pending',
     }),
   })
@@ -127,18 +128,19 @@ export async function POST(request: NextRequest) {
 
     const { data: pagamentoPendente } = await supabase
       .from('pagamentos')
-      .select('id,gateway_url,checkout_url,created_at')
+      .select('id,gateway_url,checkout_url,created_at,metodo')
       .eq('user_id', user.id)
       .eq('status', 'pendente')
       .eq('valor', valor)
       .eq('plano', planoChave)
+      .eq('metodo', 'mercado_pago')
       .gte('created_at', criadoDepoisDe)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
     const checkoutPendente = pagamentoPendente?.checkout_url || pagamentoPendente?.gateway_url
-    if (checkoutPendente) {
+    if (checkoutPendente && checkoutPendente.includes('mercadopago')) {
       return NextResponse.json({
         ok: true,
         checkoutUrl: checkoutPendente,

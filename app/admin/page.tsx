@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
+import { createPortal } from 'react-dom'
 import { supabase } from '@/lib/supabase-browser'
 import { isAdminMaster } from '@/lib/access'
 import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetricas'
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
-import { abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
+import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
 
 type FiltroStatus = 'todos' | 'trial' | 'ativo' | 'bloqueado' | 'vencidos' | 'risco'
@@ -19,6 +20,7 @@ type PerfilAdmin = {
   ativo: boolean | null
   vencimento: string | null
   status: string | null
+  plano_tier?: string | null
   data_criacao?: string | null
   valor_plano?: number | null
   telefone?: string | null
@@ -56,6 +58,7 @@ type EditForm = {
   telefone: string
   valor_plano: string
   status: string
+  plano_tier: string
   vencimento: string
   sistema_cliente: string
   observacoes: string
@@ -73,6 +76,12 @@ type UsoSistema = {
 type MetaCliente = {
   sistema_cliente?: string
   observacoes?: string
+}
+
+type DesktopActionMenuState = {
+  cliente: PerfilAdmin
+  top: number
+  left: number
 }
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://connect-sistema-teste.vercel.app').replace(/\/$/, '')
@@ -133,13 +142,50 @@ function prazoColor(profile: PerfilAdmin): string {
   return '#22c55e'
 }
 
+function linksWhatsappFallback(url: string) {
+  try {
+    const parsed = new URL(String(url || '').trim())
+    let phone = ''
+    let text = ''
+
+    if (parsed.hostname.includes('wa.me')) {
+      phone = parsed.pathname.replace(/\//g, '').replace(/\D/g, '')
+      text = parsed.searchParams.get('text') || ''
+      const textoDecodificado = decodeURIComponent(text.replace(/\+/g, ' '))
+      const encoded = encodeURIComponent(textoDecodificado)
+      const principal = phone ? `https://wa.me/${phone}?text=${encoded}` : `https://wa.me/?text=${encoded}`
+      const alternativa = phone
+        ? `https://api.whatsapp.com/send?phone=${phone}&text=${encoded}`
+        : `https://api.whatsapp.com/send?text=${encoded}`
+      return { principal, alternativa }
+    }
+
+    phone = (parsed.searchParams.get('phone') || '').replace(/\D/g, '')
+    text = parsed.searchParams.get('text') || ''
+    const textoDecodificado = decodeURIComponent(text.replace(/\+/g, ' '))
+    const encoded = encodeURIComponent(textoDecodificado)
+    const principal = phone ? `https://wa.me/${phone}?text=${encoded}` : `https://wa.me/?text=${encoded}`
+    const alternativa = phone
+      ? `https://api.whatsapp.com/send?phone=${phone}&text=${encoded}`
+      : `https://api.whatsapp.com/send?text=${encoded}`
+    return { principal, alternativa }
+  } catch {
+    return { principal: String(url || ''), alternativa: String(url || '') }
+  }
+}
+
 function statusColor(status: string | null | undefined): string {
   const s = String(status || '').toLowerCase()
   if (s === 'ativo') return '#22c55e'
-  if (s === 'trial') return '#facc15'
+  if (s === 'trial' || s === 'teste') return '#facc15'
   if (s === 'bloqueado') return '#ef4444'
   if (s === 'vencido') return '#fb7185'
   return '#94a3b8'
+}
+
+function statusTrialAdmin(status?: string | null) {
+  const s = String(status || '').toLowerCase()
+  return s === 'trial' || s === 'teste'
 }
 
 function normalizePhone(value?: string | null) {
@@ -194,7 +240,7 @@ export default function AdminSaasMasterPage() {
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<FiltroStatus>('todos')
   const [aba, setAba] = useState<'clientes' | 'sessoes' | 'metricas'>('clientes')
-  const [acaoId, setAcaoId] = useState<string | null>(null)
+  const [desktopActionMenu, setDesktopActionMenu] = useState<DesktopActionMenuState | null>(null)
   const [acaoProcessandoId, setAcaoProcessandoId] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -214,6 +260,8 @@ export default function AdminSaasMasterPage() {
   } | null>(null)
   const [isMobileAdmin, setIsMobileAdmin] = useState(false)
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
+  const [acaoClienteMobile, setAcaoClienteMobile] = useState<PerfilAdmin | null>(null)
+  const [whatsFallbackUrl, setWhatsFallbackUrl] = useState('')
   const [novoCliente, setNovoCliente] = useState<NovoClienteForm>({
     email: '',
     nome_empresa: '',
@@ -231,10 +279,24 @@ export default function AdminSaasMasterPage() {
   }, [])
 
   useEffect(() => {
+    const aoFallback = (event: Event) => {
+      const custom = event as CustomEvent<{ url?: string }>
+      const url = String(custom?.detail?.url || '')
+      if (url) setWhatsFallbackUrl(url)
+    }
+    window.addEventListener(WHATSAPP_FALLBACK_EVENT, aoFallback as EventListener)
+    return () => window.removeEventListener(WHATSAPP_FALLBACK_EVENT, aoFallback as EventListener)
+  }, [])
+
+  useEffect(() => {
     const verificar = () => {
       const mobile = window.innerWidth < 900
       setIsMobileAdmin(mobile)
-      if (!mobile) setMobileDrawerOpen(false)
+      if (!mobile) {
+        setMobileDrawerOpen(false)
+        setAcaoClienteMobile(null)
+      }
+      if (mobile) setDesktopActionMenu(null)
     }
     verificar()
     window.addEventListener('resize', verificar)
@@ -244,7 +306,9 @@ export default function AdminSaasMasterPage() {
   useEffect(() => {
     function fecharMenus(event: MouseEvent) {
       const target = event.target as HTMLElement | null
-      if (!target?.closest('[data-action-menu]')) setAcaoId(null)
+      if (!target?.closest('[data-action-menu]') && !target?.closest('[data-action-popover]')) {
+        setDesktopActionMenu(null)
+      }
     }
     document.addEventListener('mousedown', fecharMenus)
     return () => document.removeEventListener('mousedown', fecharMenus)
@@ -395,8 +459,20 @@ export default function AdminSaasMasterPage() {
     await atualizarCliente(id, {
       status: 'ativo',
       ativo: true,
+      plano_tier: 'starter',
       vencimento: dataMaisDias(dias),
       status_pagamento: 'em_dia',
+      ultimo_pagamento: hojeISO(),
+    })
+  }
+
+  async function marcarComoPago(id: string) {
+    await atualizarCliente(id, {
+      status: 'ativo',
+      ativo: true,
+      plano_tier: 'starter',
+      vencimento: dataMaisDias(30),
+      status_pagamento: 'pago',
       ultimo_pagamento: hojeISO(),
     })
   }
@@ -513,21 +589,33 @@ export default function AdminSaasMasterPage() {
   function cobrarWhatsapp(cliente: PerfilAdmin) {
     const nome = cliente.nome_empresa || cliente.email || 'cliente'
     const sistema = clienteSistema(cliente)
+    const plano = planoCliente(cliente)
+    const risco = riscoCliente(cliente)
+    const statusAtual = String(cliente.status || '').toLowerCase()
+    const atrasado = risco.nivel === 'critico' || statusAtual === 'bloqueado'
+    const linkPagamento = `${SITE_URL}/assinatura`
+    const statusTexto = atrasado ? 'Atrasado' : statusAtual === 'ativo' ? 'Ativo' : (cliente.status || 'Pendente')
     const mensagem = [
       `Olá, ${nome}!`,
       '',
       `Passando para lembrar sobre sua mensalidade do ${sistema}.`,
-      `Plano: ${planoCliente(cliente).nome}`,
+      `Plano: ${plano.nome}`,
       `Valor: ${toMoney(cliente.valor_plano || 0)}`,
       `Vencimento: ${cliente.vencimento || '-'}`,
-      `Status: ${cliente.status || '-'}`,
+      `Status: ${statusTexto}`,
+      `Link de pagamento/assinatura: ${linkPagamento}`,
       '',
-      'Para manter o acesso e o suporte em dia, me chama por aqui para regularizar.',
+      atrasado
+        ? 'Seu acesso pode ser bloqueado por atraso. Me chama aqui para regularizar agora.'
+        : 'Para manter o acesso e o suporte em dia, me chama por aqui para regularizar.',
       '',
       '— Connect Sistema',
     ].join('\n')
 
-    abrirWhatsappUrl(montarUrlWhatsapp(whatsappDestino(cliente.telefone), mensagem))
+    const resultado = abrirWhatsappUrl(montarUrlWhatsapp(whatsappDestino(cliente.telefone), mensagem))
+    if (resultado.mostrarLink && resultado.url) {
+      setWhatsFallbackUrl(resultado.url)
+    }
   }
 
   function mensagemUpgrade(cliente: PerfilAdmin) {
@@ -648,6 +736,7 @@ export default function AdminSaasMasterPage() {
       telefone: cliente.telefone || '',
       valor_plano: String(cliente.valor_plano ?? '49.90').replace('.', ','),
       status: cliente.status || 'trial',
+      plano_tier: String(cliente.plano_tier || 'starter'),
       vencimento: cliente.vencimento || '',
       sistema_cliente: clienteSistema(cliente),
       observacoes: clienteObs(cliente),
@@ -672,14 +761,23 @@ export default function AdminSaasMasterPage() {
       writeMeta(meta)
       setMetaLocal(meta)
 
+      const statusEdicao = editForm.status
+      const planoTier =
+        statusEdicao === 'ativo'
+          ? (editForm.plano_tier && editForm.plano_tier !== 'trial' ? editForm.plano_tier : 'starter')
+          : editForm.plano_tier
+
       await atualizarCliente(editForm.id, {
         email: editForm.email.trim().toLowerCase(),
         nome_empresa: editForm.nome_empresa.trim() || null,
         telefone: normalizePhone(editForm.telefone) || null,
         valor_plano: parseMoney(editForm.valor_plano),
-        status: editForm.status,
-        ativo: editForm.status !== 'bloqueado',
+        status: statusEdicao,
+        plano_tier: planoTier,
+        ativo: statusEdicao !== 'bloqueado',
         vencimento: editForm.vencimento || null,
+        status_pagamento: statusEdicao === 'ativo' ? 'em_dia' : statusEdicao === 'trial' ? 'trial' : undefined,
+        ultimo_pagamento: statusEdicao === 'ativo' ? hojeISO() : undefined,
         sistema_cliente: editForm.sistema_cliente || 'Connect Sistema',
         observacoes: editForm.observacoes || null,
       })
@@ -784,7 +882,7 @@ export default function AdminSaasMasterPage() {
   const resumo = useMemo(() => {
     const total = clientes.length
     const ativos = clientes.filter((c) => String(c.status || '').toLowerCase() === 'ativo').length
-    const trials = clientes.filter((c) => String(c.status || '').toLowerCase() === 'trial').length
+    const trials = clientes.filter((c) => statusTrialAdmin(c.status)).length
     const bloqueados = clientes.filter((c) => String(c.status || '').toLowerCase() === 'bloqueado' || c.ativo === false).length
     const vencidos = clientes.filter((c) => !isPermanent(c) && (daysUntil(c.vencimento) || 0) < 0).length
     const vencendo7 = clientes.filter((c) => {
@@ -831,7 +929,12 @@ export default function AdminSaasMasterPage() {
       const status = String(c.status || '').toLowerCase()
       const vencido = !isPermanent(c) && (daysUntil(c.vencimento) || 0) < 0
       const risco = riscoCliente(c).nivel !== 'ok'
-      const bateFiltro = filtro === 'todos' || status === filtro || (filtro === 'vencidos' && vencido) || (filtro === 'risco' && risco)
+      const bateFiltro =
+        filtro === 'todos' ||
+        (filtro === 'trial' && statusTrialAdmin(c.status)) ||
+        (filtro !== 'trial' && status === filtro) ||
+        (filtro === 'vencidos' && vencido) ||
+        (filtro === 'risco' && risco)
       return bateBusca && bateFiltro
     })
   }, [clientes, busca, filtro, metaLocal])
@@ -1004,7 +1107,6 @@ export default function AdminSaasMasterPage() {
               {clientesFiltrados.map((cliente) => {
                 const plan = planoCliente(cliente)
                 const risk = riscoCliente(cliente)
-                const loadingAction = acaoProcessandoId === cliente.id
                 const sessao = sessoesMap.get(cliente.id) || sessoesMap.get(String(cliente.email || '').toLowerCase())
 
                 return (
@@ -1025,27 +1127,38 @@ export default function AdminSaasMasterPage() {
 
                     <div style={{ ...styles.rowActions, ...(isMobileAdmin ? styles.rowActionsMobile : {}) }}>
                       <button style={styles.primarySmall} onClick={() => cobrarWhatsapp(cliente)}>Cobrar</button>
-                      <div style={styles.menuWrap} data-action-menu>
-                        <button style={styles.actionSummary} onClick={(e) => { e.stopPropagation(); setAcaoId(acaoId === cliente.id ? null : cliente.id) }}>Ações</button>
-                        {acaoId === cliente.id ? (
-                          <div style={styles.actionMenu}>
-                            <div style={styles.menuHeader}>
-                              <span>Ações rápidas</span>
-                              <button style={styles.menuClose} onClick={() => setAcaoId(null)}>×</button>
-                            </div>
-                            <button style={styles.menuItem} onClick={() => { setAcaoId(null); abrirEdicao(cliente) }}>Editar cliente</button>
-                            <button style={styles.menuItem} disabled={loadingAction} onClick={() => void resetarSenhaCliente(cliente)}>Resetar senha / WhatsApp</button>
-                            <button style={styles.menuItem} disabled={loadingAction} onClick={() => trial7(cliente.id)}>Trial 7 dias</button>
-                            <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => ativar(30, cliente.id)}>Ativar +30 dias</button>
-                            <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => ativar(60, cliente.id)}>Ativar +60 dias</button>
-                            <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => ativar(365, cliente.id)}>Renovar anual</button>
-                            <button style={styles.menuItem} disabled={loadingAction || isPermanent(cliente)} onClick={() => abrirRenovacaoManual(cliente)}>Renovar sistema / Marcar pago</button>
-                            <button style={styles.menuItem} onClick={() => mensagemUpgrade(cliente)}>Oferta upgrade</button>
-                            <button style={styles.menuDanger} disabled={loadingAction || isPermanent(cliente)} onClick={() => { if (confirm('Bloquear este cliente?')) void bloquear(cliente.id) }}>Bloquear</button>
-                            <button style={styles.menuDelete} disabled={loadingAction} onClick={() => void excluirCliente(cliente)}>Excluir cliente</button>
-                          </div>
-                        ) : null}
-                      </div>
+                      {isMobileAdmin ? (
+                        <button
+                          style={styles.actionSummary}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setAcaoClienteMobile(cliente)
+                          }}
+                        >
+                          Ações
+                        </button>
+                      ) : (
+                        <div style={styles.menuWrap} data-action-menu>
+                          <button
+                            style={styles.actionSummary}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                              setDesktopActionMenu((atual) =>
+                                atual?.cliente.id === cliente.id
+                                  ? null
+                                  : {
+                                      cliente,
+                                      top: Math.min(rect.bottom + 8, window.innerHeight - 20),
+                                      left: Math.max(12, Math.min(rect.right - 250, window.innerWidth - 262)),
+                                    }
+                              )
+                            }}
+                          >
+                            Ações
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
@@ -1120,6 +1233,102 @@ export default function AdminSaasMasterPage() {
         )}
       </div>
 
+      {desktopActionMenu && typeof document !== 'undefined'
+        ? createPortal(
+            <div style={styles.desktopActionBackdrop} onClick={() => setDesktopActionMenu(null)}>
+              <div
+                style={{ ...styles.actionMenuPortal, top: desktopActionMenu.top, left: desktopActionMenu.left }}
+                data-action-popover
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div style={styles.menuHeader}>
+                  <span>Ações rápidas</span>
+                  <button style={styles.menuClose} onClick={() => setDesktopActionMenu(null)}>×</button>
+                </div>
+                <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); abrirEdicao(desktopActionMenu.cliente) }}>Editar cliente</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); void resetarSenhaCliente(desktopActionMenu.cliente) }}>Resetar senha / WhatsApp</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); trial7(desktopActionMenu.cliente.id) }}>Trial 7 dias</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); void marcarComoPago(desktopActionMenu.cliente.id) }}>Marcar ativo / pago</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); ativar(30, desktopActionMenu.cliente.id) }}>Ativar +30 dias</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); ativar(60, desktopActionMenu.cliente.id) }}>Ativar +60 dias</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); ativar(365, desktopActionMenu.cliente.id) }}>Renovar anual</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); abrirRenovacaoManual(desktopActionMenu.cliente) }}>Renovar sistema / Marcar pago</button>
+                <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); mensagemUpgrade(desktopActionMenu.cliente) }}>Oferta upgrade</button>
+                <button style={styles.menuDanger} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { if (confirm('Bloquear este cliente?')) { setDesktopActionMenu(null); void bloquear(desktopActionMenu.cliente.id) } }}>Bloquear</button>
+                <button style={styles.menuDelete} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); void excluirCliente(desktopActionMenu.cliente) }}>Excluir cliente</button>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {isMobileAdmin && acaoClienteMobile ? (
+        <div style={styles.mobileActionOverlay} onClick={() => setAcaoClienteMobile(null)}>
+          <div style={styles.mobileActionSheet} onClick={(event) => event.stopPropagation()}>
+            <div style={styles.mobileActionSheetHeader}>
+              <div>
+                <div style={styles.mobileActionTitle}>Ações do cliente</div>
+                <div style={styles.mobileActionSub}>
+                  {acaoClienteMobile.nome_empresa || acaoClienteMobile.email || 'Cliente'}
+                </div>
+              </div>
+              <button style={styles.mobileActionClose} onClick={() => setAcaoClienteMobile(null)}>✕</button>
+            </div>
+
+            <div style={styles.mobileActionScroll}>
+              <div style={styles.mobileActionGroup}>
+                <div style={styles.mobileActionGroupTitle}>Ações principais</div>
+                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); abrirEdicao(acaoClienteMobile) }}>Editar cliente</button>
+                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); cobrarWhatsapp(acaoClienteMobile) }}>Cobrar WhatsApp</button>
+                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); abrirRenovacaoManual(acaoClienteMobile) }}>Renovar sistema / Marcar pago</button>
+                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); void marcarComoPago(acaoClienteMobile.id) }}>Marcar ativo / pago</button>
+              </div>
+
+              <div style={styles.mobileActionGroup}>
+                <div style={styles.mobileActionGroupTitle}>Acesso</div>
+                <button style={styles.mobileActionBtn} disabled={acaoProcessandoId === acaoClienteMobile.id} onClick={() => { setAcaoClienteMobile(null); void resetarSenhaCliente(acaoClienteMobile) }}>Resetar senha / WhatsApp</button>
+                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); trial7(acaoClienteMobile.id) }}>Trial 7 dias</button>
+                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); ativar(30, acaoClienteMobile.id) }}>Ativar +30 dias</button>
+                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); ativar(60, acaoClienteMobile.id) }}>Ativar +60 dias</button>
+                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); ativar(365, acaoClienteMobile.id) }}>Renovar anual</button>
+              </div>
+
+              <div style={styles.mobileActionGroup}>
+                <div style={styles.mobileActionGroupTitle}>Comercial</div>
+                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); mensagemUpgrade(acaoClienteMobile) }}>Oferta upgrade</button>
+              </div>
+
+              <div style={styles.mobileActionDangerWrap}>
+                <button
+                  style={styles.mobileActionDanger}
+                  disabled={isPermanent(acaoClienteMobile)}
+                  onClick={() => {
+                    if (confirm('Bloquear este cliente?')) {
+                      setAcaoClienteMobile(null)
+                      void bloquear(acaoClienteMobile.id)
+                    }
+                  }}
+                >
+                  Bloquear
+                </button>
+                <button style={styles.mobileActionDelete} onClick={() => { setAcaoClienteMobile(null); void excluirCliente(acaoClienteMobile) }}>
+                  Excluir cliente
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {whatsFallbackUrl ? (
+        <div style={styles.whatsFallbackBar}>
+          <span>Não foi possível abrir automaticamente.</span>
+          <a style={styles.whatsFallbackButton} href={linksWhatsappFallback(whatsFallbackUrl).principal} target="_blank" rel="noopener noreferrer">Abrir WhatsApp</a>
+          <a style={styles.whatsFallbackAltButton} href={linksWhatsappFallback(whatsFallbackUrl).alternativa} target="_blank" rel="noopener noreferrer">Abrir alternativa</a>
+          <button style={styles.whatsFallbackClose} onClick={() => setWhatsFallbackUrl('')}>✕</button>
+        </div>
+      ) : null}
+
       {modalOpen && (
         <Modal maxWidth={820} onClose={() => { setModalOpen(false); setInviteLink(''); setInviteText(''); setInvitePhone('') }}>
           <div style={styles.modalTitle}>Novo cliente SaaS</div>
@@ -1192,8 +1401,17 @@ export default function AdminSaasMasterPage() {
               <div style={styles.inputLabel}>Status</div>
               <select style={{ ...styles.input, width: '100%' }} value={editForm.status} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, status: e.target.value }) : prev)}>
                 <option style={styles.selectOption} value="trial">Trial</option>
-                <option style={styles.selectOption} value="ativo">Ativo</option>
+                <option style={styles.selectOption} value="ativo">Ativo / Pago</option>
                 <option style={styles.selectOption} value="bloqueado">Bloqueado</option>
+              </select>
+            </div>
+            <div>
+              <div style={styles.inputLabel}>Plano</div>
+              <select style={{ ...styles.input, width: '100%' }} value={editForm.plano_tier} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, plano_tier: e.target.value }) : prev)}>
+                <option style={styles.selectOption} value="trial">Trial</option>
+                <option style={styles.selectOption} value="starter">Starter</option>
+                <option style={styles.selectOption} value="pro">Pro</option>
+                <option style={styles.selectOption} value="empresa">Empresa</option>
               </select>
             </div>
           </div>
@@ -1364,6 +1582,8 @@ const styles: Record<string, CSSProperties> = {
   menuWrap: { position: 'relative' },
   actionSummary: { height: 38, borderRadius: 999, padding: '0 15px', background: 'rgba(59,130,246,0.18)', border: '1px solid rgba(147,197,253,0.28)', color: '#dbeafe', fontWeight: 950, cursor: 'pointer' },
   actionMenu: { position: 'absolute', right: 0, top: 44, zIndex: 9999, width: 245, borderRadius: 18, padding: 9, background: 'linear-gradient(135deg, rgba(38,50,68,0.98), rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.16)', boxShadow: '0 22px 58px rgba(15,23,42,0.52)', display: 'grid', gap: 6 },
+  desktopActionBackdrop: { position: 'fixed', inset: 0, zIndex: 1650, background: 'transparent' },
+  actionMenuPortal: { position: 'fixed', zIndex: 1660, width: 245, borderRadius: 18, padding: 9, background: 'linear-gradient(135deg, rgba(38,50,68,0.98), rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.16)', boxShadow: '0 22px 58px rgba(15,23,42,0.52)', display: 'grid', gap: 6 },
   menuHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 4px 6px 8px', color: '#bfdbfe', fontSize: 11, fontWeight: 950, textTransform: 'uppercase', letterSpacing: 1 },
   menuClose: { width: 27, height: 27, borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.09)', color: '#fff', fontWeight: 900, cursor: 'pointer' },
   menuItem: { minHeight: 37, borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontWeight: 850, textAlign: 'left', padding: '0 11px', cursor: 'pointer' },
@@ -1429,5 +1649,22 @@ const styles: Record<string, CSSProperties> = {
   clientListMobile: { overflowX: 'visible', gap: 10 },
   clientRowMobile: { minWidth: 0, gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8, padding: 12, borderRadius: 18 },
   rowActionsMobile: { gridColumn: '1 / -1', justifyContent: 'stretch', display: 'grid', gridTemplateColumns: '1fr 1fr', width: '100%' },
+  mobileActionOverlay: { position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.66)', backdropFilter: 'blur(4px)', zIndex: 1600, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: '0 10px max(10px, env(safe-area-inset-bottom))' },
+  mobileActionSheet: { width: '100%', maxWidth: 560, maxHeight: '85dvh', borderRadius: '22px 22px 16px 16px', background: 'linear-gradient(180deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', border: '1px solid rgba(255,255,255,0.16)', boxShadow: '0 -12px 40px rgba(2,6,23,0.55)', overflow: 'hidden' },
+  mobileActionSheetHeader: { position: 'sticky', top: 0, zIndex: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '14px 14px 10px', background: 'rgba(15,23,42,0.9)', borderBottom: '1px solid rgba(255,255,255,0.10)' },
+  mobileActionTitle: { color: '#fff', fontWeight: 950, fontSize: 17 },
+  mobileActionSub: { color: '#cbd5e1', fontSize: 12, marginTop: 2, maxWidth: 250, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  mobileActionClose: { width: 34, height: 34, borderRadius: 999, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontWeight: 900, cursor: 'pointer' },
+  mobileActionScroll: { overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: 12, display: 'grid', gap: 10 },
+  mobileActionGroup: { display: 'grid', gap: 8, padding: 10, borderRadius: 14, border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.04)' },
+  mobileActionGroupTitle: { color: '#93c5fd', fontWeight: 900, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.1 },
+  mobileActionBtn: { minHeight: 38, borderRadius: 11, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(15,23,42,0.58)', color: '#fff', fontSize: 13, fontWeight: 850, textAlign: 'left', padding: '0 12px', cursor: 'pointer' },
+  mobileActionDangerWrap: { display: 'grid', gap: 8, padding: 10, borderRadius: 14, border: '1px solid rgba(248,113,113,0.22)', background: 'rgba(127,29,29,0.14)' },
+  mobileActionDanger: { minHeight: 40, borderRadius: 11, border: '1px solid rgba(248,113,113,0.26)', background: 'rgba(239,68,68,0.24)', color: '#fecaca', fontWeight: 900, textAlign: 'left', padding: '0 12px', cursor: 'pointer' },
+  mobileActionDelete: { minHeight: 40, borderRadius: 11, border: '1px solid rgba(248,113,113,0.45)', background: 'linear-gradient(135deg,rgba(127,29,29,0.92),rgba(239,68,68,0.34))', color: '#fff', fontWeight: 950, textAlign: 'left', padding: '0 12px', cursor: 'pointer' },
+  whatsFallbackBar: { position: 'fixed', left: 12, right: 12, bottom: 'max(10px, env(safe-area-inset-bottom))', zIndex: 1700, minHeight: 52, borderRadius: 14, border: '1px solid rgba(147,197,253,0.3)', background: 'rgba(15,23,42,0.95)', color: '#dbeafe', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 12px 30px rgba(2,6,23,0.45)' },
+  whatsFallbackButton: { height: 34, borderRadius: 999, border: 'none', padding: '0 12px', background: 'linear-gradient(135deg,#25d366,#16a34a)', color: '#fff', fontWeight: 900, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', textDecoration: 'none' },
+  whatsFallbackAltButton: { height: 34, borderRadius: 999, border: '1px solid rgba(147,197,253,0.4)', padding: '0 12px', background: 'rgba(30,64,175,0.35)', color: '#dbeafe', fontWeight: 900, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', textDecoration: 'none' },
+  whatsFallbackClose: { width: 30, height: 30, borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontWeight: 900, cursor: 'pointer', marginLeft: 'auto' },
 }
 

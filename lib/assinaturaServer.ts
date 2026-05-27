@@ -78,6 +78,7 @@ export function montarPayloadAtivacao(params: {
   gatewayAssinaturaId?: string
   gatewayClienteId?: string
   valorPago?: number
+  renovacaoAutomatica?: boolean
 }) {
   const planoChave = `${params.tier}_${params.recorrencia}`
   const cfg = PLANOS_CATALOGO[params.tier]
@@ -92,7 +93,9 @@ export function montarPayloadAtivacao(params: {
       status: 'ativa',
       data_fim: params.vencimentoIso,
       proxima_cobranca: params.vencimentoIso,
-      renovacao_automatica: true,
+      data_trial_fim: null,
+      trial_dias: 0,
+      renovacao_automatica: params.renovacaoAutomatica !== false,
       valor_mensal: valorMensal,
       valor_anual: valorAnual,
       gateway: 'mercado_pago',

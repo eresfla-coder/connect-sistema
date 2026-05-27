@@ -6,11 +6,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
 import { emailDoUsuarioAuth, isAdminMaster } from "@/lib/access";
 import { readLocalCloudPayload } from "@/lib/connect-cloud-storage";
-import { installDemoGuard, isDemoMode, sairDemoMode } from "@/lib/connect-demo";
+import { installDemoGuard, isDemoMode, limparSessaoReal, sairDemoMode } from "@/lib/connect-demo";
 import dynamic from "next/dynamic";
 import ConnectToastProvider from "@/components/ui/ConnectToast";
 import WhatsAppFallbackBar from "@/components/WhatsAppFallbackBar";
-import { WHATSAPP_FALLBACK_EVENT } from "@/lib/abrirExterno";
+import { abrirWhatsappUrl, montarUrlWhatsapp, WHATSAPP_FALLBACK_EVENT } from "@/lib/abrirExterno";
 
 const TrialBanner = dynamic(() => import("@/components/assinatura/TrialBanner"), { ssr: false });
 
@@ -321,8 +321,8 @@ export default function PainelLayout({
     try {
       const mensagem =
         "Olá! Gostaria de falar com o suporte da Connect Sistemas.";
-      const url = `https://wa.me/${WHATSAPP_SUPORTE}?text=${encodeURIComponent(mensagem)}`;
-      window.open(url, "_blank", "noopener,noreferrer");
+      const url = montarUrlWhatsapp(WHATSAPP_SUPORTE, mensagem);
+      abrirWhatsappUrl(url);
     } catch (error) {
       console.error("Erro ao abrir WhatsApp:", error);
       alert("Não foi possível abrir o WhatsApp.");
@@ -358,10 +358,12 @@ export default function PainelLayout({
     try {
       if (isDemoMode()) {
         sairDemoMode();
+        limparSessaoReal();
         router.push("/login");
         return;
       }
       await supabase.auth.signOut();
+      limparSessaoReal();
       router.push("/login");
     } catch (error) {
       console.error("Erro ao sair:", error);

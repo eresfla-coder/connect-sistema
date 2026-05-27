@@ -1,4 +1,5 @@
 import './globals.css'
+import PWAClient from './components/PWAClient'
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://appconnectpro.com.br'
 
@@ -68,6 +69,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body>
+        <PWAClient />
         {children}
       </body>
     </html>

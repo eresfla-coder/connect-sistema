@@ -356,7 +356,9 @@ function detectarRiscos(
 async function carregarDadosDashboard(): Promise<DadosDashboard> {
   let orcamentos = (lerLocalJson<Record<string, unknown>[]>(ORCAMENTOS_KEY, []) || []).map(normalizarOrcamentoDashboard)
   let ordens = (lerLocalJson<Record<string, unknown>[]>(OS_KEY, []) || []).map(normalizarOsDashboard)
-  const produtos = lerLocalJson<ProdutoResumo[]>(PRODUTOS_KEY, [])
+  const { lerLocalStorageUsuario, obterUserIdPainel } = await import('@/lib/connect-user-storage')
+  const userId = await obterUserIdPainel()
+  const produtos = lerLocalStorageUsuario<ProdutoResumo[]>(PRODUTOS_KEY, userId, [])
   const servicos = lerLocalJson<ServicoResumo[]>(SERVICOS_KEY, [])
   const financeiroTitulos = lerLocalJson<FinanceiroTituloResumo[]>(FINANCEIRO_KEY, [])
 

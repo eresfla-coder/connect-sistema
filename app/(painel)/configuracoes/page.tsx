@@ -195,8 +195,8 @@ export default function ConfiguracoesPage() {
 
         const mapeada: ConfiguracaoSistema = {
           nomeEmpresa: cfgSupabase.nomeEmpresa || '',
-          telefone: cfgSupabase.telefone || '',
-          celularEmpresa: cfgSupabase.celularEmpresa || '',
+          telefone: cfgSupabase.telefone || cfgSupabase.whatsappEmpresa || '',
+          celularEmpresa: cfgSupabase.celularEmpresa || cfgSupabase.whatsappEmpresa || cfgSupabase.telefone || '',
           email: cfgSupabase.email || '',
           endereco: cfgSupabase.endereco || '',
           cidadeUf: cfgSupabase.cidadeUf || '',
@@ -375,8 +375,8 @@ export default function ConfiguracoesPage() {
       // 1. Salvar no Supabase (fonte de verdade)
       const cfgParaApi: ConfiguracaoEmpresa = {
         nomeEmpresa: config.nomeEmpresa,
-        telefone: config.telefone,
-        celularEmpresa: config.celularEmpresa,
+        telefone: config.telefone || config.celularEmpresa || '',
+        celularEmpresa: config.celularEmpresa || config.telefone || '',
         whatsappEmpresa: config.celularEmpresa || config.telefone || '',
         email: config.email,
         endereco: config.endereco,
