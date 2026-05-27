@@ -481,7 +481,8 @@ export default function AdminSaasMasterPage() {
     setRenovarCliente(cliente)
     setRenovarResultado(null)
     setRenovarOpen(true)
-    setAcaoId(null)
+    setDesktopActionMenu(null)
+    setAcaoClienteMobile(null)
   }
 
   async function confirmarRenovacaoManual(form: FormRenovacao) {
@@ -550,7 +551,8 @@ export default function AdminSaasMasterPage() {
 
     try {
       setAcaoProcessandoId(cliente.id)
-      setAcaoId(null)
+      setDesktopActionMenu(null)
+      setAcaoClienteMobile(null)
 
       const { data: { session } } = await supabase.auth.getSession()
       const accessToken = session?.access_token
