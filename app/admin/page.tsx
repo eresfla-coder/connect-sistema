@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
@@ -80,8 +80,17 @@ type MetaCliente = {
 
 type DesktopActionMenuState = {
   cliente: PerfilAdmin
+  anchorRect: {
+    top: number
+    left: number
+    right: number
+    bottom: number
+    width: number
+    height: number
+  }
   top: number
   left: number
+  placement: 'top' | 'bottom'
 }
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://connect-sistema-teste.vercel.app').replace(/\/$/, '')
@@ -241,6 +250,8 @@ export default function AdminSaasMasterPage() {
   const [filtro, setFiltro] = useState<FiltroStatus>('todos')
   const [aba, setAba] = useState<'clientes' | 'sessoes' | 'metricas'>('clientes')
   const [desktopActionMenu, setDesktopActionMenu] = useState<DesktopActionMenuState | null>(null)
+  const desktopActionMenuRef = useRef<HTMLDivElement | null>(null)
+  const [desktopActionMenuAnimIn, setDesktopActionMenuAnimIn] = useState(false)
   const [acaoProcessandoId, setAcaoProcessandoId] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -313,6 +324,55 @@ export default function AdminSaasMasterPage() {
     document.addEventListener('mousedown', fecharMenus)
     return () => document.removeEventListener('mousedown', fecharMenus)
   }, [])
+
+  useEffect(() => {
+    if (!desktopActionMenu) {
+      setDesktopActionMenuAnimIn(false)
+      return
+    }
+    setDesktopActionMenuAnimIn(false)
+    const id = requestAnimationFrame(() => setDesktopActionMenuAnimIn(true))
+    return () => cancelAnimationFrame(id)
+  }, [desktopActionMenu?.cliente.id])
+
+  useLayoutEffect(() => {
+    if (!desktopActionMenu) return
+    const menu = desktopActionMenuRef.current
+    if (!menu) return
+
+    const viewportPadding = 12
+    const gap = 8
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+
+    const rect = menu.getBoundingClientRect()
+    const menuW = rect.width
+    const menuH = rect.height
+
+    const anchor = desktopActionMenu.anchorRect
+    const preferredLeft = anchor.left + anchor.width / 2 - menuW / 2
+    const preferredTopBelow = anchor.bottom + gap
+    const preferredTopAbove = anchor.top - gap - menuH
+
+    const spaceBelow = vh - anchor.bottom
+    const spaceAbove = anchor.top
+    const openUpwards = spaceBelow < menuH + gap && spaceAbove > spaceBelow
+
+    let nextLeft = preferredLeft
+    let nextTop = openUpwards ? preferredTopAbove : preferredTopBelow
+
+    nextLeft = Math.max(viewportPadding, Math.min(vw - viewportPadding - menuW, nextLeft))
+    nextTop = Math.max(viewportPadding, Math.min(vh - viewportPadding - menuH, nextTop))
+
+    const placement: DesktopActionMenuState['placement'] = openUpwards ? 'top' : 'bottom'
+    const changed =
+      Math.abs((desktopActionMenu.left ?? 0) - nextLeft) > 0.5 ||
+      Math.abs((desktopActionMenu.top ?? 0) - nextTop) > 0.5 ||
+      desktopActionMenu.placement !== placement
+
+    if (!changed) return
+    setDesktopActionMenu((prev) => (prev ? { ...prev, left: nextLeft, top: nextTop, placement } : prev))
+  }, [desktopActionMenu])
 
   function clienteSistema(cliente: PerfilAdmin) {
     return cliente.sistema_cliente || metaLocal[cliente.id]?.sistema_cliente || 'Connect Sistema'
@@ -1151,8 +1211,17 @@ export default function AdminSaasMasterPage() {
                                   ? null
                                   : {
                                       cliente,
-                                      top: Math.min(rect.bottom + 8, window.innerHeight - 20),
-                                      left: Math.max(12, Math.min(rect.right - 250, window.innerWidth - 262)),
+                                      anchorRect: {
+                                        top: rect.top,
+                                        left: rect.left,
+                                        right: rect.right,
+                                        bottom: rect.bottom,
+                                        width: rect.width,
+                                        height: rect.height,
+                                      },
+                                      top: rect.bottom + 8,
+                                      left: rect.left + rect.width / 2 - 245 / 2,
+                                      placement: 'bottom',
                                     }
                               )
                             }}
@@ -1239,7 +1308,15 @@ export default function AdminSaasMasterPage() {
         ? createPortal(
             <div style={styles.desktopActionBackdrop} onClick={() => setDesktopActionMenu(null)}>
               <div
-                style={{ ...styles.actionMenuPortal, top: desktopActionMenu.top, left: desktopActionMenu.left }}
+                ref={desktopActionMenuRef}
+                style={{
+                  ...styles.actionMenuPortal,
+                  top: desktopActionMenu.top,
+                  left: desktopActionMenu.left,
+                  transformOrigin: desktopActionMenu.placement === 'top' ? 'bottom center' : 'top center',
+                  opacity: desktopActionMenuAnimIn ? 1 : 0,
+                  transform: desktopActionMenuAnimIn ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.985)',
+                }}
                 data-action-popover
                 onClick={(event) => event.stopPropagation()}
               >
@@ -1585,7 +1662,7 @@ const styles: Record<string, CSSProperties> = {
   actionSummary: { height: 38, borderRadius: 999, padding: '0 15px', background: 'rgba(59,130,246,0.18)', border: '1px solid rgba(147,197,253,0.28)', color: '#dbeafe', fontWeight: 950, cursor: 'pointer' },
   actionMenu: { position: 'absolute', right: 0, top: 44, zIndex: 9999, width: 245, borderRadius: 18, padding: 9, background: 'linear-gradient(135deg, rgba(38,50,68,0.98), rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.16)', boxShadow: '0 22px 58px rgba(15,23,42,0.52)', display: 'grid', gap: 6 },
   desktopActionBackdrop: { position: 'fixed', inset: 0, zIndex: 1650, background: 'transparent' },
-  actionMenuPortal: { position: 'fixed', zIndex: 1660, width: 245, borderRadius: 18, padding: 9, background: 'linear-gradient(135deg, rgba(38,50,68,0.98), rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.16)', boxShadow: '0 22px 58px rgba(15,23,42,0.52)', display: 'grid', gap: 6 },
+  actionMenuPortal: { position: 'fixed', zIndex: 1660, width: 245, borderRadius: 18, padding: 9, paddingBottom: 12, maxHeight: '80vh', overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'rgba(148,163,184,0.55) rgba(15,23,42,0.65)', background: 'linear-gradient(135deg, rgba(38,50,68,0.98), rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.16)', boxShadow: '0 28px 76px rgba(2,6,23,0.62)', display: 'grid', gap: 6, transition: 'opacity 140ms ease, transform 140ms ease', willChange: 'transform, opacity' },
   menuHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 4px 6px 8px', color: '#bfdbfe', fontSize: 11, fontWeight: 950, textTransform: 'uppercase', letterSpacing: 1 },
   menuClose: { width: 27, height: 27, borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.09)', color: '#fff', fontWeight: 900, cursor: 'pointer' },
   menuItem: { minHeight: 37, borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontWeight: 850, textAlign: 'left', padding: '0 11px', cursor: 'pointer' },
