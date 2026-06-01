@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase-browser'
 import { isAdminMaster } from '@/lib/access'
 import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetricas'
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
+import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
 
@@ -248,7 +249,10 @@ export default function AdminSaasMasterPage() {
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<FiltroStatus>('todos')
-  const [aba, setAba] = useState<'clientes' | 'sessoes' | 'metricas'>('clientes')
+  const [aba, setAba] = useState<'clientes' | 'sessoes' | 'metricas' | 'saude'>('clientes')
+  const [healthItens, setHealthItens] = useState<Array<{ nome: string; status: string; detalhe?: string }>>([])
+  const [healthLoading, setHealthLoading] = useState(false)
+  const [backupModalCliente, setBackupModalCliente] = useState<PerfilAdmin | null>(null)
   const [desktopActionMenu, setDesktopActionMenu] = useState<DesktopActionMenuState | null>(null)
   const desktopActionMenuRef = useRef<HTMLDivElement | null>(null)
   const [desktopActionMenuAnimIn, setDesktopActionMenuAnimIn] = useState(false)
@@ -288,6 +292,23 @@ export default function AdminSaasMasterPage() {
     setMetaLocal(readMeta())
     void carregarTudo()
   }, [])
+
+  useEffect(() => {
+    if (aba !== 'saude') return
+    void (async () => {
+      setHealthLoading(true)
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const token = session?.access_token
+        if (!token) return
+        const res = await fetch('/api/admin/health', { headers: { Authorization: `Bearer ${token}` } })
+        const json = await res.json().catch(() => ({}))
+        if (json.ok && Array.isArray(json.itens)) setHealthItens(json.itens)
+      } finally {
+        setHealthLoading(false)
+      }
+    })()
+  }, [aba])
 
   useEffect(() => {
     const aoFallback = (event: Event) => {
@@ -1121,6 +1142,7 @@ export default function AdminSaasMasterPage() {
           <button style={{ ...(aba === 'clientes' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('clientes')}>Clientes e planos</button>
           <button style={{ ...(aba === 'sessoes' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('sessoes')}>Sessões ativas</button>
           <button style={{ ...(aba === 'metricas' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('metricas')}>Uso e crescimento</button>
+          <button style={{ ...(aba === 'saude' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('saude')}>Saúde do sistema</button>
         </section>
 
         {aba === 'clientes' && (
@@ -1265,6 +1287,50 @@ export default function AdminSaasMasterPage() {
           </section>
         )}
 
+        {aba === 'saude' && (
+          <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>
+            <div style={styles.panelTop}>
+              <div>
+                <h2 style={styles.panelTitle}>Saúde do sistema</h2>
+                <p style={styles.panelSub}>Monitoramento de Supabase, Mercado Pago, WhatsApp, Storage e Backup.</p>
+              </div>
+              <button
+                style={styles.secondaryHeroButton}
+                onClick={() => {
+                  setAba('saude')
+                  setHealthLoading(true)
+                  void supabase.auth.getSession().then(async ({ data: { session } }) => {
+                    const token = session?.access_token
+                    if (!token) return
+                    const res = await fetch('/api/admin/health', { headers: { Authorization: `Bearer ${token}` } })
+                    const json = await res.json().catch(() => ({}))
+                    if (json.ok) setHealthItens(json.itens || [])
+                    setHealthLoading(false)
+                  })
+                }}
+              >
+                Atualizar
+              </button>
+            </div>
+            {healthLoading ? <div style={styles.empty}>Verificando...</div> : (
+              <div style={styles.sessionGrid}>
+                {healthItens.map((item) => {
+                  const cor = item.status === 'online' ? '#22c55e' : item.status === 'atencao' ? '#facc15' : '#ef4444'
+                  return (
+                    <div style={styles.sessionCard} key={item.nome}>
+                      <div style={styles.sessionTop}>
+                        <strong>{item.nome}</strong>
+                        <span style={{ color: cor, fontWeight: 950, textTransform: 'capitalize' }}>{item.status}</span>
+                      </div>
+                      {item.detalhe ? <small>{item.detalhe}</small> : null}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
         {aba === 'metricas' && (
           <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>
             <div style={styles.panelTop}>
@@ -1333,6 +1399,7 @@ export default function AdminSaasMasterPage() {
                 <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); ativar(365, desktopActionMenu.cliente.id) }}>Renovar anual</button>
                 <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); abrirRenovacaoManual(desktopActionMenu.cliente) }}>Renovar sistema / Marcar pago</button>
                 <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); mensagemUpgrade(desktopActionMenu.cliente) }}>Oferta upgrade</button>
+                <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); setBackupModalCliente(desktopActionMenu.cliente) }}>Backups do cliente</button>
                 <button style={styles.menuDanger} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { if (confirm('Bloquear este cliente?')) { setDesktopActionMenu(null); void bloquear(desktopActionMenu.cliente.id) } }}>Bloquear</button>
                 <button style={styles.menuDelete} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); void excluirCliente(desktopActionMenu.cliente) }}>Excluir cliente</button>
               </div>
@@ -1375,6 +1442,7 @@ export default function AdminSaasMasterPage() {
               <div style={styles.mobileActionGroup}>
                 <div style={styles.mobileActionGroupTitle}>Comercial</div>
                 <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); mensagemUpgrade(acaoClienteMobile) }}>Oferta upgrade</button>
+                <button style={styles.mobileActionBtn} onClick={() => { setBackupModalCliente(acaoClienteMobile); setAcaoClienteMobile(null) }}>Backups do cliente</button>
               </div>
 
               <div style={styles.mobileActionDangerWrap}>
@@ -1397,6 +1465,14 @@ export default function AdminSaasMasterPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {backupModalCliente ? (
+        <AdminBackupsModal
+          clienteId={backupModalCliente.id}
+          clienteNome={backupModalCliente.nome_empresa || backupModalCliente.email || 'Cliente'}
+          onClose={() => setBackupModalCliente(null)}
+        />
       ) : null}
 
       {whatsFallbackUrl ? (

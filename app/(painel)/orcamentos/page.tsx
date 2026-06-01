@@ -18,6 +18,8 @@ import {
   orcamentoDeveOcultarM2Cliente,
 } from '@/lib/orcamentoTextos'
 import { lerLocalStorageUsuario, obterUserIdPainel } from '@/lib/connect-user-storage'
+import { registrarLogSistema } from '@/lib/logs-sistema'
+import { exportarOrcamentosExcel } from '@/lib/export-modulos'
 type TipoPessoaCliente = 'PF' | 'PJ'
 
 type Cliente = {
@@ -2816,6 +2818,11 @@ export default function OrcamentoPage() {
             : 'Orçamento salvo no aparelho. A sincronização com a nuvem será tentada novamente.',
           okNuvem ? 'success' : 'info'
         )
+        const { data: { session: sessEdit } } = await supabase.auth.getSession()
+        void registrarLogSistema(sessEdit?.access_token || '', 'editou_orcamento', {
+          modulo: 'orcamentos',
+          referencia_id: String(atualizado.id),
+        })
         setFormAberto(false)
         novoOrcamento()
         return
@@ -2867,6 +2874,11 @@ export default function OrcamentoPage() {
           : 'Orçamento salvo no aparelho. A sincronização com a nuvem será tentada novamente.',
         okNuvem ? 'success' : 'info'
       )
+      const { data: { session: sessNovo } } = await supabase.auth.getSession()
+      void registrarLogSistema(sessNovo?.access_token || '', 'criou_orcamento', {
+        modulo: 'orcamentos',
+        referencia_id: String(novo.id),
+      })
       setEditandoOrcamentoId(id)
       setFormAberto(false)
     } finally {
@@ -3008,6 +3020,11 @@ export default function OrcamentoPage() {
     salvarListaOrcamentos(listaAtualizada)
     if (orcamento) void excluirOrcamentoSupabase(orcamento)
     if (editandoOrcamentoId === id) novoOrcamento()
+    const { data: { session: sessDel } } = await supabase.auth.getSession()
+    void registrarLogSistema(sessDel?.access_token || '', 'excluiu_orcamento', {
+      modulo: 'orcamentos',
+      referencia_id: String(id),
+    })
     notificar('Orçamento excluído.', 'info')
   }
 
@@ -3483,6 +3500,13 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
             <div style={{ marginTop: 8, color: colors.muted, fontWeight: 700 }}>Módulo blindado com foco em fechamento e conversão</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={() => exportarOrcamentosExcel(orcamentosSalvos as unknown as Record<string, unknown>[])}
+              style={{ border: `1px solid ${colors.inputBorder}`, background: colors.card, color: colors.text, borderRadius: 999, padding: '10px 14px', fontWeight: 900, cursor: 'pointer' }}
+            >
+              Exportar Excel
+            </button>
             <button
               onClick={() => { novoOrcamento(); setFormAberto(true) }}
               style={{

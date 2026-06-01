@@ -9,6 +9,7 @@ import {
 import { ChangeEvent, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase-browser'
 import { Camera, Check, CheckCircle2, ChevronLeft, Lock, Palette, Type, X } from 'lucide-react'
+import BackupSegurancaPanel from '@/components/configuracoes/BackupSegurancaPanel'
 
 type AbaConfig = 'empresa' | 'visual' | 'pdf' | 'cadastros' | 'seguranca'
 
@@ -583,7 +584,7 @@ export default function ConfiguracoesPage() {
           <button style={tabStyle(aba === 'visual')} onClick={() => setAba('visual')}>🎨 Visual</button>
           <button style={tabStyle(aba === 'pdf')} onClick={() => setAba('pdf')}>📄 PDF</button>
           <button style={tabStyle(aba === 'cadastros')} onClick={() => setAba('cadastros')}>⚡ Cadastros</button>
-          <button style={tabStyle(aba === 'seguranca')} onClick={() => setAba('seguranca')}>🔐 Segurança</button>
+          <button style={tabStyle(aba === 'seguranca')} onClick={() => setAba('seguranca')}>🔐 Backup e Segurança</button>
         </nav>
 
         {aba === 'empresa' ? (
@@ -710,6 +711,13 @@ export default function ConfiguracoesPage() {
         ) : null}
 
         {aba === 'seguranca' ? (
+          <>
+          <BackupSegurancaPanel
+            cardStyle={cardStyle}
+            buttonPrimary={buttonPrimary}
+            labelStyle={labelStyle}
+            isMobile={isMobile}
+          />
           <section style={cardStyle}>
             <h2 style={{ margin: '0 0 14px', fontSize: 24 }}>Alterar senha</h2>
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: 14 }}>
@@ -730,6 +738,7 @@ export default function ConfiguracoesPage() {
               {salvandoSenha ? 'Alterando...' : 'Alterar senha'}
             </button>
           </section>
+          </>
         ) : null}
 
         <footer style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>

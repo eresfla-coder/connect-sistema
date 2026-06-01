@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { supabase } from '@/lib/supabase'
+import { exportarClientesExcel } from '@/lib/export-modulos'
+import { registrarLogSistema } from '@/lib/logs-sistema'
 
 type Cliente = {
   id: string
@@ -218,6 +220,11 @@ export default function ClientesPage() {
     }
 
     await carregarClientes()
+    const { data: { session } } = await supabase.auth.getSession()
+    void registrarLogSistema(session?.access_token || '', 'alterou_cliente', {
+      modulo: 'clientes',
+      referencia_id: editandoId || undefined,
+    })
     setSaving(false)
     alert(editandoId ? 'Cliente atualizado com sucesso.' : 'Cliente salvo com sucesso.')
     fecharDrawer()
@@ -331,6 +338,7 @@ export default function ClientesPage() {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: isMobile ? 'stretch' : 'flex-end' }}>
           <button onClick={carregarClientes} style={btnMiniCinza}>Atualizar</button>
+          <button onClick={() => exportarClientesExcel(clientesAtivos as unknown as Record<string, unknown>[])} style={btnMiniCinza}>Exportar Excel</button>
           <Link href="/financeiro" style={btnMiniVerde}>Financeiro</Link>
           <button onClick={novoCliente} style={{ ...btnMiniAzul, height: 36, padding: '0 15px' }}>+ Novo cliente</button>
         </div>

@@ -12,6 +12,8 @@ import {
   type ConfigEmpresaPublica,
 } from '@/lib/documentosPublicos'
 import { supabase } from '@/lib/supabase'
+import { registrarLogSistema } from '@/lib/logs-sistema'
+import { exportarOsExcel } from '@/lib/export-modulos'
 
 type Cliente = {
   id?: string | number
@@ -1713,6 +1715,11 @@ export default function OrdemServicoPage() {
       } else {
         alert('Alterações salvas neste aparelho. A sincronização com a nuvem continuará automaticamente.')
       }
+      const { data: { session: sessOsEdit } } = await supabase.auth.getSession()
+      void registrarLogSistema(sessOsEdit?.access_token || '', 'editou_os', {
+        modulo: 'ordens_servico',
+        referencia_id: String(editandoId),
+      })
       limpar()
       return
     }
@@ -1739,6 +1746,11 @@ export default function OrdemServicoPage() {
     } else {
       alert('OS salva neste aparelho. A sincronização com a nuvem continuará em instantes.')
     }
+    const { data: { session: sessOsNovo } } = await supabase.auth.getSession()
+    void registrarLogSistema(sessOsNovo?.access_token || '', 'criou_os', {
+      modulo: 'ordens_servico',
+      referencia_id: String(novoId),
+    })
     limpar()
   }
 
@@ -1771,6 +1783,12 @@ export default function OrdemServicoPage() {
       setOrcamentos(orcAtualizados)
       localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(orcAtualizados))
     }
+
+    const { data: { session: sessOsDel } } = await supabase.auth.getSession()
+    void registrarLogSistema(sessOsDel?.access_token || '', 'excluiu_os', {
+      modulo: 'ordens_servico',
+      referencia_id: String(id),
+    })
 
     if (editandoId === id) limpar()
   }
@@ -2086,6 +2104,22 @@ export default function OrdemServicoPage() {
               width: isMobile ? '100%' : 'auto',
             }}
           >
+            <button
+              type="button"
+              onClick={() => exportarOsExcel(lista as unknown as Record<string, unknown>[])}
+              style={{
+                height: 44,
+                borderRadius: 14,
+                border: `1px solid ${colors.inputBorder}`,
+                background: colors.card,
+                color: colors.text,
+                fontWeight: 900,
+                padding: '0 14px',
+                cursor: 'pointer',
+              }}
+            >
+              Exportar Excel
+            </button>
             <button
               onClick={() => {
                 setEditandoId(null)

@@ -390,7 +390,9 @@ async function carregarDadosDashboard(): Promise<DadosDashboard> {
   }
 
   try {
-    const { data, error } = await supabase.from('orcamentos').select('*').order('created_at', { ascending: false })
+    let queryOrc = supabase.from('orcamentos').select('*').order('created_at', { ascending: false })
+    if (userId) queryOrc = queryOrc.eq('user_id', userId)
+    const { data, error } = await queryOrc
     if (!error && Array.isArray(data) && data.length) {
       orcamentos = data.map((row) => mapearOrcamentoSupabase(row as Record<string, unknown>))
       try {
@@ -400,7 +402,9 @@ async function carregarDadosDashboard(): Promise<DadosDashboard> {
   } catch {}
 
   try {
-    const { data, error } = await supabase.from('ordens_servico').select('*').order('created_at', { ascending: false })
+    let queryOs = supabase.from('ordens_servico').select('*').order('created_at', { ascending: false })
+    if (userId) queryOs = queryOs.eq('user_id', userId)
+    const { data, error } = await queryOs
     if (!error && Array.isArray(data) && data.length) {
       ordens = data.map((row) => mapearOsSupabase(row as Record<string, unknown>))
       try {

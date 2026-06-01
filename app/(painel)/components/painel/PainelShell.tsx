@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
 import { emailDoUsuarioAuth, isAdminMaster } from "@/lib/access";
 import { readLocalCloudPayload } from "@/lib/connect-cloud-storage";
+import { nomeArquivoBackup } from "@/lib/backup-connect";
 import { installDemoGuard, isDemoMode, limparSessaoReal, sairDemoMode } from "@/lib/connect-demo";
 import dynamic from "next/dynamic";
 import ConnectToastProvider from "@/components/ui/ConnectToast";
@@ -339,9 +340,8 @@ export default function PainelLayout({
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      const data = new Date().toISOString().slice(0, 10);
       a.href = url;
-      a.download = `connect-backup-${data}.json`;
+      a.download = nomeArquivoBackup();
       document.body.appendChild(a);
       a.click();
       a.remove();
