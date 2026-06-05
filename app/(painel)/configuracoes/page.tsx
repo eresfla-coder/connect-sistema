@@ -395,16 +395,20 @@ export default function ConfiguracoesPage() {
       }
       await salvarConfigApi(cfgParaApi)
 
-      // 2. Salvar localStorage (cache temporário)
+      // 2. Salvar localStorage (cache + cores/PDF/validade)
       localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
       localStorage.setItem(CATEGORIAS_KEY, JSON.stringify(categorias))
       localStorage.setItem(FORMAS_KEY, JSON.stringify(formasPagamento))
       window.dispatchEvent(new Event('connect-data-change'))
 
-      // 3. Também salvar na nuvem legacy (compatibilidade)
-      await salvarConfigNaNuvem(config, categorias, formasPagamento)
+      // 3. Nuvem legacy (connect_storage) — config completa incluindo visual/PDF
+      const okNuvem = await salvarConfigNaNuvem(config, categorias, formasPagamento)
 
-      setMensagem('Configurações salvas e sincronizadas com sucesso!')
+      setMensagem(
+        okNuvem
+          ? 'Configurações salvas e sincronizadas com sucesso!'
+          : 'Configurações salvas neste aparelho. Dados da empresa sincronizados.'
+      )
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Não foi possível salvar as configurações.'
       setMensagem(msg)

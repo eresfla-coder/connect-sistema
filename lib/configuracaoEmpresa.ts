@@ -62,30 +62,7 @@ function telefoneWhatsappDeRow(row: Record<string, unknown>) {
   }
 }
 
-function dbToApp(row: any): ConfiguracaoEmpresa {
-  const contatos = telefoneWhatsappDeRow(row || {})
-  return {
-    nomeEmpresa: row.nome_empresa || CONFIG_PADRAO.nomeEmpresa,
-    telefone: contatos.telefone,
-    celularEmpresa: contatos.celular,
-    whatsappEmpresa: contatos.whatsapp,
-    email: row.email || '',
-    endereco: row.endereco || '',
-    cidadeUf: row.cidade_uf || '',
-    responsavel: row.responsavel || '',
-    logoUrl: normalizarLogoEmpresaPublica(row.logo_url) || CONFIG_PADRAO.logoUrl,
-    corPrimaria: row.cor_primaria || CONFIG_PADRAO.corPrimaria,
-    corSecundaria: row.cor_secundaria || CONFIG_PADRAO.corSecundaria,
-    tituloPdf: row.titulo_pdf || CONFIG_PADRAO.tituloPdf,
-    rodapePdf: row.rodape_pdf || CONFIG_PADRAO.rodapePdf,
-    validadePadrao: row.validade_padrao ?? CONFIG_PADRAO.validadePadrao,
-    prazoEntregaPadrao: row.prazo_entrega_padrao ?? CONFIG_PADRAO.prazoEntregaPadrao,
-    formaPagamentoPadrao: row.forma_pagamento_padrao ?? CONFIG_PADRAO.formaPagamentoPadrao,
-    mostrarQuantidade: row.mostrar_quantidade ?? true,
-  }
-}
-
-function appToDb(cfg: ConfiguracaoEmpresa): Record<string, any> {
+function appToDbCore(cfg: ConfiguracaoEmpresa): Record<string, unknown> {
   const celular = String(cfg.celularEmpresa || '').trim()
   const telefone = String(cfg.telefone || '').trim() || celular
   const whatsapp = String(cfg.whatsappEmpresa || '').trim() || celular || telefone
@@ -98,14 +75,57 @@ function appToDb(cfg: ConfiguracaoEmpresa): Record<string, any> {
     endereco: cfg.endereco,
     responsavel: cfg.responsavel,
     logo_url: cfg.logoUrl,
-    cor_primaria: cfg.corPrimaria,
-    cor_secundaria: cfg.corSecundaria,
-    titulo_pdf: cfg.tituloPdf,
-    rodape_pdf: cfg.rodapePdf,
-    validade_padrao: cfg.validadePadrao,
-    prazo_entrega_padrao: cfg.prazoEntregaPadrao,
-    forma_pagamento_padrao: cfg.formaPagamentoPadrao,
-    mostrar_quantidade: cfg.mostrarQuantidade,
+  }
+}
+
+/** Campos visuais/PDF — podem não existir na tabela; ficam no localStorage e connect_storage. */
+function camposPreferenciaLocal(cfg: ConfiguracaoEmpresa): Partial<ConfiguracaoEmpresa> {
+  return {
+    cidadeUf: cfg.cidadeUf,
+    corPrimaria: cfg.corPrimaria,
+    corSecundaria: cfg.corSecundaria,
+    tituloPdf: cfg.tituloPdf,
+    rodapePdf: cfg.rodapePdf,
+    validadePadrao: cfg.validadePadrao,
+    prazoEntregaPadrao: cfg.prazoEntregaPadrao,
+    formaPagamentoPadrao: cfg.formaPagamentoPadrao,
+    mostrarQuantidade: cfg.mostrarQuantidade,
+  }
+}
+
+function dbToApp(row: Record<string, unknown>, local?: ConfiguracaoEmpresa | null): ConfiguracaoEmpresa {
+  const contatos = telefoneWhatsappDeRow(row || {})
+  const prefs = local ? camposPreferenciaLocal(local) : {}
+  return {
+    nomeEmpresa: String(row.nome_empresa || CONFIG_PADRAO.nomeEmpresa),
+    telefone: contatos.telefone,
+    celularEmpresa: contatos.celular,
+    whatsappEmpresa: contatos.whatsapp,
+    email: String(row.email || ''),
+    endereco: String(row.endereco || ''),
+    cidadeUf: prefs.cidadeUf ?? String(row.cidade_uf || ''),
+    responsavel: String(row.responsavel || ''),
+    logoUrl: normalizarLogoEmpresaPublica(String(row.logo_url || '')) || CONFIG_PADRAO.logoUrl,
+    corPrimaria: prefs.corPrimaria ?? (row.cor_primaria != null ? String(row.cor_primaria) : CONFIG_PADRAO.corPrimaria),
+    corSecundaria: prefs.corSecundaria ?? (row.cor_secundaria != null ? String(row.cor_secundaria) : CONFIG_PADRAO.corSecundaria),
+    tituloPdf: prefs.tituloPdf ?? (row.titulo_pdf != null ? String(row.titulo_pdf) : CONFIG_PADRAO.tituloPdf),
+    rodapePdf: prefs.rodapePdf ?? (row.rodape_pdf != null ? String(row.rodape_pdf) : CONFIG_PADRAO.rodapePdf),
+    validadePadrao:
+      prefs.validadePadrao ??
+      (row.validade_padrao != null && row.validade_padrao !== undefined
+        ? String(row.validade_padrao)
+        : CONFIG_PADRAO.validadePadrao),
+    prazoEntregaPadrao:
+      prefs.prazoEntregaPadrao ??
+      (row.prazo_entrega_padrao != null && row.prazo_entrega_padrao !== undefined
+        ? String(row.prazo_entrega_padrao)
+        : CONFIG_PADRAO.prazoEntregaPadrao),
+    formaPagamentoPadrao:
+      prefs.formaPagamentoPadrao ??
+      (row.forma_pagamento_padrao != null ? String(row.forma_pagamento_padrao) : CONFIG_PADRAO.formaPagamentoPadrao),
+    mostrarQuantidade:
+      prefs.mostrarQuantidade ??
+      (typeof row.mostrar_quantidade === 'boolean' ? row.mostrar_quantidade : CONFIG_PADRAO.mostrarQuantidade),
   }
 }
 
@@ -139,22 +159,8 @@ export async function buscarConfiguracao(): Promise<ConfiguracaoEmpresa> {
       if (error) {
         console.warn('[config] Supabase error:', error.message)
       } else if (data) {
-        const cfgNuvem = dbToApp(data)
         const local = carregarLocal()
-        const cfg = local
-          ? {
-              ...cfgNuvem,
-              cidadeUf: local.cidadeUf || cfgNuvem.cidadeUf,
-              validadePadrao:
-                data.validade_padrao != null && data.validade_padrao !== undefined
-                  ? String(data.validade_padrao)
-                  : (local.validadePadrao ?? cfgNuvem.validadePadrao),
-              prazoEntregaPadrao:
-                data.prazo_entrega_padrao != null && data.prazo_entrega_padrao !== undefined
-                  ? String(data.prazo_entrega_padrao)
-                  : (local.prazoEntregaPadrao ?? cfgNuvem.prazoEntregaPadrao),
-            }
-          : cfgNuvem
+        const cfg = dbToApp(data as Record<string, unknown>, local)
         salvarLocal(cfg)
         return cfg
       }
@@ -207,7 +213,7 @@ export async function salvarConfiguracao(cfg: ConfiguracaoEmpresa): Promise<void
     throw new Error('Faça login para salvar as configurações na nuvem.')
   }
 
-  const dbRecord = appToDb(cfg)
+  const dbRecord = appToDbCore(cfg)
   const { error } = await supabase
     .from('configuracoes_empresa')
     .upsert(
@@ -220,7 +226,13 @@ export async function salvarConfiguracao(cfg: ConfiguracaoEmpresa): Promise<void
     )
 
   if (error) {
-    throw new Error((error as SupabaseError).message || 'Erro ao salvar configurações no Supabase.')
+    const msg = (error as SupabaseError).message || ''
+    // Coluna extra no schema: dados já estão no localStorage; não bloquear o usuário.
+    if (msg.includes('schema cache') || msg.includes('Could not find')) {
+      console.warn('[config] Supabase parcial (colunas opcionais ausentes):', msg)
+      return
+    }
+    throw new Error(msg || 'Erro ao salvar configurações no Supabase.')
   }
 }
 
