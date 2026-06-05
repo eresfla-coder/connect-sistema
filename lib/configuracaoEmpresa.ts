@@ -78,9 +78,9 @@ function dbToApp(row: any): ConfiguracaoEmpresa {
     corSecundaria: row.cor_secundaria || CONFIG_PADRAO.corSecundaria,
     tituloPdf: row.titulo_pdf || CONFIG_PADRAO.tituloPdf,
     rodapePdf: row.rodape_pdf || CONFIG_PADRAO.rodapePdf,
-    validadePadrao: row.validade_padrao || CONFIG_PADRAO.validadePadrao,
-    prazoEntregaPadrao: row.prazo_entrega_padrao || CONFIG_PADRAO.prazoEntregaPadrao,
-    formaPagamentoPadrao: row.forma_pagamento_padrao || CONFIG_PADRAO.formaPagamentoPadrao,
+    validadePadrao: row.validade_padrao ?? CONFIG_PADRAO.validadePadrao,
+    prazoEntregaPadrao: row.prazo_entrega_padrao ?? CONFIG_PADRAO.prazoEntregaPadrao,
+    formaPagamentoPadrao: row.forma_pagamento_padrao ?? CONFIG_PADRAO.formaPagamentoPadrao,
     mostrarQuantidade: row.mostrar_quantidade ?? true,
   }
 }
@@ -96,7 +96,6 @@ function appToDb(cfg: ConfiguracaoEmpresa): Record<string, any> {
     whatsapp_empresa: whatsapp,
     email: cfg.email,
     endereco: cfg.endereco,
-    cidade_uf: cfg.cidadeUf,
     responsavel: cfg.responsavel,
     logo_url: cfg.logoUrl,
     cor_primaria: cfg.corPrimaria,
@@ -140,7 +139,22 @@ export async function buscarConfiguracao(): Promise<ConfiguracaoEmpresa> {
       if (error) {
         console.warn('[config] Supabase error:', error.message)
       } else if (data) {
-        const cfg = dbToApp(data)
+        const cfgNuvem = dbToApp(data)
+        const local = carregarLocal()
+        const cfg = local
+          ? {
+              ...cfgNuvem,
+              cidadeUf: local.cidadeUf || cfgNuvem.cidadeUf,
+              validadePadrao:
+                data.validade_padrao != null && data.validade_padrao !== undefined
+                  ? String(data.validade_padrao)
+                  : (local.validadePadrao ?? cfgNuvem.validadePadrao),
+              prazoEntregaPadrao:
+                data.prazo_entrega_padrao != null && data.prazo_entrega_padrao !== undefined
+                  ? String(data.prazo_entrega_padrao)
+                  : (local.prazoEntregaPadrao ?? cfgNuvem.prazoEntregaPadrao),
+            }
+          : cfgNuvem
         salvarLocal(cfg)
         return cfg
       }

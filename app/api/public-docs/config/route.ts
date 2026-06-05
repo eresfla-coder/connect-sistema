@@ -111,7 +111,7 @@ export async function GET(request: Request) {
       corSecundaria: String(configAtual.cor_secundaria || payloadCfg.corSecundaria || '#dcfce7'),
       tituloPdf: String(configAtual.titulo_pdf || payloadCfg.tituloPdf || 'Orçamento Comercial'),
       rodapePdf: String(configAtual.rodape_pdf || payloadCfg.rodapePdf || 'Obrigado pela preferência.'),
-      validadePadrao: String(configAtual.validade_padrao || payloadCfg.validadePadrao || '7 dias'),
+      validadePadrao: String(configAtual.validade_padrao ?? payloadCfg.validadePadrao ?? '7 dias'),
       prazoEntregaPadrao: String(configAtual.prazo_entrega_padrao || payloadCfg.prazoEntregaPadrao || '3 dias'),
       formaPagamentoPadrao: String(configAtual.forma_pagamento_padrao || payloadCfg.formaPagamentoPadrao || 'PIX'),
       mostrarQuantidade: configAtual.mostrar_quantidade ?? payloadCfg.mostrarQuantidade ?? true,

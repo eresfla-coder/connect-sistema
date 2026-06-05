@@ -208,9 +208,9 @@ export default function ConfiguracoesPage() {
           corTabela: '#f3f4f6',
           tituloPdf: cfgSupabase.tituloPdf || 'Orçamento Comercial',
           rodapePdf: cfgSupabase.rodapePdf || 'Obrigado pela preferência.',
-          validadePadrao: cfgSupabase.validadePadrao || '7 dias',
-          prazoEntregaPadrao: cfgSupabase.prazoEntregaPadrao || '3 dias',
-          formaPagamentoPadrao: cfgSupabase.formaPagamentoPadrao || 'PIX',
+          validadePadrao: cfgSupabase.validadePadrao ?? '7 dias',
+          prazoEntregaPadrao: cfgSupabase.prazoEntregaPadrao ?? '3 dias',
+          formaPagamentoPadrao: cfgSupabase.formaPagamentoPadrao ?? 'PIX',
           mostrarQuantidade: cfgSupabase.mostrarQuantidade ?? true,
         }
         setConfig(mapeada)
@@ -653,7 +653,7 @@ export default function ConfiguracoesPage() {
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
                 <CampoTexto label="Título padrão" campo="tituloPdf" placeholder="Orçamento Comercial" />
                 <CampoTexto label="Pagamento padrão" campo="formaPagamentoPadrao" placeholder="PIX" />
-                <CampoTexto label="Validade padrão" campo="validadePadrao" placeholder="7 dias" />
+                <CampoTexto label="Validade padrão" campo="validadePadrao" placeholder="7 dias (use 0 para ocultar)" />
                 <CampoTexto label="Prazo de entrega padrão" campo="prazoEntregaPadrao" placeholder="3 dias" />
               </div>
               <div style={{ marginTop: 14 }}>

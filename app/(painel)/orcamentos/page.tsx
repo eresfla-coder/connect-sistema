@@ -16,6 +16,8 @@ import {
 import {
   OBSERVACAO_PADRAO_ORCAMENTO,
   orcamentoDeveOcultarM2Cliente,
+  validadeOrcamentoAtiva,
+  resolverValidadePadraoOrcamento,
 } from '@/lib/orcamentoTextos'
 import { lerLocalStorageUsuario, obterUserIdPainel } from '@/lib/connect-user-storage'
 import { registrarLogSistema } from '@/lib/logs-sistema'
@@ -1633,7 +1635,7 @@ export default function OrcamentoPage() {
         setTituloPdf(dados.tituloPdf || 'Orçamento Comercial')
         setObservacao(dados.rodapePdf || OBSERVACAO_PADRAO_ORCAMENTO)
         setFormaPagamento(dados.formaPagamentoPadrao || 'PIX')
-        setValidade(dados.validadePadrao || '')
+        setValidade(resolverValidadePadraoOrcamento(dados.validadePadrao))
         setPrazoEntrega(dados.prazoEntregaPadrao || '')
       } catch {}
     }
@@ -1645,6 +1647,8 @@ export default function OrcamentoPage() {
           ...nuvem,
           logoUrl: normalizarLogoEmpresaPublica(nuvem.logoUrl || anterior.logoUrl),
         }))
+        setValidade((atual) => (editandoOrcamentoId === null ? resolverValidadePadraoOrcamento(nuvem.validadePadrao) : atual))
+        setPrazoEntrega((atual) => (editandoOrcamentoId === null ? (nuvem.prazoEntregaPadrao ?? '') : atual))
       })
       .catch(() => {})
 
@@ -2422,7 +2426,7 @@ export default function OrcamentoPage() {
     setFormasPagamentoSelecionadas([config.formaPagamentoPadrao || formasPagamento[0] || 'Pix'])
     setOcultarValorUnitarioM2(true)
     setParcelasBoleto('')
-    setValidade(config.validadePadrao || '')
+    setValidade(resolverValidadePadraoOrcamento(config.validadePadrao))
     setPrazoEntrega(config.prazoEntregaPadrao || '')
     setEnderecoEntrega('')
     setValorEntrega(0)
@@ -3105,7 +3109,7 @@ export default function OrcamentoPage() {
         montarMensagem: (link) => {
           let mensagem = `Olá ${orc.cliente?.nome || 'cliente'}!\n\n`
           mensagem += `${textoIntroWhatsapp(orc)} *${orc.numero}* no valor de *${moeda(orc.total)}*.\n`
-          if (orc.validade) mensagem += `Validade: ${orc.validade}.\n`
+          if (validadeOrcamentoAtiva(orc.validade)) mensagem += `Validade: ${orc.validade}.\n`
           mensagem += `\n🔗 Acesse aqui:\n${link}`
           return mensagem
         },
@@ -3171,7 +3175,7 @@ export default function OrcamentoPage() {
         mensagem += `${montarTextoBoleto(parcelasBoleto)}
 `
       }
-      if (validade) mensagem += `Validade: ${validade}
+      if (validadeOrcamentoAtiva(validade)) mensagem += `Validade: ${validade}
 `
       if (prazoEntrega) mensagem += `Prazo de entrega: ${prazoEntrega}
 `

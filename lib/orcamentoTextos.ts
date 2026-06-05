@@ -21,6 +21,19 @@ export function orcamentoDeveOcultarM2Cliente(
 }
 
 /** Corrige "% duplicado" e parágrafos colados ao exibir observação no PDF. */
+/** Validade desativada quando vazia ou "0" (oculta no orçamento/PDF/WhatsApp). */
+export function validadeOrcamentoAtiva(valor?: string | null): boolean {
+  const v = String(valor ?? '').trim().toLowerCase()
+  if (!v) return false
+  if (v === '0' || v === '0 dias' || v === '0 dia' || v === '0dias') return false
+  return true
+}
+
+export function resolverValidadePadraoOrcamento(validadePadrao?: string | null): string {
+  if (!validadeOrcamentoAtiva(validadePadrao)) return ''
+  return String(validadePadrao).trim()
+}
+
 export function normalizarTextoObservacao(texto: string) {
   const saida = String(texto || '')
     .replace(/\r\n/g, '\n')

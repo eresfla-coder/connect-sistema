@@ -14,6 +14,7 @@ import {
   normalizarTextoObservacao,
   OBSERVACAO_PADRAO_ORCAMENTO,
   orcamentoDeveOcultarM2Cliente,
+  validadeOrcamentoAtiva,
 } from '@/lib/orcamentoTextos'
 
 type Cliente = {
@@ -1001,7 +1002,8 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
     Boolean(enderecoEntregaDoc) &&
     enderecoEntregaDoc.toLowerCase() !== enderecoCliente.trim().toLowerCase()
   const data = parseDataBR(orc.data)
-  const validade = texto(orc.validadeProposta || orc.validade, '7 dias')
+  const validadeBruta = texto(orc.validadeProposta || orc.validade, '')
+  const validade = validadeOrcamentoAtiva(validadeBruta) ? validadeBruta.trim() : ''
   const entrega = texto(orc.prazoEntrega, '3 dias')
   const pagamento = textoPagamentoOrcamento(orc)
   const pagamentoLista = listaFormasPagamentoOrcamento(orc)
@@ -1100,10 +1102,12 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
             <span>Documento</span>
             <strong>Nº {numeroDoc}</strong>
           </article>
-          <article>
-            <span>Validade</span>
-            <strong>{validade}</strong>
-          </article>
+          {validade ? (
+            <article>
+              <span>Validade</span>
+              <strong>{validade}</strong>
+            </article>
+          ) : null}
           <article>
             <span>Entrega</span>
             <strong>{entrega}</strong>

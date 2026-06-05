@@ -1,3 +1,5 @@
+import { validadeOrcamentoAtiva } from '@/lib/orcamentoTextos'
+
 export type TipoDocumentoWhatsapp = 'orcamento' | 'proposta_comercial' | 'os' | 'cobranca'
 
 function saudacaoPorHorario(): string {
@@ -53,7 +55,9 @@ export function mensagemDocumentoComercial(params: {
     `A *${empresa}* preparou sua ${rotulo} *${params.numero}* no valor de *${params.totalFormatado}*.`,
   ]
 
-  if (params.validade?.trim()) linhas.push(`Validade: ${params.validade.trim()}.`)
+  if (params.validade?.trim() && validadeOrcamentoAtiva(params.validade)) {
+    linhas.push(`Validade: ${params.validade.trim()}.`)
+  }
   if (params.prazoEntrega?.trim()) linhas.push(`Prazo de entrega: ${params.prazoEntrega.trim()}.`)
   if (params.formaPagamento?.trim()) linhas.push(`Pagamento: ${params.formaPagamento.trim()}.`)
   if (params.observacao?.trim()) linhas.push(`Obs.: ${params.observacao.trim()}`)
