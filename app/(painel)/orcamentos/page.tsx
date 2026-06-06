@@ -4223,72 +4223,6 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                   ))}
                 </div>
 
-                <div style={{ marginBottom: 12, padding: 12, borderRadius: 18, border: `1px solid ${modoBalcaoTurbo ? '#22c55e' : darkMode ? '#22d3ee' : '#67e8f9'}`, background: modoBalcaoTurbo ? (darkMode ? 'rgba(20,83,45,.58)' : '#ecfdf5') : (darkMode ? 'rgba(8,47,73,.55)' : '#ecfeff'), boxShadow: modoBalcaoTurbo ? '0 12px 28px rgba(34,197,94,.18)' : undefined }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
-                    <div>
-                      <div style={{ fontWeight: 950, color: modoBalcaoTurbo ? (darkMode ? '#bbf7d0' : '#166534') : (darkMode ? '#a5f3fc' : '#155e75') }}>⚡ Modo Balcão Turbo</div>
-                      <div style={{ fontSize: 12, color: modoBalcaoTurbo ? (darkMode ? '#dcfce7' : '#15803d') : (darkMode ? '#cffafe' : '#0e7490'), fontWeight: 700, marginTop: 2 }}>Leitor USB, Bluetooth ou OTG: bipou, adicionou e o foco volta sozinho.</div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setModoBalcaoTurbo((ativo) => !ativo)
-                        focarBipagemTurbo()
-                      }}
-                      style={{ ...buttonBase, background: modoBalcaoTurbo ? 'linear-gradient(135deg,#22c55e,#16a34a)' : 'linear-gradient(135deg,#06b6d4,#0891b2)', color: '#fff', padding: '10px 14px' }}
-                    >
-                      {modoBalcaoTurbo ? 'Turbo ligado' : 'Ligar turbo'}
-                    </button>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) 150px', gap: 8 }}>
-                    <input
-                      ref={inputBipagemRef}
-                      value={codigoBarrasBusca}
-                      onChange={(e) => setCodigoBarrasBusca(normalizarCodigoBarras(e.target.value))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          biparProdutoNoOrcamento()
-                        }
-                      }}
-                      onFocus={() => modoBalcaoTurbo && setMostrarBuscaProduto(false)}
-                      placeholder={modoBalcaoTurbo ? 'Bipe sem parar...' : 'Bipar produto aqui...'}
-                      inputMode="numeric"
-                      autoComplete="off"
-                      style={{ ...inputStyle, fontWeight: 950, letterSpacing: .8, fontSize: modoBalcaoTurbo ? 18 : undefined, borderColor: modoBalcaoTurbo ? '#22c55e' : inputStyle.borderColor }}
-                    />
-                    <button onClick={() => biparProdutoNoOrcamento()} style={{ ...buttonBase, background: 'linear-gradient(135deg,#06b6d4,#0891b2)', color: '#fff' }}>Adicionar</button>
-                  </div>
-                  {modoBalcaoTurbo && (
-                    <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr 1fr auto', gap: 8, alignItems: 'stretch' }}>
-                        <div style={{ padding: 10, borderRadius: 14, background: darkMode ? 'rgba(15,23,42,.68)' : '#fff', border: `1px solid ${colors.inputBorder}`, fontWeight: 900 }}>Itens: {itens.length}</div>
-                        <div style={{ padding: 10, borderRadius: 14, background: darkMode ? 'rgba(15,23,42,.68)' : '#fff', border: `1px solid ${colors.inputBorder}`, fontWeight: 900 }}>Total: {moeda(total)}</div>
-                        <div style={{ padding: 10, borderRadius: 14, background: darkMode ? 'rgba(15,23,42,.68)' : '#fff', border: `1px solid ${colors.inputBorder}`, fontWeight: 900, gridColumn: isMobile ? '1 / -1' : undefined }}>Último: {ultimoBipado || '-'}</div>
-                        <button
-                          type="button"
-                          onClick={focarBipagemTurbo}
-                          style={{ ...buttonBase, background: darkMode ? '#0f172a' : '#111827', color: '#fff', padding: '10px 12px', gridColumn: isMobile ? '1 / -1' : undefined }}
-                        >
-                          Foco no leitor
-                        </button>
-                      </div>
-
-                      {ultimosBipados.length > 0 && (
-                        <div style={{ padding: 10, borderRadius: 14, background: darkMode ? 'rgba(15,23,42,.68)' : '#ffffff', border: `1px solid ${colors.inputBorder}` }}>
-                          <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.1, color: '#22c55e', fontWeight: 950, marginBottom: 6 }}>Últimos bipados</div>
-                          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
-                            {ultimosBipados.map((nome, index) => (
-                              <span key={`${nome}-${index}`} style={{ whiteSpace: 'nowrap', padding: '7px 9px', borderRadius: 999, background: darkMode ? 'rgba(34,197,94,.12)' : '#dcfce7', color: darkMode ? '#bbf7d0' : '#166534', fontSize: 12, fontWeight: 850 }}>
-                                {nome}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
                 {usaCampoM2 ? (
                   <div
                     style={{
@@ -4688,50 +4622,6 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
         </div>
       </div>
-        {modoBalcaoTurbo && itens.length > 0 && (
-          <div style={{
-            position: 'fixed',
-            right: isMobile ? 12 : 24,
-            bottom: isMobile ? 12 : 24,
-            zIndex: 900,
-            padding: isMobile ? '10px 12px' : '12px 16px',
-            borderRadius: 18,
-            background: darkMode ? 'rgba(15,23,42,.94)' : 'rgba(255,255,255,.96)',
-            border: `1px solid ${darkMode ? '#22c55e' : '#86efac'}`,
-            boxShadow: '0 18px 45px rgba(15,23,42,.22)',
-            color: colors.text,
-            display: 'grid',
-            gap: 2,
-            minWidth: isMobile ? 190 : 240,
-          }}>
-            <div style={{ fontSize: 11, letterSpacing: 1.2, textTransform: 'uppercase', color: '#22c55e', fontWeight: 950 }}>Balcão PRO ativo</div>
-            <div style={{ fontSize: isMobile ? 20 : 24, fontWeight: 950 }}>{moeda(total)}</div>
-            <div style={{ fontSize: 12, color: colors.muted, fontWeight: 800 }}>{itens.length} item(ns) • {itens.reduce((acc, item) => acc + Number(item.quantidade || 0), 0).toLocaleString('pt-BR')} un.</div>
-            <button type="button" onClick={focarBipagemTurbo} style={{ ...buttonBase, marginTop: 6, padding: '8px 10px', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontSize: 12 }}>Continuar bipando</button>
-          </div>
-        )}
-
-        {feedbackBalcao && (
-          <div style={{
-            position: 'fixed',
-            left: '50%',
-            top: isMobile ? 76 : 96,
-            transform: 'translateX(-50%)',
-            zIndex: 1200,
-            width: 'min(92vw, 520px)',
-            padding: isMobile ? '16px 18px' : '20px 24px',
-            borderRadius: 22,
-            background: feedbackBalcao.tipo === 'ok' ? 'linear-gradient(135deg,#16a34a,#22c55e)' : 'linear-gradient(135deg,#dc2626,#ef4444)',
-            color: '#fff',
-            boxShadow: '0 24px 70px rgba(15,23,42,.30)',
-            textAlign: 'center',
-            pointerEvents: 'none',
-          }}>
-            <div style={{ fontSize: isMobile ? 34 : 42, lineHeight: 1 }}>{feedbackBalcao.tipo === 'ok' ? '✓' : '!'}</div>
-            <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 950, marginTop: 4 }}>{feedbackBalcao.texto}</div>
-            {feedbackBalcao.detalhe ? <div style={{ fontSize: 13, fontWeight: 800, opacity: .92, marginTop: 4 }}>{feedbackBalcao.detalhe}</div> : null}
-          </div>
-        )}
 
         {modalPropostaAberto && (
           <div

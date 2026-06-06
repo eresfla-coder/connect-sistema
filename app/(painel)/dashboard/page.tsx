@@ -910,7 +910,7 @@ export default function DashboardPage() {
         <section style={{ ...glass, padding: isMobile ? 16 : 20 }}>
           <Header title="Ações rápidas" subtitle="Atalhos para operar mais rápido no dia a dia" />
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,minmax(0,1fr))' : 'repeat(5,minmax(0,1fr))', gap: 12 }}>
-            <Action href="/orcamentos" title="Novo orçamento" text="Balcão PRO" />
+            <Action href="/orcamentos" title="Novo orçamento" text="Novo orçamento" />
             <Action href="/ordens-servico" title="Nova OS" text="Assistência" />
             <Action href="/produtos" title="Produtos" text="Código de barras" />
             <Action href="/financeiro" title="Financeiro" text="Cobranças" />
