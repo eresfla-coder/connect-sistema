@@ -426,6 +426,13 @@ function moeda(valor: number) {
   })
 }
 
+function iconeProdutoOrcamento(produto: Produto): string {
+  if (produto.tipoCadastro === 'servico') return '🛠️'
+  if (produto.tipoCalculo === 'm2') return '📐'
+  if (produto.tipoCalculo === 'peso') return '⚖️'
+  return '📦'
+}
+
 const MODELOS_PROPOSTA: Record<
   ModeloPropostaRapida,
   {
@@ -3857,8 +3864,8 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         {formAberto && (
           <div onClick={() => setFormAberto(false)} style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(15,23,42,0.42)', backdropFilter: 'blur(3px)' }} />
         )}
-        <div style={formAberto ? { ...shellStyle, position: 'fixed', right: isMobile ? 8 : 24, top: isMobile ? 8 : 24, bottom: isMobile ? 8 : 24, zIndex: 1000, width: isMobile ? 'calc(100vw - 16px)' : 860, maxWidth: 'calc(100vw - 32px)', overflowY: 'auto', boxShadow: '0 30px 80px rgba(15,23,42,0.28)' } : { display: 'none' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.05fr 0.95fr', gap: 16, alignItems: 'start' }}>
+        <div style={formAberto ? { ...shellStyle, position: 'fixed', right: isMobile ? 8 : 24, top: isMobile ? 8 : 24, bottom: isMobile ? 8 : 24, zIndex: 1000, width: isMobile ? 'calc(100vw - 16px)' : 980, maxWidth: 'calc(100vw - 32px)', overflowY: 'auto', boxShadow: '0 30px 80px rgba(15,23,42,0.28)' } : { display: 'none' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,7fr) minmax(260px,3fr)', gap: 16, alignItems: 'start' }}>
             <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: -4 }}>
               <div>
                 <div style={{ fontSize: 24, fontWeight: 900, color: colors.text }}>{editandoOrcamentoId ? 'Editar orçamento' : 'Novo orçamento'}</div>
@@ -3868,47 +3875,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
             </div>
             <div style={{ display: 'grid', gap: 14 }}>
               <div style={cardStyle}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                  <label style={{ ...labelStyle, marginBottom: 0 }}>👤 Cliente</label>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
-                    <button
-                      onClick={() => {
-                        setMostrarNovoCliente((valor) => !valor)
-                        setMostrarBuscaCliente(false)
-                      }}
-                      style={{
-                        ...buttonBase,
-                        minHeight: 40,
-                        padding: '10px 14px',
-                        background: 'linear-gradient(135deg,#4b5563,#374151)',
-                        color: '#fff',
-                        fontSize: 13,
-                        flex: isMobile ? 1 : undefined,
-                        boxShadow: '0 10px 18px rgba(37,99,235,0.22)',
-                      }}
-                    >
-                      + Novo cliente
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (clientesFiltrados.length > 0) setMostrarBuscaCliente((valor) => !valor)
-                      }}
-                      style={{
-                        ...buttonBase,
-                        minHeight: 40,
-                        padding: '10px 14px',
-                        background: darkMode ? '#18253f' : '#eef2ff',
-                        color: colors.text,
-                        border: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : '#d1d5db'}`,
-                        fontSize: 13,
-                        flex: isMobile ? 1 : undefined,
-                      }}
-                    >
-                      Buscar
-                    </button>
-                  </div>
-                </div>
-
+                <label style={labelStyle}>Cliente</label>
                 <input
                   value={clienteBusca}
                   onChange={(e) => {
@@ -3920,9 +3887,29 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     setMostrarBuscaCliente(true)
                     setMostrarNovoCliente(false)
                   }}
-                  placeholder="Pesquisar cliente ou salvar sem cliente (flash)..."
-                  style={inputStyle}
+                  placeholder="Pesquisar cliente"
+                  style={{ ...inputStyle, marginBottom: 8 }}
                 />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMostrarNovoCliente((valor) => !valor)
+                    setMostrarBuscaCliente(false)
+                  }}
+                  style={{
+                    ...buttonBase,
+                    minHeight: 36,
+                    padding: '8px 12px',
+                    background: 'transparent',
+                    color: darkMode ? '#93c5fd' : '#2563eb',
+                    border: `1px dashed ${darkMode ? 'rgba(147,197,253,0.35)' : '#93c5fd'}`,
+                    fontSize: 13,
+                    fontWeight: 900,
+                    width: 'fit-content',
+                  }}
+                >
+                  + Novo Cliente
+                </button>
 
                 {clienteSelecionado && (
                   <div
@@ -3941,18 +3928,6 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     <div style={{ fontSize: 13, color: colors.muted }}>🪪 {clienteSelecionado.tipoPessoa === 'PJ' ? 'PJ' : 'PF'} {clienteSelecionado.cpf ? `• CPF: ${clienteSelecionado.cpf}` : ''} {clienteSelecionado.cnpj ? `• CNPJ: ${clienteSelecionado.cnpj}` : ''}</div>
                     {clienteSelecionado.email ? <div style={{ fontSize: 13, color: colors.muted }}>✉️ {clienteSelecionado.email}</div> : null}
                     {clienteSelecionado.endereco ? <div style={{ fontSize: 13, color: colors.muted }}>📍 Endereço do cliente: {clienteSelecionado.endereco}</div> : null}
-                  </div>
-                )}
-
-                {clienteSelecionado && (
-                  <div style={{ marginTop: 10 }}>
-                    <label style={labelStyle}>📦 Endereço de entrega</label>
-                    <input
-                      value={enderecoEntrega}
-                      onChange={(e) => setEnderecoEntrega(e.target.value)}
-                      placeholder="Preencha se for diferente do cadastro (ex.: trabalho, outro bairro)"
-                      style={inputStyle}
-                    />
                   </div>
                 )}
 
@@ -4189,7 +4164,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               </div>
 
               <div style={cardStyle}>
-                <label style={labelStyle}>📦 Produto / Serviço</label>
+                <label style={labelStyle}>Produto / Serviço</label>
 
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(0,1fr))', gap: 8, marginBottom: 10 }}>
                   {[
@@ -4344,16 +4319,36 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                         onClick={() => selecionarProduto(produto)}
                         style={{
                           textAlign: 'left',
-                          border: `1px solid ${colors.inputBorder}`,
-                          background: colors.inputBg,
+                          border: `1.5px solid ${darkMode ? 'rgba(255,255,255,0.08)' : '#dbeafe'}`,
+                          background: darkMode ? '#0f172a' : '#ffffff',
                           color: colors.text,
-                          borderRadius: 10,
-                          padding: 10,
+                          borderRadius: 14,
+                          padding: '14px 16px',
+                          minHeight: 72,
                           cursor: 'pointer',
-                          fontWeight: 700,
+                          display: 'grid',
+                          gap: 6,
+                          boxShadow: darkMode ? '0 8px 20px rgba(0,0,0,0.18)' : '0 8px 20px rgba(37,99,235,0.08)',
+                          transition: 'transform 0.12s ease, box-shadow 0.12s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-1px)'
+                          e.currentTarget.style.boxShadow = darkMode ? '0 12px 28px rgba(0,0,0,0.24)' : '0 12px 28px rgba(37,99,235,0.14)'
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)'
+                          e.currentTarget.style.boxShadow = darkMode ? '0 8px 20px rgba(0,0,0,0.18)' : '0 8px 20px rgba(37,99,235,0.08)'
                         }}
                       >
-                        {produto.nome} • {produto.tipoCalculo === 'm2' ? `${moeda(produto.valor)} / m²` : produto.tipoCalculo === 'peso' ? `${moeda(produto.valor)} / kg` : moeda(produto.valor)}{produto.codigoBarras ? ` • cód. ${produto.codigoBarras}` : ''}
+                        <div style={{ fontSize: 15, fontWeight: 900, lineHeight: 1.25, wordBreak: 'break-word' }}>
+                          {iconeProdutoOrcamento(produto)} {produto.nome}
+                        </div>
+                        <div style={{ fontSize: 16, fontWeight: 900, color: darkMode ? '#4ade80' : '#15803d' }}>
+                          {produto.tipoCalculo === 'm2' ? `${moeda(produto.valor)} / m²` : produto.tipoCalculo === 'peso' ? `${moeda(produto.valor)} / kg` : moeda(produto.valor)}
+                        </div>
+                        {produto.codigoBarras ? (
+                          <div style={{ fontSize: 11, color: colors.muted, fontWeight: 700 }}>cód. {produto.codigoBarras}</div>
+                        ) : null}
                       </button>
                     ))}
                   </div>
@@ -4361,7 +4356,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               </div>
 
               <div style={cardStyle}>
-                <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>Itens</div>
+                <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>Itens adicionados</div>
                 {itens.length === 0 ? (
                   <div style={{ color: colors.muted }}>Nenhum item adicionado.</div>
                 ) : (
@@ -4484,7 +4479,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                             <button onClick={() => ajustarQuantidadeItem(item.id, -1)} style={{ ...buttonBase, background: darkMode ? '#334155' : '#e2e8f0', color: darkMode ? '#fff' : '#111827', padding: '10px 14px' }}>-</button>
                             <button onClick={() => alterarVisibilidadeItemCliente(item.id)} style={{ ...buttonBase, background: item.mostrarCliente === false ? 'linear-gradient(135deg,#f97316,#ea580c)' : darkMode ? '#334155' : '#e2e8f0', color: item.mostrarCliente === false ? '#fff' : darkMode ? '#fff' : '#111827', padding: '10px 14px' }}>{item.mostrarCliente === false ? 'Mostrar ao cliente' : 'Ocultar do cliente'}</button>
                             <button onClick={() => editarItem(item)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(37,99,235,0.25)' }}>Editar</button>
-                            <button onClick={() => removerItem(item.id)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(239,68,68,0.22)' }}>Remover</button>
+                            <button onClick={() => removerItem(item.id)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(239,68,68,0.22)' }}>Excluir</button>
                           </div>
                         </div>
                       </div>
@@ -4494,128 +4489,198 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               </div>
             </div>
 
-            <div style={{ display: 'grid', gap: 14 }}>
-              <div style={cardStyle}>
-                <label style={labelStyle}>📝 Título</label>
-                <div style={{ display: 'grid', gridTemplateColumns: config.logoUrl ? '56px 1fr' : '1fr', gap: 8, alignItems: 'center' }}>
-                  {config.logoUrl ? <img src={config.logoUrl} alt="Logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 12, background: '#fff', padding: 4 }} /> : null}
-                  <input value={tituloPdf} onChange={(e) => setTituloPdf(e.target.value)} style={inputStyle} />
+            <div style={{ display: 'grid', gap: 14, position: isMobile ? 'static' : 'sticky', top: 16, alignSelf: 'start' }}>
+              <div
+                style={{
+                  ...cardStyle,
+                  background: darkMode ? 'linear-gradient(180deg,#0f172a,#111827)' : 'linear-gradient(180deg,#f8fafc,#ffffff)',
+                  border: `1px solid ${darkMode ? 'rgba(34,197,94,0.28)' : '#bbf7d0'}`,
+                }}
+              >
+                <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 12, color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.6 }}>Resumo financeiro</div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, color: colors.text }}>
+                    <span>Subtotal</span>
+                    <strong>{moeda(subtotal)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, color: colors.text }}>
+                    <span>Entrega</span>
+                    <strong>{moeda(valorEntrega)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, color: colors.text }}>
+                    <span>Desconto</span>
+                    <strong>
+                      {moeda(valorDesconto)}
+                      {descontoTipo === 'percentual' && descontoInput ? ` (${textoDecimalLivreParaNumero(descontoInput).toLocaleString('pt-BR')}%)` : ''}
+                    </strong>
+                  </div>
+                  <div style={{ borderTop: `1px solid ${colors.inputBorder}`, marginTop: 4, paddingTop: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 900, color: colors.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Total</div>
+                    <div style={{ fontSize: isMobile ? 28 : 34, fontWeight: 950, color: darkMode ? '#4ade80' : '#15803d', lineHeight: 1.05, letterSpacing: -0.5 }}>
+                      {moeda(total)}
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div style={cardStyle}>
-                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
-                  <div style={{ gridColumn: isMobile ? '1 / -1' : '1 / -1' }}>
-                    <label style={labelStyle}>💳 Formas de pagamento</label>
-                    
-                    
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                      {OPCOES_PAGAMENTO_ORCAMENTO.map((opcao) => {
-                        const ativo = formasPagamentoSelecionadas.includes(opcao.label)
-                        return (
-                          <button
-                            key={opcao.id}
-                            type="button"
-                            onClick={() =>
-                              setFormasPagamentoSelecionadas((atual) =>
-                                atual.includes(opcao.label) ? atual.filter((f) => f !== opcao.label) : [...atual, opcao.label],
-                              )
-                            }
-                            style={{
-                              minHeight: 38,
-                              borderRadius: 999,
-                              border: ativo ? '2px solid #2563eb' : `1px solid ${colors.inputBorder}`,
-                              background: ativo ? (darkMode ? '#1e3a8a' : '#eff6ff') : (darkMode ? '#0f172a' : '#fff'),
-                              color: ativo ? (darkMode ? '#bfdbfe' : '#1d4ed8') : colors.text,
-                              fontWeight: 900,
-                              fontSize: 13,
-                              padding: '0 14px',
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              boxShadow: ativo ? '0 0 16px rgba(37,99,235,.15)' : 'none',
-                            }}
-                          >
-                            <span>{opcao.icon}</span> {opcao.label}
-                          </button>
-                        )
-                      })}
-                    
-                    </div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontWeight: 800, color: colors.muted, fontSize: 13 }}>
-                      <input
-                        type="checkbox"
-                        checked={ocultarValorUnitarioM2}
-                        onChange={(e) => setOcultarValorUnitarioM2(e.target.checked)}
-                      />
-                      No PDF/WhatsApp para o cliente, itens m² mostram só descrição e valor final (cálculo interno no painel)
-                    </label>
+                <label style={{ ...labelStyle, marginBottom: 6 }}>Formas de pagamento</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {OPCOES_PAGAMENTO_ORCAMENTO.map((opcao) => {
+                    const ativo = formasPagamentoSelecionadas.includes(opcao.label)
+                    return (
+                      <button
+                        key={opcao.id}
+                        type="button"
+                        onClick={() =>
+                          setFormasPagamentoSelecionadas((atual) =>
+                            atual.includes(opcao.label) ? atual.filter((f) => f !== opcao.label) : [...atual, opcao.label],
+                          )
+                        }
+                        style={{
+                          minHeight: 32,
+                          borderRadius: 999,
+                          border: ativo ? '2px solid #2563eb' : `1px solid ${colors.inputBorder}`,
+                          background: ativo ? (darkMode ? '#1e3a8a' : '#eff6ff') : (darkMode ? '#0f172a' : '#fff'),
+                          color: ativo ? (darkMode ? '#bfdbfe' : '#1d4ed8') : colors.text,
+                          fontWeight: 900,
+                          fontSize: 12,
+                          padding: '0 12px',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          boxShadow: ativo ? '0 0 12px rgba(37,99,235,.12)' : 'none',
+                        }}
+                      >
+                        {opcao.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontWeight: 800, color: colors.muted, fontSize: 12, lineHeight: 1.4 }}>
+                  <input
+                    type="checkbox"
+                    checked={ocultarValorUnitarioM2}
+                    onChange={(e) => setOcultarValorUnitarioM2(e.target.checked)}
+                  />
+                  No PDF/WhatsApp para o cliente, itens m² mostram só descrição e valor final (cálculo interno no painel)
+                </label>
+                {formasPagamentoSelecionadas.some((f) => f.toLowerCase().includes('boleto')) && (
+                  <div style={{ marginTop: 8 }}>
+                    <label style={labelStyle}>Prazo dos boletos</label>
+                    <select value={parcelasBoleto} onChange={(e) => setParcelasBoleto(e.target.value)} style={inputStyle}>
+                      <option value="">Selecione</option>
+                      <option value="30 dias">30 dias</option>
+                      <option value="30 / 60 dias">30 / 60 dias</option>
+                      <option value="30 / 60 / 90 dias">30 / 60 / 90 dias</option>
+                    </select>
                   </div>
-                  {formasPagamentoSelecionadas.some((f) => f.toLowerCase().includes('boleto')) && (
-                    <div>
-                      <label style={labelStyle}>🗓️ Prazo dos boletos</label>
-                      <select value={parcelasBoleto} onChange={(e) => setParcelasBoleto(e.target.value)} style={inputStyle}>
-                        <option value="">Selecione</option>
-                        <option value="30 dias">30 dias</option>
-                        <option value="30 / 60 dias">30 / 60 dias</option>
-                        <option value="30 / 60 / 90 dias">30 / 60 / 90 dias</option>
-                      </select>
-                    </div>
-                  )}
+                )}
+              </div>
+
+              <div style={cardStyle}>
+                <div style={{ display: 'grid', gap: 10 }}>
                   <div>
-                    <label style={labelStyle}>📅 Validade</label>
+                    <label style={labelStyle}>Título</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: config.logoUrl ? '48px 1fr' : '1fr', gap: 8, alignItems: 'center' }}>
+                      {config.logoUrl ? <img src={config.logoUrl} alt="Logo" style={{ width: 48, height: 48, objectFit: 'contain', borderRadius: 10, background: '#fff', padding: 4 }} /> : null}
+                      <input value={tituloPdf} onChange={(e) => setTituloPdf(e.target.value)} style={inputStyle} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Validade</label>
                     <input value={validade} onChange={(e) => setValidade(e.target.value)} style={inputStyle} />
                   </div>
                   <div>
-                    <label style={labelStyle}>🚚 Prazo entrega</label>
+                    <label style={labelStyle}>Prazo de entrega</label>
                     <input value={prazoEntrega} onChange={(e) => setPrazoEntrega(e.target.value)} style={inputStyle} />
                   </div>
                   <div>
-                    <label style={labelStyle}>🚛 Entrega</label>
+                    <label style={labelStyle}>Frete / Entrega</label>
                     <input type="number" min={0} step="0.01" value={valorEntrega === 0 ? '' : valorEntrega} placeholder="0,00" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setValorEntrega(e.target.value === '' ? 0 : Number(e.target.value))} style={inputStyle} />
                   </div>
-                </div>
-                <div style={{ marginTop: 10 }}>
-                  <label style={labelStyle}>🏷 Desconto</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '140px 1fr', gap: 8 }}>
-                    <select value={descontoTipo} onChange={(e) => setDescontoTipo(e.target.value as 'valor' | 'percentual')} style={inputStyle}>
-                      <option value="valor">R$</option>
-                      <option value="percentual">%</option>
-                    </select>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={descontoInput}
-                      onChange={(e) => setDescontoInput(e.target.value)}
-                      placeholder={descontoTipo === 'percentual' ? 'Ex: 10' : '0,00'}
-                      style={inputStyle}
-                    />
+                  {clienteSelecionado && (
+                    <div>
+                      <label style={labelStyle}>Endereço de entrega</label>
+                      <input
+                        value={enderecoEntrega}
+                        onChange={(e) => setEnderecoEntrega(e.target.value)}
+                        placeholder="Preencha se for diferente do cadastro"
+                        style={inputStyle}
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label style={labelStyle}>Desconto</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 8 }}>
+                      <select value={descontoTipo} onChange={(e) => setDescontoTipo(e.target.value as 'valor' | 'percentual')} style={inputStyle}>
+                        <option value="valor">R$</option>
+                        <option value="percentual">%</option>
+                      </select>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={descontoInput}
+                        onChange={(e) => setDescontoInput(e.target.value)}
+                        placeholder={descontoTipo === 'percentual' ? 'Ex: 10' : '0,00'}
+                        style={inputStyle}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div style={cardStyle}>
-                <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>Resumo</div>
-                <div style={{ display: 'grid', gap: 6 }}>
-                  <div style={{ fontSize: 15 }}>Subtotal: <strong>{moeda(subtotal)}</strong></div>
-                  <div style={{ fontSize: 15 }}>Entrega: <strong>{moeda(valorEntrega)}</strong></div>
-                  <div style={{ fontSize: 15 }}>Desconto: <strong>{moeda(valorDesconto)}</strong>{descontoTipo === 'percentual' && descontoInput ? ` (${textoDecimalLivreParaNumero(descontoInput).toLocaleString('pt-BR')}%)` : ''}</div>
-                  <div style={{ fontSize: isMobile ? 24 : 30, fontWeight: 900 }}>💰 Total: {moeda(total)}</div>
-                </div>
+                <label style={labelStyle}>Observação</label>
+                <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} />
               </div>
 
-              <div style={cardStyle}>
-                <label style={{ ...labelStyle, color: '#dc2626' }}>📝 Observação</label>
-                <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} style={{ ...inputStyle, minHeight: 90, resize: 'vertical' }} />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', justifyContent: isMobile ? 'stretch' : 'stretch', gap: 8, alignItems: 'stretch' }}>
-                <button type="button" disabled={salvandoOrcamento} onClick={novoOrcamento} style={{ ...buttonBase, width: '100%', background: '#e5e7eb', color: '#111827', opacity: salvandoOrcamento ? 0.6 : 1 }}>Limpar</button>
-                <button type="button" disabled={salvandoOrcamento} onClick={() => void salvarOrcamento()} style={{ ...actionButtonStyle('os'), opacity: salvandoOrcamento ? 0.7 : 1, cursor: salvandoOrcamento ? 'wait' : 'pointer' }}>
+              <div style={{ display: 'grid', gap: 8 }}>
+                <button type="button" disabled={salvandoOrcamento} onClick={() => void salvarOrcamento()} style={{ ...actionButtonStyle('editar'), opacity: salvandoOrcamento ? 0.7 : 1, cursor: salvandoOrcamento ? 'wait' : 'pointer', minHeight: 48, fontSize: 14 }}>
                   {salvandoOrcamento ? 'Salvando…' : editandoOrcamentoId !== null ? 'Atualizar orçamento' : 'Salvar orçamento'}
                 </button>
-                <button type="button" disabled={salvandoOrcamento} onClick={gerarPDF} style={{ ...actionButtonStyle('editar'), opacity: salvandoOrcamento ? 0.7 : 1 }}>Gerar PDF</button>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
+                  <button
+                    type="button"
+                    disabled={salvandoOrcamento}
+                    onClick={() => void enviarWhatsApp()}
+                    style={{
+                      ...buttonBase,
+                      width: '100%',
+                      minHeight: 44,
+                      background: 'linear-gradient(135deg,#25d366,#128c7e)',
+                      color: '#fff',
+                      boxShadow: '0 8px 18px rgba(37,211,102,0.22)',
+                      opacity: salvandoOrcamento ? 0.7 : 1,
+                    }}
+                  >
+                    WhatsApp
+                  </button>
+                  <button type="button" disabled={salvandoOrcamento} onClick={gerarPDF} style={{ ...actionButtonStyle('visualizar'), opacity: salvandoOrcamento ? 0.7 : 1 }}>
+                    Gerar PDF
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  disabled={salvandoOrcamento}
+                  onClick={novoOrcamento}
+                  style={{
+                    ...buttonBase,
+                    width: '100%',
+                    minHeight: 36,
+                    background: 'transparent',
+                    color: colors.muted,
+                    border: 'none',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    opacity: salvandoOrcamento ? 0.5 : 0.85,
+                    textDecoration: 'underline',
+                    textUnderlineOffset: 3,
+                  }}
+                >
+                  Limpar formulário
+                </button>
               </div>
             </div>
           </div>
