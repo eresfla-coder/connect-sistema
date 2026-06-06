@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { ADMIN_EMAILS, dataMaisDias } from '@/lib/access'
+import { dataMaisDias } from '@/lib/access'
+import { requireAdminFromRequest } from '@/lib/api-auth'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
@@ -13,7 +14,6 @@ type BodyPayload = {
   telefone?: string
   valor_plano?: string | number
   tipo?: TipoNovoCliente
-  admin_email?: string
   sistema_cliente?: string
   observacoes?: string
   criar_acesso?: boolean
@@ -22,7 +22,6 @@ type BodyPayload = {
 type PatchPayload = {
   id?: string
   updates?: Record<string, any>
-  admin_email?: string
 }
 
 function normalizarTelefone(value?: string) {
@@ -40,59 +39,8 @@ function senhaTemporaria() {
   return `Connect@${aleatorio}${final}`
 }
 
-function getBearerToken(req: Request) {
-  const authHeader = req.headers.get('authorization') || req.headers.get('Authorization')
-  if (!authHeader) return ''
-
-  const [type, token] = authHeader.split(' ')
-
-  if (String(type || '').toLowerCase() !== 'bearer' || !token) {
-    return ''
-  }
-
-  return token.trim()
-}
-
 function siteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'https://connect-sistema-teste.vercel.app').replace(/\/$/, '')
-}
-
-function isAdminEmail(email?: string | null) {
-  return ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase())
-}
-
-async function identificarAdmin(req: Request, body?: BodyPayload | PatchPayload) {
-  const token = getBearerToken(req)
-
-  if (token) {
-    const authUserResult = await supabaseAdmin.auth.getUser(token)
-
-    const emailToken =
-      authUserResult.data.user?.email?.trim().toLowerCase() || ''
-
-    if (!authUserResult.error && isAdminEmail(emailToken)) {
-      return {
-        ok: true as const,
-        email: emailToken,
-      }
-    }
-  }
-
-  const emailFallback = String(body?.admin_email || '')
-    .trim()
-    .toLowerCase()
-
-  if (isAdminEmail(emailFallback)) {
-    return {
-      ok: true as const,
-      email: emailFallback,
-    }
-  }
-
-  return {
-    ok: false as const,
-    email: null,
-  }
 }
 
 /* =========================
@@ -101,14 +49,7 @@ async function identificarAdmin(req: Request, body?: BodyPayload | PatchPayload)
 
 export async function GET(req: Request) {
   try {
-    const admin = await identificarAdmin(req)
-
-    if (!admin.ok) {
-      return NextResponse.json(
-        { error: 'Acesso negado.' },
-        { status: 403 }
-      )
-    }
+    await requireAdminFromRequest(req)
 
     const { data, error } = await supabaseAdmin
       .from('perfis')
@@ -127,17 +68,15 @@ export async function GET(req: Request) {
       clientes: data || [],
     })
   } catch (error: any) {
+    const status = error?.message === 'Acesso negado.' || error?.message === 'Sessão ausente.' || error?.message === 'Sessão inválida.' ? 403 : 500
     return NextResponse.json(
       {
         error: error?.message || 'Erro ao carregar clientes.',
       },
-      { status: 500 }
+      { status }
     )
   }
 }
-
-
-
 
 /* =========================
    PATCH CLIENTE ADMIN
@@ -145,15 +84,8 @@ export async function GET(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
+    await requireAdminFromRequest(req)
     const body = (await req.json()) as PatchPayload
-    const admin = await identificarAdmin(req, body)
-
-    if (!admin.ok) {
-      return NextResponse.json(
-        { error: 'Acesso negado.' },
-        { status: 403 }
-      )
-    }
 
     const id = String(body.id || '').trim()
 
@@ -272,11 +204,12 @@ export async function PATCH(req: Request) {
 
     return NextResponse.json({ ok: true, cliente: clienteAtualizado })
   } catch (error: any) {
+    const status = error?.message === 'Acesso negado.' || error?.message === 'Sessão ausente.' || error?.message === 'Sessão inválida.' ? 403 : 500
     return NextResponse.json(
       {
         error: error?.message || 'Erro ao atualizar cliente.',
       },
-      { status: 500 }
+      { status }
     )
   }
 }
@@ -319,14 +252,7 @@ async function sincronizarAssinaturaPagante(
 
 export async function DELETE(req: Request) {
   try {
-    const admin = await identificarAdmin(req)
-
-    if (!admin.ok) {
-      return NextResponse.json(
-        { error: 'Acesso negado.' },
-        { status: 403 }
-      )
-    }
+    await requireAdminFromRequest(req)
 
     const url = new URL(req.url)
     const id = String(url.searchParams.get('id') || '').trim()
@@ -358,11 +284,12 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ ok: true })
   } catch (error: any) {
+    const status = error?.message === 'Acesso negado.' || error?.message === 'Sessão ausente.' || error?.message === 'Sessão inválida.' ? 403 : 500
     return NextResponse.json(
       {
         error: error?.message || 'Erro ao excluir cliente.',
       },
-      { status: 500 }
+      { status }
     )
   }
 }
@@ -373,16 +300,8 @@ export async function DELETE(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    await requireAdminFromRequest(req)
     const body = (await req.json()) as BodyPayload
-
-    const admin = await identificarAdmin(req, body)
-
-    if (!admin.ok) {
-      return NextResponse.json(
-        { error: 'Acesso restrito ao administrador.' },
-        { status: 403 }
-      )
-    }
 
     const email = String(body.email || '').trim().toLowerCase()
 
@@ -566,11 +485,12 @@ export async function POST(req: Request) {
       cliente: perfil,
     })
   } catch (error: any) {
+    const status = error?.message === 'Acesso negado.' || error?.message === 'Sessão ausente.' || error?.message === 'Sessão inválida.' ? 403 : 500
     return NextResponse.json(
       {
         error: error?.message || 'Erro inesperado.',
       },
-      { status: 500 }
+      { status }
     )
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { ADMIN_EMAILS } from '@/lib/access'
+import { requireAdminFromRequest } from '@/lib/api-auth'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
@@ -15,21 +15,6 @@ type PerfilAutomacao = {
   vencimento: string | null
   valor_plano: number | null
   sistema_cliente: string | null
-}
-
-function getBearerToken(request: NextRequest) {
-  const header = request.headers.get('authorization') || ''
-  if (!header.toLowerCase().startsWith('bearer ')) return ''
-  return header.slice(7).trim()
-}
-
-async function validarAdmin(request: NextRequest) {
-  const token = getBearerToken(request)
-  if (!token) return false
-
-  const { data, error } = await supabaseAdmin.auth.getUser(token)
-  const email = data.user?.email?.trim().toLowerCase() || ''
-  return !error && ADMIN_EMAILS.includes(email)
 }
 
 function diasAte(data?: string | null) {
@@ -75,10 +60,7 @@ function montarItem(cliente: PerfilAutomacao, tipo: 'trial' | 'vencendo' | 'venc
 
 export async function GET(request: NextRequest) {
   try {
-    const adminOk = await validarAdmin(request)
-    if (!adminOk) {
-      return NextResponse.json({ ok: false, error: 'Acesso negado.' }, { status: 403 })
-    }
+    await requireAdminFromRequest(request)
 
     const { data, error } = await supabaseAdmin
       .from('perfis')
@@ -120,10 +102,11 @@ export async function GET(request: NextRequest) {
       renovacao: clientes.slice(0, 20).map((cliente) => montarItem(cliente, 'renovacao')),
     })
   } catch (error: any) {
+    const status = error?.message === 'Acesso negado.' || error?.message === 'Sessão ausente.' || error?.message === 'Sessão inválida.' ? 403 : 500
     console.error('ADMIN_AUTOMACOES_ERROR', error)
     return NextResponse.json(
       { ok: false, error: error?.message || 'Não foi possível preparar automações.' },
-      { status: 500 },
+      { status },
     )
   }
 }

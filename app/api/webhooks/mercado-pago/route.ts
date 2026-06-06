@@ -48,7 +48,10 @@ function extrairPaymentId(request: NextRequest, body: any) {
 
 function validarAssinaturaMercadoPago(request: NextRequest, resourceId: string) {
   const secret = process.env.MERCADO_PAGO_WEBHOOK_SECRET
-  if (!secret) return true
+  if (!secret) {
+    console.error('CONNECT_WEBHOOK_SECRET_AUSENTE')
+    return false
+  }
 
   const signature = request.headers.get('x-signature') || ''
   const requestId = request.headers.get('x-request-id') || ''

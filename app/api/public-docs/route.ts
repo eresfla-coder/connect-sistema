@@ -109,6 +109,82 @@ function getBearerToken(req: NextRequest) {
   return String(token || '').trim()
 }
 
+function tokenFormatoValido(token: string) {
+  const t = String(token || '').trim()
+  return t.length >= 16 && /^[a-f0-9]+$/i.test(t)
+}
+
+function payloadIndicaAprovacaoPublica(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return false
+  const p = payload as Record<string, unknown>
+  const status = String(p.status || '').toLowerCase()
+  if (/aprov|cancel|recus/.test(status)) return true
+  if (p.aprovacaoDigital || p.assinaturaDigital) return true
+  if (typeof p.aprovado === 'boolean') return true
+  const assinatura = p.assinatura as Record<string, unknown> | undefined
+  if (assinatura?.status === 'assinado' || p.assinado === true) return true
+  return false
+}
+
+function mesclarPayloadAprovacaoPublica(
+  base: Record<string, unknown> | null | undefined,
+  incoming: Record<string, unknown>,
+) {
+  const anterior = base && typeof base === 'object' ? base : {}
+  return {
+    ...anterior,
+    status: incoming.status ?? anterior.status,
+    aprovado: incoming.aprovado ?? anterior.aprovado,
+    aprovadoEm: incoming.aprovadoEm ?? anterior.aprovadoEm,
+    aprovacaoDigital: incoming.aprovacaoDigital ?? anterior.aprovacaoDigital,
+    assinaturaDigital: incoming.assinaturaDigital ?? anterior.assinaturaDigital,
+    assinatura: incoming.assinatura ?? anterior.assinatura,
+    assinado: incoming.assinado ?? anterior.assinado,
+    atualizadoEm: incoming.atualizadoEm ?? anterior.atualizadoEm,
+  }
+}
+
+async function buscarDocumentoOwner(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  documentType: string,
+  documentId: string,
+  userId: string,
+) {
+  const base = await supabaseAdmin
+    .from('public_documents')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('document_id', documentId)
+    .eq('document_type', documentType)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (base.data || base.error) return base
+
+  if (documentType === 'ordem_servico') {
+    return supabaseAdmin
+      .from('public_documents')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('documento_id', documentId)
+      .in('tipo', ['ordem_servico', 'os'])
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  }
+
+  return supabaseAdmin
+    .from('public_documents')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('tipo', documentType)
+    .eq('documento_id', documentId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+}
+
 async function userIdDoToken(
   req: NextRequest,
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>
@@ -155,10 +231,12 @@ export async function GET(req: NextRequest) {
       ''
     ).trim()
 
+    const userIdOwner = await userIdDoToken(req, supabaseAdmin)
+
     if (documentType === 'ordem_servico' && documentId) {
       let result
 
-      if (token) {
+      if (token && tokenFormatoValido(token)) {
         result = await supabaseAdmin
           .from('public_documents')
           .select('*')
@@ -166,15 +244,13 @@ export async function GET(req: NextRequest) {
           .eq('token', token)
           .in('tipo', ['ordem_servico', 'os'])
           .maybeSingle()
+      } else if (userIdOwner) {
+        result = await buscarDocumentoOwner(supabaseAdmin, 'ordem_servico', documentId, userIdOwner)
       } else {
-        result = await supabaseAdmin
-          .from('public_documents')
-          .select('*')
-          .eq('documento_id', documentId)
-          .in('tipo', ['ordem_servico', 'os'])
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
+        return NextResponse.json(
+          { success: false, error: 'Token obrigatório para acessar este documento.' },
+          { status: 401 },
+        )
       }
 
       const { data, error } = result
@@ -195,7 +271,7 @@ export async function GET(req: NextRequest) {
     }
 
     if ((documentType === 'contrato' || documentType === 'recibo') && documentId) {
-      if (!token) {
+      if (!token || !tokenFormatoValido(token)) {
         return NextResponse.json(
           { success: false, error: 'Link inválido ou incompleto. Peça um novo link ao emitente.' },
           { status: 400 }
@@ -246,7 +322,7 @@ export async function GET(req: NextRequest) {
     if (documentType === 'orcamento' && documentId) {
       let result
 
-      if (token) {
+      if (token && tokenFormatoValido(token)) {
         result = await supabaseAdmin
           .from('public_documents')
           .select('*')
@@ -254,15 +330,13 @@ export async function GET(req: NextRequest) {
           .eq('documento_id', documentId)
           .eq('token', token)
           .maybeSingle()
+      } else if (userIdOwner) {
+        result = await buscarDocumentoOwner(supabaseAdmin, 'orcamento', documentId, userIdOwner)
       } else {
-        result = await supabaseAdmin
-          .from('public_documents')
-          .select('*')
-          .eq('tipo', 'orcamento')
-          .eq('documento_id', documentId)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
+        return NextResponse.json(
+          { success: false, error: 'Token obrigatório para acessar este documento.' },
+          { status: 401 },
+        )
       }
 
       const { data, error } = result
@@ -292,6 +366,22 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    if (!token || !tokenFormatoValido(token)) {
+      if (!userIdOwner) {
+        return NextResponse.json(
+          { success: false, error: 'Token obrigatório para acessar este documento.' },
+          { status: 401 },
+        )
+      }
+      const tipoNorm = normalizarTipoPublico(tipo)
+      const ownerResult = await buscarDocumentoOwner(supabaseAdmin, tipoNorm, documentoId, userIdOwner)
+      if (ownerResult.error) return erroApi(ownerResult.error)
+      if (!ownerResult.data) {
+        return NextResponse.json({ success: false, error: 'Documento não encontrado.' }, { status: 404 })
+      }
+      return NextResponse.json(ownerResult.data)
+    }
+
     const legadoQuery =
       tipo === 'ordem_servico' || tipo === 'os'
         ? supabaseAdmin
@@ -304,11 +394,9 @@ export async function GET(req: NextRequest) {
             .select('*')
             .eq('tipo', tipo)
             .eq('documento_id', documentoId)
+            .eq('token', token)
 
-    const { data, error } = await legadoQuery
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    const { data, error } = await legadoQuery.maybeSingle()
 
     if (error) {
       console.error('[PUBLIC_DOCS_GET]', error)
@@ -422,20 +510,57 @@ export async function POST(req: NextRequest) {
       return erroApi(erroBusca)
     }
 
+    const userIdBearer = await userIdDoToken(req, supabaseAdmin)
+    const isAprovacaoPublica = payloadIndicaAprovacaoPublica(payloadRecebido)
+    const tokenConfere = Boolean(
+      tokenRecebido &&
+      existente?.token &&
+      String(existente.token) === tokenRecebido &&
+      tokenFormatoValido(tokenRecebido),
+    )
+
+    if (!existente && !userIdBearer) {
+      return NextResponse.json(
+        { success: false, error: 'Publicação exige autenticação do emitente.' },
+        { status: 401 },
+      )
+    }
+
+    if (!userIdBearer) {
+      if (!tokenConfere || !existente) {
+        return NextResponse.json({ success: false, error: 'Não autorizado.' }, { status: 401 })
+      }
+      if (!isAprovacaoPublica) {
+        return NextResponse.json(
+          { success: false, error: 'Alteração não permitida sem autenticação do emitente.' },
+          { status: 403 },
+        )
+      }
+    }
+
+    if (userIdBearer && existente?.user_id && String(existente.user_id) !== userIdBearer) {
+      return NextResponse.json({ success: false, error: 'Documento pertence a outro usuário.' }, { status: 403 })
+    }
+
+    const payloadParaMerge =
+      !userIdBearer && existente?.payload && isAprovacaoPublica
+        ? mesclarPayloadAprovacaoPublica(existente.payload as Record<string, unknown>, payloadRecebido as Record<string, unknown>)
+        : payloadRecebido
+
     const token = String(
       existente?.token ||
       tokenRecebido ||
       gerarToken()
     ).trim()
 
-    const userIdToken = await userIdDoToken(req, supabaseAdmin)
+    const userIdToken = userIdBearer
 
     const userId = String(
+      userIdBearer ||
+      existente?.user_id ||
       body?.user_id ||
       payloadRecebido?.user_id ||
       payloadRecebido?.owner_user_id ||
-      userIdToken ||
-      existente?.user_id ||
       ''
     ).trim()
 
@@ -471,7 +596,7 @@ export async function POST(req: NextRequest) {
     const payload = enriquecerPayloadDocumentoPublico(
       {
         ...(existente?.payload || {}),
-        ...payloadRecebido,
+        ...payloadParaMerge,
         ...empresaCampos,
       },
       configEmpresaPublica,

@@ -1,25 +1,14 @@
-export const ADMIN_EMAILS = [
-  'eresfla@gmail.com',
-  'eresfla2025@hotmail.com',
-  'lojaconnect@hotmail.com',
-]
-
-export function isAdminEmail(email?: string | null) {
-  if (!email) return false
-
-  return ADMIN_EMAILS.includes(
-    String(email).trim().toLowerCase()
-  )
+/**
+ * Client-safe admin hints. Authoritative admin list lives server-side (lib/access-server.ts + ADMIN_EMAILS env).
+ * On the client, only perfil role/tier flags are trusted locally; use /api/assinatura/status for isAdminMaster.
+ */
+export function isAdminEmail(_email?: string | null) {
+  return false
 }
 
-/** Admin master: e-mails fixos + lista ADMIN_EMAILS (não depende de perfis). */
-export function isAdminMaster(email?: string | null) {
-  const emailNormalizado = String(email || '').toLowerCase().trim()
-  return (
-    emailNormalizado === 'eresfla2025@hotmail.com' ||
-    emailNormalizado === 'eresfla@gmail.com' ||
-    isAdminEmail(emailNormalizado)
-  )
+/** @deprecated Client-side email check disabled — use API isAdminMaster flag. */
+export function isAdminMaster(_email?: string | null) {
+  return false
 }
 
 export type PerfilAdminCheck = {
@@ -43,10 +32,8 @@ export function isPerfilRoleAdmin(perfil?: PerfilAdminCheck | null) {
   return false
 }
 
-/** Admin master: e-mail na lista ou perfil com role/tier admin. */
+/** Admin master: perfil role/tier on client; e-mail master only on server (access-server). */
 export function isUsuarioAdmin(args?: { email?: string | null; perfil?: PerfilAdminCheck | null }) {
-  const email = String(args?.email || '').trim().toLowerCase()
-  if (isAdminMaster(email) || isAdminEmail(email)) return true
   return isPerfilRoleAdmin(args?.perfil)
 }
 

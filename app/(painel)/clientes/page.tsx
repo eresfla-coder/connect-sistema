@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { supabase } from '@/lib/supabase'
 import { exportarClientesExcel } from '@/lib/export-modulos'
+import { lerLocalStorageUsuario, obterUserIdPainel, salvarLocalStorageUsuario } from '@/lib/connect-user-storage'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 
 type Cliente = {
@@ -109,6 +110,11 @@ export default function ClientesPage() {
   const [selecionadoId, setSelecionadoId] = useState<string | null>(null)
   const [filtroRapido, setFiltroRapido] = useState<FiltroRapido>('todos')
   const [modoLista, setModoLista] = useState<'cards' | 'tabela'>('cards')
+  const [userId, setUserId] = useState<string | null>(null)
+
+  useEffect(() => {
+    void obterUserIdPainel().then(setUserId)
+  }, [])
 
   useEffect(() => {
     const verificar = () => setIsMobile(window.innerWidth <= 768)
@@ -119,13 +125,19 @@ export default function ClientesPage() {
 
   async function carregarClientes() {
     setLoading(true)
-    const { data, error } = await supabase.from('clientes').select('*').order('nome', { ascending: true })
+    const { data: { user } } = await supabase.auth.getUser()
+    const uid = user?.id || (await obterUserIdPainel())
+    if (uid) setUserId(uid)
+
+    let query = supabase.from('clientes').select('*').order('nome', { ascending: true })
+    if (uid) query = query.eq('user_id', uid)
+
+    const { data, error } = await query
 
     if (error) {
       console.error('Erro ao carregar clientes:', error)
       try {
-        const local = localStorage.getItem(CLIENTES_KEY)
-        const listaLocal = local ? JSON.parse(local) : []
+        const listaLocal = lerLocalStorageUsuario<Cliente[]>(CLIENTES_KEY, uid, [])
         const normalizados = Array.isArray(listaLocal) ? listaLocal.map(normalizarCliente) : []
         setClientes(normalizados)
         if (!selecionadoId && normalizados[0]) setSelecionadoId(normalizados[0].id)
@@ -139,7 +151,7 @@ export default function ClientesPage() {
     const normalizados = ((data || []) as any[]).map(normalizarCliente)
     setClientes(normalizados)
     if (!selecionadoId && normalizados[0]) setSelecionadoId(normalizados[0].id)
-    try { localStorage.setItem(CLIENTES_KEY, JSON.stringify(normalizados)) } catch {}
+    try { salvarLocalStorageUsuario(CLIENTES_KEY, uid, normalizados) } catch {}
     setLoading(false)
   }
 
@@ -173,6 +185,13 @@ export default function ClientesPage() {
 
     setSaving(true)
 
+    const uid = userId || (await obterUserIdPainel())
+    if (!uid) {
+      alert('Sessão inválida. Faça login novamente.')
+      setSaving(false)
+      return
+    }
+
     const enderecoBase = form.endereco.trim()
     const bairro = form.bairro.trim()
     const cidade = form.cidade.trim()
@@ -187,13 +206,18 @@ export default function ClientesPage() {
       cep: form.cep.trim() || null,
       email: form.email.trim() || null,
       ativo: true,
+      user_id: uid,
     }
 
-    const salvar = (payload: any) => (
-      editandoId
-        ? supabase.from('clientes').update(payload).eq('id', editandoId)
-        : supabase.from('clientes').insert(payload)
-    )
+    const salvar = (payload: any) => {
+      if (editandoId) {
+        const { user_id: _omit, ...rest } = payload
+        let q = supabase.from('clientes').update(rest).eq('id', editandoId)
+        q = q.eq('user_id', uid)
+        return q
+      }
+      return supabase.from('clientes').insert(payload)
+    }
 
     let { error } = await salvar(payloadCompleto)
 
@@ -208,6 +232,7 @@ export default function ClientesPage() {
         email: form.email.trim() || null,
         ativo: true,
       }
+      if (!editandoId) payloadCompat.user_id = uid
       const retry = await salvar(payloadCompat)
       error = retry.error
     }
@@ -247,7 +272,11 @@ export default function ClientesPage() {
 
   async function excluirCliente(id: string) {
     if (!window.confirm('Deseja excluir este cliente?')) return
-    const { error } = await supabase.from('clientes').delete().eq('id', id)
+    const uid = userId || (await obterUserIdPainel())
+    if (!uid) return alert('Sessão inválida.')
+    let q = supabase.from('clientes').delete().eq('id', id)
+    q = q.eq('user_id', uid)
+    const { error } = await q
     if (error) return alert(`Erro ao excluir cliente: ${error.message}`)
     await carregarClientes()
     if (editandoId === id) fecharDrawer()

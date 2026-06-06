@@ -1,4 +1,5 @@
 import type { DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
+import { supabase } from '@/lib/supabase-browser'
 
 export const RECIBO_VISUALIZACAO_KEY = 'connect_recibo_visualizacao'
 
@@ -44,9 +45,18 @@ export async function gerarLinkPublicoRecibo(dados: DadosReciboEmitido): Promise
   const snapshotDoRecibo = prepararPayloadReciboPublico(dados)
 
   try {
+    const { data: session } = await supabase.auth.getSession()
+    const accessToken = session?.session?.access_token
+    if (!accessToken) {
+      throw new Error('Sessão ausente para publicar recibo.')
+    }
+
     const response = await fetch('/api/public-docs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
       body: JSON.stringify({
         document_type: 'recibo',
         document_id: documentId,

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
-import { emailDoUsuarioAuth, isAdminMaster } from "@/lib/access";
+import { emailDoUsuarioAuth } from "@/lib/access";
 import { readLocalCloudPayload } from "@/lib/connect-cloud-storage";
 import { nomeArquivoBackup } from "@/lib/backup-connect";
 import { installDemoGuard, isDemoMode, limparSessaoReal, sairDemoMode } from "@/lib/connect-demo";
@@ -64,6 +64,22 @@ async function obterEmailLogadoPainel(): Promise<string> {
   return email;
 }
 
+async function verificarAdminViaApi(): Promise<boolean> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) return false;
+  try {
+    const resp = await fetch("/api/assinatura/status", {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    const payload = await resp.json().catch(() => null);
+    return Boolean(payload?.isAdminMaster);
+  } catch {
+    return false;
+  }
+}
+
 export default function PainelLayout({
   children,
 }: {
@@ -103,14 +119,7 @@ export default function PainelLayout({
   useEffect(() => {
     let ativo = true;
 
-    async function aplicarAdminDetectado(email: string) {
-      const adminMaster = isAdminMaster(email);
-      if (adminMaster) {
-        console.log("[PainelShell] email admin detectado, adminMaster", {
-          email: email || "(vazio)",
-          adminMaster,
-        });
-      }
+    async function aplicarAdminDetectado(adminMaster: boolean) {
       if (!ativo) return;
       setAdminLogado(adminMaster);
     }
@@ -123,15 +132,15 @@ export default function PainelLayout({
         }
 
         for (let i = 1; i <= tentativas; i += 1) {
-          const email = await obterEmailLogadoPainel();
-          if (email && isAdminMaster(email)) {
-            await aplicarAdminDetectado(email);
+          const adminMaster = await verificarAdminViaApi();
+          if (adminMaster) {
+            await aplicarAdminDetectado(true);
             return;
           }
           if (i < tentativas) {
             await new Promise((resolve) => setTimeout(resolve, 180 + i * 120));
           } else if (ativo) {
-            setAdminLogado(isAdminMaster(email));
+            setAdminLogado(false);
           }
         }
       } catch {
@@ -147,11 +156,10 @@ export default function PainelLayout({
         setAdminLogado(false);
         return;
       }
-      const email =
-        String(session?.user?.email || "").trim().toLowerCase() ||
-        emailDoUsuarioAuth(session?.user ?? null);
-      if (isAdminMaster(email)) {
-        void aplicarAdminDetectado(email);
+      if (session?.access_token) {
+        void verificarAdminViaApi().then((ok) => {
+          if (ativo) setAdminLogado(ok);
+        });
         return;
       }
 

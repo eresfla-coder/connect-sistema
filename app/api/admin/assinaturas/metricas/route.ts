@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { isAdminMaster } from '@/lib/access'
+import { isAdminMasterServer } from '@/lib/access-server'
 import { normalizarTier } from '@/lib/planosSaaS'
 
 export const runtime = 'nodejs'
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const { data: authData, error: authError } = await supabase.auth.getUser(token)
     const user = authData?.user
 
-    if (authError || !user?.email || !isAdminMaster(user.email)) {
+    if (authError || !user?.email || !isAdminMasterServer(user.email)) {
       return NextResponse.json({ ok: false, message: 'Acesso restrito ao admin master.' }, { status: 403 })
     }
 

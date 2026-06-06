@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { ADMIN_EMAILS } from '@/lib/access'
+import { requireAdminFromRequest } from '@/lib/api-auth'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
@@ -11,7 +11,6 @@ type BodyPayload = {
   nome_empresa?: string
   telefone?: string
   sistema_cliente?: string
-  admin_email?: string
 }
 
 function senhaTemporaria() {
@@ -21,41 +20,12 @@ function senhaTemporaria() {
   return `Connect@${meio}${new Date().getDate().toString().padStart(2, '0')}`
 }
 
-function getBearerToken(req: Request) {
-  const authHeader = req.headers.get('authorization') || req.headers.get('Authorization')
-  if (!authHeader) return ''
-  const [type, token] = authHeader.split(' ')
-  if (String(type || '').toLowerCase() !== 'bearer' || !token) return ''
-  return token.trim()
-}
-
-function isAdminEmail(email?: string | null) {
-  return ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase())
-}
-
 function siteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
 }
 
 function onlyDigits(value?: string | null) {
   return String(value || '').replace(/\D/g, '')
-}
-
-async function identificarAdmin(req: Request, body: BodyPayload) {
-  const token = getBearerToken(req)
-
-  if (token) {
-    const authUserResult = await supabaseAdmin.auth.getUser(token)
-    const emailToken = authUserResult.data.user?.email?.trim().toLowerCase() || ''
-    if (!authUserResult.error && isAdminEmail(emailToken)) {
-      return { ok: true as const, email: emailToken, origem: 'token' }
-    }
-  }
-
-  const emailFallback = String(body.admin_email || '').trim().toLowerCase()
-  if (isAdminEmail(emailFallback)) return { ok: true as const, email: emailFallback, origem: 'fallback' }
-
-  return { ok: false as const, email: emailFallback || null, origem: 'negado' }
 }
 
 async function localizarUserId(body: BodyPayload) {
@@ -79,7 +49,6 @@ async function localizarUserId(body: BodyPayload) {
       if (!teste.error && teste.data.user?.id) return teste.data.user.id
     }
 
-    // fallback robusto: procura nos usuários do Auth pelo e-mail
     let page = 1
     while (page <= 10) {
       const lista = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 100 })
@@ -97,15 +66,8 @@ async function localizarUserId(body: BodyPayload) {
 
 export async function POST(req: Request) {
   try {
+    const admin = await requireAdminFromRequest(req)
     const body = (await req.json()) as BodyPayload
-    const admin = await identificarAdmin(req, body)
-
-    if (!admin.ok) {
-      return NextResponse.json(
-        { error: `Acesso restrito ao administrador: ${admin.email || 'sessão inválida'}` },
-        { status: 403 }
-      )
-    }
 
     const email = String(body.email || '').trim().toLowerCase()
     const userId = await localizarUserId(body)
@@ -169,7 +131,8 @@ export async function POST(req: Request) {
       whatsappUrl,
     })
   } catch (error: any) {
+    const status = error?.message === 'Acesso negado.' || error?.message === 'Sessão ausente.' || error?.message === 'Sessão inválida.' ? 403 : 500
     console.error('[ADMIN RESET SENHA] erro fatal:', error)
-    return NextResponse.json({ error: error?.message || 'Erro inesperado ao redefinir senha.' }, { status: 500 })
+    return NextResponse.json({ error: error?.message || 'Erro inesperado ao redefinir senha.' }, { status })
   }
 }

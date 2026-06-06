@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { ADMIN_EMAILS } from '@/lib/access'
+import { isAdminMasterServer } from '@/lib/access-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     }
 
     const email = String(user.email || '').trim().toLowerCase()
-    if (ADMIN_EMAILS.includes(email)) {
+    if (isAdminMasterServer(email)) {
       return NextResponse.json({ ok: true, active: true, admin: true })
     }
 

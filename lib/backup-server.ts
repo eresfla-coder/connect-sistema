@@ -26,7 +26,8 @@ export async function coletarBackupUsuario(userId: string): Promise<ConnectBacku
 
   let cliRes = await supabase.from('clientes').select('*').eq('user_id', userId)
   if (cliRes.error) {
-    cliRes = await supabase.from('clientes').select('*')
+    console.warn('[backup] clientes sem filtro user_id:', cliRes.error.message)
+    cliRes = { data: cloud.connect_clientes || [], error: null } as typeof cliRes
   }
 
   const orcamentos = orcRes.data || cloud.connect_orcamentos_salvos || []

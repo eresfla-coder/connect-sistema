@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { isAdminEmail } from '@/lib/access'
+import { emailDoUsuarioAuth } from '@/lib/access'
 import { ativarModoDemo, marcarSessaoReal, sairDemoMode } from '@/lib/connect-demo'
 
 type ModoAuth = 'entrar' | 'criar'
@@ -167,11 +167,22 @@ export default function LoginPage() {
       marcarSessaoReal()
       sairDemoMode()
 
-      if (isAdminEmail(emailNormalizado)) {
-        router.replace('/admin')
-      } else {
-        router.replace('/dashboard')
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+      let destino: '/admin' | '/dashboard' = '/dashboard'
+      if (token) {
+        try {
+          const resp = await fetch('/api/assinatura/status', {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: 'no-store',
+          })
+          const payload = await resp.json().catch(() => null)
+          if (payload?.isAdminMaster) destino = '/admin'
+        } catch {
+          /* mantém dashboard */
+        }
       }
+      router.replace(destino)
     } catch (err: any) {
       setErro(traduzirErroAuth(err?.message || 'Failed to fetch'))
       iniciarCooldown(10)

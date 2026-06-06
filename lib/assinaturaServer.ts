@@ -1,10 +1,11 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { dataMaisDias, isUsuarioAdmin } from '@/lib/access'
+import { dataMaisDias } from '@/lib/access'
+import { isUsuarioAdminServer } from '@/lib/access-server'
 import { PLANOS_CATALOGO, TRIAL_DIAS, type PlanoTier, type RecorrenciaPlano } from '@/lib/planosSaaS'
 import { resolverSnapshotAssinatura } from '@/lib/assinaturaAcesso'
 
 export async function garantirTrialAssinatura(userId: string, email?: string | null) {
-  if (isUsuarioAdmin({ email })) {
+  if (isUsuarioAdminServer({ email })) {
     return { trialFim: null, email, admin: true as const }
   }
 

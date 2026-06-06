@@ -14,6 +14,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOsExcel } from '@/lib/export-modulos'
+import { lerLocalStorageUsuario, salvarLocalStorageUsuario } from '@/lib/connect-user-storage'
 
 type Cliente = {
   id?: string | number
@@ -645,9 +646,7 @@ export default function OrdemServicoPage() {
 
   function lerOsLocalStorage() {
     try {
-      const salvo = localStorage.getItem(STORAGE_KEY)
-      if (!salvo) return [] as OrdemServico[]
-      const listaSalva = JSON.parse(salvo)
+      const listaSalva = lerLocalStorageUsuario<OrdemServico[]>(STORAGE_KEY, userIdOsRef.current, [])
       if (!Array.isArray(listaSalva)) return [] as OrdemServico[]
       const deletedIds = lerDeletedOs(userIdOsRef.current)
       return listaSalva
@@ -729,7 +728,7 @@ export default function OrdemServicoPage() {
     setLista(listaFiltrada)
     setForm(ordemVazia(listaFiltrada))
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(listaFiltrada))
+      salvarLocalStorageUsuario(STORAGE_KEY, userIdOsRef.current, listaFiltrada)
     } catch (e) {
       console.error('[ordens_servico] erro ao gravar localStorage:', contexto, e)
     }
@@ -750,7 +749,7 @@ export default function OrdemServicoPage() {
       }
     }
     setLista(normalizada)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizada))
+    salvarLocalStorageUsuario(STORAGE_KEY, userIdOsRef.current, normalizada)
     window.dispatchEvent(new Event('connect-local-saved'))
   }
 

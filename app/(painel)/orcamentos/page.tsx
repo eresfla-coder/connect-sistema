@@ -19,7 +19,7 @@ import {
   validadeOrcamentoAtiva,
   resolverValidadePadraoOrcamento,
 } from '@/lib/orcamentoTextos'
-import { lerLocalStorageUsuario, obterUserIdPainel } from '@/lib/connect-user-storage'
+import { lerLocalStorageUsuario, obterUserIdPainel, salvarLocalStorageUsuario } from '@/lib/connect-user-storage'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOrcamentosExcel } from '@/lib/export-modulos'
 type TipoPessoaCliente = 'PF' | 'PJ'
@@ -1119,29 +1119,27 @@ export default function OrcamentoPage() {
 
   function carregarOrcamentosLocalFallback() {
     try {
-      const salvos = localStorage.getItem(ORCAMENTOS_KEY)
-      if (salvos) {
-        const lista = JSON.parse(salvos)
-        if (Array.isArray(lista)) {
-          const deletedIds = lerDeletedOrcamentos(userIdOrcamentosRef.current)
-          setOrcamentosSalvos(
-            deduplicarOrcamentosPorId(
-              lista
-                .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
-                .filter((item) => !deletedIds.has(String(item?.id || '')))
-            )
+      const userId = userIdOrcamentosRef.current
+      const lista = lerLocalStorageUsuario<OrcamentoSalvo[]>(ORCAMENTOS_KEY, userId, [])
+      if (Array.isArray(lista) && lista.length) {
+        const deletedIds = lerDeletedOrcamentos(userId)
+        setOrcamentosSalvos(
+          deduplicarOrcamentosPorId(
+            lista
+              .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+              .filter((item) => !deletedIds.has(String(item?.id || '')))
           )
-        }
+        )
       }
     } catch {}
   }
 
   function lerOrcamentosLocalStorage() {
     try {
-      const salvos = localStorage.getItem(ORCAMENTOS_KEY)
-      const lista = salvos ? JSON.parse(salvos) : []
+      const userId = userIdOrcamentosRef.current
+      const lista = lerLocalStorageUsuario<OrcamentoSalvo[]>(ORCAMENTOS_KEY, userId, [])
       if (!Array.isArray(lista)) return [] as OrcamentoSalvo[]
-      const deletedIds = lerDeletedOrcamentos(userIdOrcamentosRef.current)
+      const deletedIds = lerDeletedOrcamentos(userId)
       const normalizados = lista
         .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
         .filter((item) => !deletedIds.has(String(item?.id || ''))) as OrcamentoSalvo[]
@@ -1210,7 +1208,7 @@ export default function OrcamentoPage() {
       })
       setOrcamentosSalvos(locais)
       try {
-        localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(locais))
+        salvarLocalStorageUsuario(ORCAMENTOS_KEY, userId, locais)
       } catch (error) {
         console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
       }
@@ -1224,7 +1222,7 @@ export default function OrcamentoPage() {
     )
     setOrcamentosSalvos(listaNormalizada)
     try {
-      localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(listaNormalizada))
+      salvarLocalStorageUsuario(ORCAMENTOS_KEY, userId, listaNormalizada)
     } catch (error) {
       console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
     }
@@ -1942,7 +1940,15 @@ export default function OrcamentoPage() {
           .slice(0, 18)
           .map(async (orcamento) => {
           try {
-            const resp = await fetch(`/api/public-docs?tipo=orcamento&documentoId=${encodeURIComponent(String(orcamento.id))}&t=${Date.now()}`, { cache: 'no-store' })
+            const { data: sessao } = await supabase.auth.getSession()
+            const headers: Record<string, string> = { cache: 'no-store' }
+            if (sessao?.session?.access_token) {
+              headers.Authorization = `Bearer ${sessao.session.access_token}`
+            }
+            const resp = await fetch(
+              `/api/public-docs?document_type=orcamento&document_id=${encodeURIComponent(String(orcamento.id))}&t=${Date.now()}`,
+              { cache: 'no-store', headers },
+            )
             if (!resp.ok) return orcamento
             const json = await resp.json()
             const publico = json?.payload
@@ -2112,13 +2118,13 @@ export default function OrcamentoPage() {
       })
     }
     setOrcamentosSalvos(listaNormalizada)
-    localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(listaNormalizada))
+    salvarLocalStorageUsuario(ORCAMENTOS_KEY, userIdOrcamentosRef.current, listaNormalizada)
     window.dispatchEvent(new Event('connect-data-change'))
   }
 
   function salvarListaClientes(lista: Cliente[]) {
     setClientes(lista)
-    localStorage.setItem(CLIENTES_KEY, JSON.stringify(lista))
+    salvarLocalStorageUsuario(CLIENTES_KEY, userIdOrcamentosRef.current, lista)
   }
 
   async function buscarCNPJ() {

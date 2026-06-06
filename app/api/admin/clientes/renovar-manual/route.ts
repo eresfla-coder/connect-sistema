@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { ADMIN_EMAILS } from '@/lib/access'
+import { requireAdminFromRequest } from '@/lib/api-auth'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import {
   montarMensagemRenovacaoWhatsapp,
@@ -20,7 +20,6 @@ type BodyPayload = {
   data_pagamento?: string
   proxima_validade?: string
   observacao?: string
-  admin_email?: string
 }
 
 function getBearerToken(req: Request) {
@@ -29,24 +28,6 @@ function getBearerToken(req: Request) {
   const [type, token] = authHeader.split(' ')
   if (String(type || '').toLowerCase() !== 'bearer' || !token) return ''
   return token.trim()
-}
-
-function isAdminEmail(email?: string | null) {
-  return ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase())
-}
-
-async function identificarAdmin(req: Request, body?: BodyPayload) {
-  const token = getBearerToken(req)
-  if (token) {
-    const authUserResult = await supabaseAdmin.auth.getUser(token)
-    const emailToken = authUserResult.data.user?.email?.trim().toLowerCase() || ''
-    if (!authUserResult.error && isAdminEmail(emailToken)) {
-      return { ok: true as const, email: emailToken }
-    }
-  }
-  const emailFallback = String(body?.admin_email || '').trim().toLowerCase()
-  if (isAdminEmail(emailFallback)) return { ok: true as const, email: emailFallback }
-  return { ok: false as const, email: null }
 }
 
 function parseValor(value?: number | string) {
@@ -74,12 +55,8 @@ function whatsappUrlCliente(telefone: string | null | undefined, mensagem: strin
 
 export async function POST(req: Request) {
   try {
+    await requireAdminFromRequest(req)
     const body = (await req.json()) as BodyPayload
-    const admin = await identificarAdmin(req, body)
-
-    if (!admin.ok) {
-      return NextResponse.json({ error: 'Acesso negado.' }, { status: 403 })
-    }
 
     const userId = String(body.user_id || '').trim()
     if (!userId) {
@@ -209,6 +186,7 @@ export async function POST(req: Request) {
     })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Erro ao renovar cliente.'
-    return NextResponse.json({ error: msg }, { status: 500 })
+    const status = msg === 'Acesso negado.' || msg === 'Sessão ausente.' || msg === 'Sessão inválida.' ? 403 : 500
+    return NextResponse.json({ error: msg }, { status })
   }
 }

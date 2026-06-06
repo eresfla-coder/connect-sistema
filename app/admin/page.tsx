@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import { supabase } from '@/lib/supabase-browser'
-import { isAdminMaster } from '@/lib/access'
+import { emailDoUsuarioAuth } from '@/lib/access'
 import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetricas'
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
 import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
@@ -428,10 +428,6 @@ export default function AdminSaasMasterPage() {
     }
 
     const email = (user.email || '').trim().toLowerCase()
-    if (!isAdminMaster(email)) {
-      router.push('/dashboard')
-      return
-    }
 
     const { data: { session } } = await supabase.auth.getSession()
 
@@ -440,6 +436,11 @@ export default function AdminSaasMasterPage() {
         Authorization: `Bearer ${session?.access_token || ''}`,
       },
     })
+
+    if (response.status === 403) {
+      router.push('/dashboard')
+      return
+    }
 
     const payload = await response.json()
 
@@ -507,7 +508,6 @@ export default function AdminSaasMasterPage() {
         body: JSON.stringify({
           id,
           updates,
-          admin_email: session?.user?.email || '',
         }),
       })
 
@@ -589,7 +589,6 @@ export default function AdminSaasMasterPage() {
           data_pagamento: form.data_pagamento,
           proxima_validade: form.proxima_validade,
           observacao: form.observacao,
-          admin_email: session?.user?.email || '',
         }),
       })
 
@@ -762,7 +761,6 @@ export default function AdminSaasMasterPage() {
           nome_empresa: cliente.nome_empresa || '',
           telefone: cliente.telefone || '',
           sistema_cliente: clienteSistema(cliente),
-          admin_email: session?.user?.email || '',
         }),
       })
 
@@ -898,7 +896,6 @@ export default function AdminSaasMasterPage() {
         },
         body: JSON.stringify({
           ...novoCliente,
-          admin_email: session?.user?.email || '',
         }),
       })
 

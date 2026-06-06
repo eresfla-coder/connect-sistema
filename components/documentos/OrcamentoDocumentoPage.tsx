@@ -826,20 +826,9 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
       },
       atualizadoEm: agora.getTime(),
     } as Orcamento
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      const lista = raw ? JSON.parse(raw) : []
-      const baseLista = Array.isArray(lista) ? lista : []
-      const existe = baseLista.some((item: any) => String(item?.id) === String(orc.id))
-      const novaLista = existe
-        ? baseLista.map((item: any) => String(item?.id) === String(orc.id) ? { ...item, ...atualizado } : item)
-        : [atualizado, ...baseLista]
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(novaLista))
-      window.dispatchEvent(new Event('connect-data-change'))
-    } catch {}
     setOrc(atualizado)
-    await salvarAprovacaoPublica(atualizado)
-    return atualizado
+    const ok = await salvarAprovacaoPublica(atualizado)
+    return ok ? atualizado : null
   }
 
   function gerarOSDaAprovacao(dados: Orcamento) {
@@ -953,7 +942,9 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
       totalFmt: moeda(Number(orc.total || 0)),
     }
     const atualizado = await salvarOrcamentoAprovado('Aprovado', assinatura)
-    if (atualizado) gerarOSDaAprovacao(atualizado)
+    if (atualizado) {
+      // OS gerada no painel via sincronização de aprovação (nuvem)
+    }
     const wa = notificarEmpresaWhatsapp('aprovado', ctxWhatsapp)
     setModalAprovacao(false)
     setMensagemAprovacao(

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { isAdminMaster } from '@/lib/access'
+import { isAdminMasterServer } from '@/lib/access-server'
 
 export function getBearerToken(request: NextRequest | Request) {
   const header = request.headers.get('authorization') || ''
@@ -20,6 +20,6 @@ export async function getUserFromRequest(request: NextRequest | Request) {
 export async function requireAdminFromRequest(request: NextRequest | Request) {
   const { user } = await getUserFromRequest(request)
   const email = String(user.email || '').toLowerCase()
-  if (!isAdminMaster(email)) throw new Error('Acesso negado.')
+  if (!isAdminMasterServer(email)) throw new Error('Acesso negado.')
   return user
 }

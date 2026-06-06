@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { isUsuarioAdmin } from '@/lib/access'
+import { isUsuarioAdminServer } from '@/lib/access-server'
 import { snapshotAssinaturaAdmin } from '@/lib/assinaturaAcesso'
 import { garantirTrialAssinatura, obterAssinaturaUsuario } from '@/lib/assinaturaServer'
 import { PLANOS_CATALOGO } from '@/lib/planosSaaS'
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 
     const { perfil, assinatura, snapshot } = await obterAssinaturaUsuario(user.id)
 
-    if (isUsuarioAdmin({ email, perfil })) {
+    if (isUsuarioAdminServer({ email, perfil })) {
       const snapshotFinal = {
         ...snapshotAssinaturaAdmin(documentosUsados),
         documentosUsados,
