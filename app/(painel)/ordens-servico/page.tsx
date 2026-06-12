@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabase'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOsExcel } from '@/lib/export-modulos'
 import { lerLocalStorageUsuario, salvarLocalStorageUsuario } from '@/lib/connect-user-storage'
+import { carregarClientesPainelDetalhado } from '@/lib/clientes-painel'
 
 type Cliente = {
   id?: string | number
@@ -1391,25 +1392,15 @@ export default function OrdemServicoPage() {
         (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED')
       ) {
         void carregarOsSupabase()
+        void carregarClientesPainelDetalhado('ordens-servico').then(({ clientes: lista }) => {
+          setClientes(lista.map((item, index) => normalizarCliente(item, index)))
+        })
       }
     })
 
-    const clientesSalvos = localStorage.getItem(CLIENTES_KEY)
-    if (clientesSalvos) {
-      try {
-        const listaClientes = JSON.parse(clientesSalvos)
-        if (Array.isArray(listaClientes)) {
-          const normalizados = listaClientes
-            .map((item, index) => normalizarCliente(item, index))
-            .filter((item) => item.ativo !== false && (item.nome || item.telefone || item.email))
-          setClientes(normalizados)
-        }
-      } catch {
-        setClientes([])
-      }
-    } else {
-      setClientes([])
-    }
+    void carregarClientesPainelDetalhado('ordens-servico').then(({ clientes: lista }) => {
+      setClientes(lista.map((item, index) => normalizarCliente(item, index)))
+    })
 
     const orcSalvos = localStorage.getItem(ORCAMENTOS_KEY)
     if (orcSalvos) {
@@ -1431,19 +1422,9 @@ export default function OrdemServicoPage() {
       carregarOsLocalFallback()
       void carregarOsSupabase()
 
-      try {
-        const clientesSalvos = localStorage.getItem(CLIENTES_KEY)
-        if (clientesSalvos) {
-          const listaClientes = JSON.parse(clientesSalvos)
-          if (Array.isArray(listaClientes)) {
-            setClientes(
-              listaClientes
-                .map((item, index) => normalizarCliente(item, index))
-                .filter((item) => item.ativo !== false && (item.nome || item.telefone || item.email))
-            )
-          }
-        }
-      } catch {}
+      void carregarClientesPainelDetalhado('ordens-servico').then(({ clientes: lista }) => {
+        setClientes(lista.map((item, index) => normalizarCliente(item, index)))
+      })
 
       try {
         const orcSalvos = localStorage.getItem(ORCAMENTOS_KEY)

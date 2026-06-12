@@ -1,4 +1,7 @@
-export const CLIENTES_STORAGE_KEY = 'connect_clientes'
+import { CLIENTES_KEY, carregarClientesPainel, normalizarClientePainel, type ClientePainel } from '@/lib/clientes-painel'
+import { lerLocalStorageUsuario } from '@/lib/connect-user-storage'
+
+export const CLIENTES_STORAGE_KEY = CLIENTES_KEY
 
 export type ClienteCadastro = {
   id: string
@@ -12,35 +15,46 @@ export type ClienteCadastro = {
   email?: string
 }
 
-export function normalizarClienteCadastro(item: unknown): ClienteCadastro | null {
-  if (!item || typeof item !== 'object') return null
-  const row = item as Record<string, unknown>
-  const nome = String(row.nome || '').trim()
-  if (!nome) return null
+function painelParaCadastro(item: ClientePainel): ClienteCadastro {
   return {
-    id: String(row.id || ''),
-    nome,
-    telefone: String(row.telefone || row.whatsapp || '').trim(),
-    cpfCnpj: String(row.cpfCnpj || row.cpf_cnpj || row.cpf || row.cnpj || '').trim(),
-    endereco: String(row.endereco || '').trim(),
-    bairro: String(row.bairro || '').trim(),
-    cidade: String(row.cidade || '').trim(),
-    cep: String(row.cep || '').trim(),
-    email: String(row.email || '').trim(),
+    id: item.id,
+    nome: item.nome,
+    telefone: item.telefone,
+    cpfCnpj: item.cpfCnpj,
+    endereco: item.endereco,
+    bairro: item.bairro,
+    cidade: item.cidade,
+    cep: item.cep,
+    email: item.email,
   }
 }
 
-export function lerClientesCadastro(): ClienteCadastro[] {
+export function normalizarClienteCadastro(item: unknown): ClienteCadastro | null {
+  return painelParaCadastro(normalizarClientePainel(item))
+}
+
+/** Leitura síncrona do cache scoped (fallback quando Supabase ainda não respondeu). */
+export function lerClientesCadastro(userId?: string | null): ClienteCadastro[] {
   if (typeof window === 'undefined') return []
+
   try {
-    const raw = localStorage.getItem(CLIENTES_STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.map(normalizarClienteCadastro).filter((c): c is ClienteCadastro => Boolean(c))
+    const cache = lerLocalStorageUsuario<unknown[]>(CLIENTES_STORAGE_KEY, userId ?? null, [])
+    if (Array.isArray(cache) && cache.length > 0) {
+      return cache.map(normalizarClienteCadastro).filter((c): c is ClienteCadastro => Boolean(c))
+    }
   } catch {
-    return []
+    /* ignore */
   }
+
+  return []
+}
+
+/** Fonte completa: Supabase + cache scoped. */
+export async function carregarClientesCadastro(): Promise<ClienteCadastro[]> {
+  const lista = await carregarClientesPainel()
+  return lista
+    .map((item) => painelParaCadastro(item))
+    .filter((c): c is ClienteCadastro => Boolean(c))
 }
 
 export function enderecoClienteCompleto(cliente: ClienteCadastro) {

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { abrirNovaAbaOuMesma, abrirWhatsappAposPrepararLink, abrirWhatsappUrl, comTimeout, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { buscarConfiguracao } from '@/lib/configuracaoEmpresa'
-import { montarUrlPublicaDocumento, timestampVersaoPublica } from '@/lib/empresaPublica'
 import { mergeConfigPublicacao, normalizarLogoEmpresaPublica } from '@/lib/documentosPublicos'
 import { gerarFinanceiroDeOrcamento } from '@/lib/financeiro'
 import { supabase } from '@/lib/supabase'
@@ -20,6 +19,8 @@ import {
   resolverValidadePadraoOrcamento,
 } from '@/lib/orcamentoTextos'
 import { lerLocalStorageUsuario, obterUserIdPainel, salvarLocalStorageUsuario } from '@/lib/connect-user-storage'
+import { carregarClientesPainelDetalhado, clientePainelParaOrcamento } from '@/lib/clientes-painel'
+import { garantirPublicacaoOrcamento, type PublicacaoOrcamentoResult } from '@/lib/garantir-publicacao-orcamento'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOrcamentosExcel } from '@/lib/export-modulos'
 type TipoPessoaCliente = 'PF' | 'PJ'
@@ -90,6 +91,7 @@ type OrcamentoSalvo = {
   status: StatusOrcamento
   data: string
   link: string
+  tokenPublico?: string
   aprovado?: boolean
   aprovadoEm?: string
   atualizadoEm?: number
@@ -972,10 +974,6 @@ function osParaRowSupabase(os: OrdemServicoGerada, userId: string): OsSupabaseRo
 
 export default function OrcamentoPage() {
   const router = useRouter()
-  const clientesMock: Cliente[] = [
-    { id: 1, nome: 'ERIC DAMASCENO', telefone: '84992181399', email: 'lojaconnect@hotmail.com', endereco: 'GILBERTO ROBERTO GOMES,243' },
-    { id: 2, nome: 'MARIA SOUZA', telefone: '84999998888', email: 'maria@email.com', endereco: 'RUA DAS FLORES,120' },
-  ]
 
   const produtosMock: Produto[] = [
     { id: 101, nome: 'SERVIÇO TÉCNICO', valor: 120, tipoCadastro: 'servico', tipoCalculo: 'unidade' },
@@ -1010,7 +1008,7 @@ export default function OrcamentoPage() {
   })
 
   const [formasPagamento, setFormasPagamento] = useState<string[]>(['PIX', 'DINHEIRO', 'CARTAO 1X'])
-  const [clientes, setClientes] = useState<Cliente[]>(clientesMock)
+  const [clientes, setClientes] = useState<Cliente[]>([])
   const [produtos, setProdutos] = useState<Produto[]>(produtosMock)
 
   const [clienteBusca, setClienteBusca] = useState('')
@@ -1050,6 +1048,7 @@ export default function OrcamentoPage() {
   }, [itens])
   const [prazoEntrega, setPrazoEntrega] = useState('')
   const [enderecoEntrega, setEnderecoEntrega] = useState('')
+  const [enderecoEntregaFocused, setEnderecoEntregaFocused] = useState(false)
   const [valorEntrega, setValorEntrega] = useState(0)
   const [descontoTipo, setDescontoTipo] = useState<'valor' | 'percentual'>('valor')
   const [descontoInput, setDescontoInput] = useState('')
@@ -1701,30 +1700,9 @@ export default function OrcamentoPage() {
       } catch {}
     })
 
-    const salvosClientes = localStorage.getItem(CLIENTES_KEY)
-    if (salvosClientes) {
-      try {
-        const lista = JSON.parse(salvosClientes)
-        if (Array.isArray(lista) && lista.length > 0) {
-          const normalizados = lista
-            .map((cliente: any, index: number): Cliente => ({
-              id: Number(cliente?.id ?? index + 1),
-              nome: String(cliente?.nome ?? '').trim(),
-              telefone: String(cliente?.telefone ?? ''),
-              email: String(cliente?.email ?? ''),
-              endereco: String(cliente?.endereco ?? ''),
-              tipoPessoa: cliente?.tipoPessoa === 'PJ' ? 'PJ' : 'PF',
-              cpf: String(cliente?.cpf ?? ''),
-              cnpj: String(cliente?.cnpj ?? ''),
-              razaoSocial: String(cliente?.razaoSocial ?? ''),
-              nomeFantasia: String(cliente?.nomeFantasia ?? ''),
-            }))
-            .filter((cliente: Cliente) => Boolean(cliente.nome))
-
-          if (normalizados.length > 0) setClientes(normalizados)
-        }
-      } catch {}
-    }
+    void carregarClientesPainelDetalhado('orcamentos').then(({ clientes: lista }) => {
+      setClientes(lista.map((cliente, index) => clientePainelParaOrcamento(cliente, index)))
+    })
   }, [])
 
   useEffect(() => {
@@ -1755,27 +1733,9 @@ export default function OrcamentoPage() {
           }
         } catch {}
       })
-      try {
-        const salvosClientes = localStorage.getItem(CLIENTES_KEY)
-        if (salvosClientes) {
-          const lista = JSON.parse(salvosClientes)
-          if (Array.isArray(lista) && lista.length > 0) {
-            const normalizados = lista.map((cliente: any, index: number): Cliente => ({
-              id: Number(cliente?.id ?? index + 1),
-              nome: String(cliente?.nome ?? '').trim(),
-              telefone: String(cliente?.telefone ?? ''),
-              email: String(cliente?.email ?? ''),
-              endereco: String(cliente?.endereco ?? ''),
-              tipoPessoa: cliente?.tipoPessoa === 'PJ' ? 'PJ' : 'PF',
-              cpf: String(cliente?.cpf ?? ''),
-              cnpj: String(cliente?.cnpj ?? ''),
-              razaoSocial: String(cliente?.razaoSocial ?? ''),
-              nomeFantasia: String(cliente?.nomeFantasia ?? ''),
-            })).filter((cliente: Cliente) => Boolean(cliente.nome))
-            if (normalizados.length > 0) setClientes(normalizados)
-          }
-        }
-      } catch {}
+      void carregarClientesPainelDetalhado('orcamentos').then(({ clientes: lista }) => {
+        setClientes(lista.map((cliente, index) => clientePainelParaOrcamento(cliente, index)))
+      })
     }
     window.addEventListener('connect-cloud-hydrated', carregarDadosLocaisV78)
     return () => window.removeEventListener('connect-cloud-hydrated', carregarDadosLocaisV78)
@@ -1798,6 +1758,9 @@ export default function OrcamentoPage() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!ativo || !session?.user?.id) return
       rodarCargaSupabase(`auth-${event}`)
+      void carregarClientesPainelDetalhado('orcamentos').then(({ clientes: lista }) => {
+        setClientes(lista.map((cliente, index) => clientePainelParaOrcamento(cliente, index)))
+      })
     })
 
     const aoFoco = () => rodarCargaSupabase('window-focus')
@@ -2250,43 +2213,41 @@ export default function OrcamentoPage() {
     }
   }
 
-  async function gerarLinkDocumentoPublico(id: number, dados: OrcamentoSalvo) {
-    const base = baseUrlDocumentoPublico()
+  async function publicarOrcamentoSeguro(
+    orc: OrcamentoSalvo,
+    origem: string,
+  ): Promise<{ orcamento: OrcamentoSalvo; publicacao: PublicacaoOrcamentoResult }> {
+    const preparado = prepararOrcamentoCliente(orc)
     const cfgPublica = await configParaPublicar()
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      const { data: sessao } = await supabase.auth.getSession()
-      if (sessao?.session?.access_token) {
-        headers.Authorization = `Bearer ${sessao.session.access_token}`
-      }
-      const resp = await fetch('/api/public-docs', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          tipo: 'orcamento',
-          documentoId: String(id),
-          document_type: 'orcamento',
-          document_id: String(id),
-          payload: { ...prepararOrcamentoCliente(dados), config: cfgPublica, cfg: cfgPublica },
-        }),
-      })
-      if (resp.ok) {
-        const json = await resp.json()
-        if (json?.token) {
-          const v = timestampVersaoPublica(json?.updated_at || Date.now())
-          return montarUrlPublicaDocumento('/impressao-orcamento', String(id), {
-            token: json.token,
-            preview: true,
-            v,
-          })
-        }
-      }
-    } catch {}
-    return gerarLinkDocumento(id, dados, cfgPublica)
+    const publicacao = await garantirPublicacaoOrcamento(
+      preparado.id,
+      preparado as unknown as Record<string, unknown>,
+      cfgPublica as Record<string, unknown>,
+    )
+    const orcamento: OrcamentoSalvo = {
+      ...preparado,
+      link: publicacao.link,
+      tokenPublico: publicacao.token,
+      atualizadoEm: Date.now(),
+    }
+    upsertOrcamentoNaLista(orcamento, origem)
+    return { orcamento, publicacao }
   }
 
-  function visualizarOrcamentoInterno(id: number) {
-    window.location.href = `/view/orcamento/${id}`
+  async function visualizarOrcamentoInterno(id: number) {
+    const orc = orcamentosSalvos.find((item) => item.id === id)
+    if (!orc) {
+      notificar('Orçamento não encontrado.', 'error')
+      return
+    }
+
+    try {
+      const { publicacao } = await publicarOrcamentoSeguro(orc, 'visualizar-orcamento')
+      window.location.href = publicacao.urlView
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Não foi possível abrir o orçamento.'
+      notificar(msg, 'error')
+    }
   }
 
   function aplicarModeloOrcamento(modelo: ModeloOrcamento) {
@@ -2404,13 +2365,13 @@ export default function OrcamentoPage() {
       atualizadoEm: Date.now(),
     }
 
-    const novo: OrcamentoSalvo = {
-      ...novoBase,
-      link: gerarLinkDocumento(id, prepararOrcamentoCliente(novoBase)),
+    upsertOrcamentoNaLista(novoBase, 'salvar-proposta')
+    const okNuvem = await persistirOrcamentoSupabase(novoBase)
+    try {
+      await publicarOrcamentoSeguro(novoBase, 'salvar-proposta-publicar')
+    } catch {
+      /* proposta salva; link será gerado ao visualizar */
     }
-
-    upsertOrcamentoNaLista(novo, 'salvar-proposta')
-    const okNuvem = await persistirOrcamentoSupabase(novo)
     notificar(
       okNuvem
         ? 'Proposta comercial salva com sucesso!'
@@ -2815,18 +2776,18 @@ export default function OrcamentoPage() {
           atualizadoEm: Date.now(),
         }
 
-        const atualizado: OrcamentoSalvo = {
-          ...atualizadoBase,
-          link: gerarLinkDocumento(editandoOrcamentoId, prepararOrcamentoCliente(atualizadoBase)),
+        upsertOrcamentoNaLista(atualizadoBase, 'salvar-orcamento-update')
+        const okNuvem = await persistirOrcamentoSupabase(atualizadoBase)
+        try {
+          await publicarOrcamentoSeguro(atualizadoBase, 'salvar-orcamento-update-publicar')
+        } catch {
+          /* orçamento salvo; link será gerado ao visualizar */
         }
-
-        upsertOrcamentoNaLista(atualizado, 'salvar-orcamento-update')
-        const okNuvem = await persistirOrcamentoSupabase(atualizado)
-        gerarFinanceiroDeOrcamento(atualizado)
+        gerarFinanceiroDeOrcamento(atualizadoBase)
         logOrcamentoSave({
           origem: 'salvar-orcamento-update',
-          id: atualizado.id,
-          numero: atualizado.numero,
+          id: atualizadoBase.id,
+          numero: atualizadoBase.numero,
           okNuvem,
         })
         notificar(
@@ -2838,7 +2799,7 @@ export default function OrcamentoPage() {
         const { data: { session: sessEdit } } = await supabase.auth.getSession()
         void registrarLogSistema(sessEdit?.access_token || '', 'editou_orcamento', {
           modulo: 'orcamentos',
-          referencia_id: String(atualizado.id),
+          referencia_id: String(atualizadoBase.id),
         })
         setFormAberto(false)
         novoOrcamento()
@@ -2871,18 +2832,18 @@ export default function OrcamentoPage() {
         atualizadoEm: Date.now(),
       }
 
-      const novo: OrcamentoSalvo = {
-        ...novoBase,
-        link: gerarLinkDocumento(id, prepararOrcamentoCliente(novoBase)),
+      upsertOrcamentoNaLista(novoBase, 'salvar-orcamento-novo')
+      const okNuvem = await persistirOrcamentoSupabase(novoBase)
+      try {
+        await publicarOrcamentoSeguro(novoBase, 'salvar-orcamento-novo-publicar')
+      } catch {
+        /* orçamento salvo; link será gerado ao visualizar */
       }
-
-      upsertOrcamentoNaLista(novo, 'salvar-orcamento-novo')
-      const okNuvem = await persistirOrcamentoSupabase(novo)
-      gerarFinanceiroDeOrcamento(novo)
+      gerarFinanceiroDeOrcamento(novoBase)
       logOrcamentoSave({
         origem: 'salvar-orcamento-novo',
-        id: novo.id,
-        numero: novo.numero,
+        id: novoBase.id,
+        numero: novoBase.numero,
         okNuvem,
       })
       notificar(
@@ -2894,7 +2855,7 @@ export default function OrcamentoPage() {
       const { data: { session: sessNovo } } = await supabase.auth.getSession()
       void registrarLogSistema(sessNovo?.access_token || '', 'criou_orcamento', {
         modulo: 'orcamentos',
-        referencia_id: String(novo.id),
+        referencia_id: String(novoBase.id),
       })
       setEditandoOrcamentoId(id)
       setFormAberto(false)
@@ -3097,11 +3058,11 @@ export default function OrcamentoPage() {
   }
 
   async function linkPublicoOrcamentoLista(orc: OrcamentoSalvo): Promise<string> {
-    try {
-      return await comTimeout(gerarLinkDocumentoPublico(orc.id, orc), 14000)
-    } catch {
-      return gerarLinkDocumento(orc.id, orc)
-    }
+    const { publicacao } = await comTimeout(
+      publicarOrcamentoSeguro(orc, 'link-publico-lista'),
+      14000,
+    )
+    return publicacao.url
   }
 
   async function compartilharLinkOrcamento(orc: OrcamentoSalvo) {
@@ -3110,14 +3071,10 @@ export default function OrcamentoPage() {
     const telefone = telefoneWhatsappBrasil(orc.cliente?.telefone)
     setZapOrcCarregando(orc.id)
     try {
-      let cfgEnvio = mergeConfigPublicacao(config)
-      try {
-        cfgEnvio = mergeConfigPublicacao(config, await configParaPublicar())
-      } catch {}
-      const linkRapido = gerarLinkDocumento(orc.id, prepararOrcamentoCliente(orc), cfgEnvio)
+      const { publicacao } = await publicarOrcamentoSeguro(orc, 'whatsapp-lista')
       await abrirWhatsappAposPrepararLink({
         telefone,
-        linkRapido,
+        linkRapido: publicacao.url,
         prepararLinkCompleto: () => linkPublicoOrcamentoLista(orc),
         montarMensagem: (link) => {
           let mensagem = `Olá ${orc.cliente?.nome || 'cliente'}!\n\n`
@@ -3229,7 +3186,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
     setOrcamentoMenuAberto(null)
   }
 
-  function gerarPDF() {
+  async function gerarPDF() {
     if (itens.length === 0) {
       notificar('Adicione pelo menos um item.', 'error')
       return
@@ -3241,7 +3198,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
     if (editandoOrcamentoId !== null) {
       const atual = orcamentosSalvos.find((item) => item.id === editandoOrcamentoId)
 
-      const atualizadoBase: OrcamentoSalvo = {
+      dadosParaAbrir = {
         id: editandoOrcamentoId,
         numero: atual?.numero || gerarNumeroDocumentoIgnorandoAtual(),
         titulo: tituloPdf,
@@ -3266,16 +3223,10 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         atualizadoEm: Date.now(),
       }
 
-      const atualizado: OrcamentoSalvo = {
-        ...atualizadoBase,
-        link: gerarLinkDocumento(editandoOrcamentoId, prepararOrcamentoCliente(atualizadoBase)),
-      }
-
-      dadosParaAbrir = atualizado
-      upsertOrcamentoNaLista(atualizado, 'gerar-pdf-update')
+      upsertOrcamentoNaLista(dadosParaAbrir, 'gerar-pdf-update')
     } else {
       const existente = orcamentosSalvos.find((item) => item.id === idParaAbrir)
-      const novoBase: OrcamentoSalvo = {
+      dadosParaAbrir = {
         id: idParaAbrir,
         numero: existente?.numero || gerarNumeroDocumentoIgnorandoAtual(),
         titulo: tituloPdf,
@@ -3300,19 +3251,18 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         atualizadoEm: Date.now(),
       }
 
-      const novo: OrcamentoSalvo = {
-        ...novoBase,
-        link: gerarLinkDocumento(idParaAbrir, prepararOrcamentoCliente(novoBase)),
-      }
-
-      dadosParaAbrir = novo
-      upsertOrcamentoNaLista(novo, 'gerar-pdf-novo')
+      upsertOrcamentoNaLista(dadosParaAbrir, 'gerar-pdf-novo')
       setEditandoOrcamentoId(idParaAbrir)
     }
 
-    notificar('PDF pronto para visualização.', 'info')
-    const linkFinal = gerarLinkDocumento(idParaAbrir, dadosParaAbrir || undefined)
-    abrirNovaAbaOuMesma(linkFinal)
+    try {
+      const { publicacao } = await publicarOrcamentoSeguro(dadosParaAbrir!, 'gerar-pdf')
+      notificar('PDF pronto para visualização.', 'info')
+      abrirNovaAbaOuMesma(publicacao.url)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Não foi possível gerar o PDF.'
+      notificar(msg, 'error')
+    }
   }
 
   const colors = darkMode
@@ -3407,6 +3357,61 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
     justifyContent: 'center',
     gap: 6,
     transition: 'transform .18s ease, box-shadow .18s ease, opacity .18s ease',
+    boxShadow: 'none',
+  }
+
+  const listaAcaoBtn = (
+    bg: string,
+    color = '#fff',
+    border = 'transparent',
+  ): React.CSSProperties => ({
+    ...buttonBase,
+    width: '100%',
+    minHeight: 40,
+    height: 40,
+    borderRadius: 14,
+    fontSize: 12,
+    fontWeight: 900,
+    justifyContent: 'flex-start',
+    padding: '0 14px',
+    gap: 8,
+    background: bg,
+    color,
+    border: `1px solid ${border}`,
+    boxShadow: '0 4px 14px rgba(15,23,42,0.08)',
+  })
+
+  const bindHoverListaBtn = (el: HTMLButtonElement | null, entering: boolean) => {
+    if (!el) return
+    el.style.transform = entering ? 'translateY(-1px)' : 'translateY(0)'
+    el.style.boxShadow = entering ? '0 10px 22px rgba(15,23,42,0.16)' : '0 4px 14px rgba(15,23,42,0.08)'
+  }
+
+  const qtdStepBtnBase: React.CSSProperties = {
+    ...buttonBase,
+    width: 44,
+    minWidth: 44,
+    minHeight: 44,
+    height: 44,
+    borderRadius: 10,
+    padding: 0,
+    fontSize: 20,
+    fontWeight: 900,
+    flexShrink: 0,
+  }
+
+  const qtdStepBtnPlus: React.CSSProperties = {
+    ...qtdStepBtnBase,
+    background: 'linear-gradient(135deg,#16a34a,#15803d)',
+    color: '#fff',
+    boxShadow: '0 4px 12px rgba(22,163,74,0.22)',
+  }
+
+  const qtdStepBtnMinus: React.CSSProperties = {
+    ...qtdStepBtnBase,
+    background: darkMode ? '#475569' : '#e2e8f0',
+    color: darkMode ? '#f8fafc' : '#64748b',
+    border: `1px solid ${darkMode ? 'rgba(148,163,184,0.25)' : '#cbd5e1'}`,
     boxShadow: 'none',
   }
 
@@ -3516,81 +3521,34 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
             <h1 style={{ margin: 0, fontSize: isMobile ? 34 : 44, lineHeight: 1, fontWeight: 900, color: colors.text }}>Orçamentos</h1>
             <div style={{ marginTop: 8, color: colors.muted, fontWeight: 700 }}>Módulo blindado com foco em fechamento e conversão</div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <button
-              type="button"
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <BotaoTopoPremium
+              icon="📊"
+              title="Exportar Excel"
+              subtitle="Baixar lista de orçamentos"
               onClick={() => exportarOrcamentosExcel(orcamentosSalvos as unknown as Record<string, unknown>[])}
-              style={{ border: `1px solid ${colors.inputBorder}`, background: colors.card, color: colors.text, borderRadius: 999, padding: '10px 14px', fontWeight: 900, cursor: 'pointer' }}
-            >
-              Exportar Excel
-            </button>
-            <button
+              gradient={darkMode ? 'linear-gradient(135deg,#334155 0%,#1e293b 100%)' : 'linear-gradient(135deg,#64748b 0%,#475569 100%)'}
+              shadow="0 12px 28px rgba(51,65,85,0.22)"
+              minWidth={isMobile ? '100%' : 240}
+            />
+            <BotaoTopoPremium
+              icon="📄💰"
+              title="Novo orçamento"
+              subtitle="Criar proposta premium"
               onClick={() => { novoOrcamento(); setFormAberto(true) }}
-              style={{
-                border: 0,
-                cursor: 'pointer',
-                minHeight: 74,
-                minWidth: isMobile ? '100%' : 286,
-                padding: 0,
-                borderRadius: 22,
-                overflow: 'hidden',
-                color: '#fff',
-                background: 'linear-gradient(135deg,#0f172a 0%,#14532d 100%)',
-                boxShadow: '0 18px 38px rgba(15,23,42,0.26)',
-              }}
-            >
-              <div style={{ display: 'grid', gridTemplateColumns: '82px 1fr 38px', alignItems: 'center', height: '100%' }}>
-                <div style={{
-                  height: '100%',
-                  minHeight: 74,
-                  background: 'linear-gradient(180deg,#ffffff,#dcfce7)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  borderRight: '1px solid rgba(255,255,255,0.18)'
-                }}>
-                  <div style={{
-                    width: 46,
-                    height: 58,
-                    borderRadius: 10,
-                    background: '#fff',
-                    border: '1px solid rgba(15,23,42,0.12)',
-                    boxShadow: '0 10px 20px rgba(15,23,42,0.14)',
-                    padding: 6
-                  }}>
-                    <div style={{ height: 5, borderRadius: 999, background: '#16a34a', marginBottom: 6 }} />
-                    <div style={{ height: 4, borderRadius: 999, background: '#cbd5e1', marginBottom: 5 }} />
-                    <div style={{ height: 4, borderRadius: 999, background: '#cbd5e1', marginBottom: 5, width: '82%' }} />
-                    <div style={{ height: 4, borderRadius: 999, background: '#86efac', marginTop: 12 }} />
-                  </div>
-                </div>
-                <div style={{ textAlign: 'left', padding: '12px 12px' }}>
-                  <div style={{ fontSize: 15, fontWeight: 950, lineHeight: 1 }}>Novo orçamento</div>
-                  <div style={{ marginTop: 5, fontSize: 11, fontWeight: 800, opacity: .82 }}>
-                    Criar proposta premium
-                  </div>
-                </div>
-                <div style={{ fontSize: 24, fontWeight: 900, opacity: .9 }}>›</div>
-              </div>
-            </button>
-            <button
-              type="button"
+              gradient="linear-gradient(135deg,#16a34a 0%,#15803d 100%)"
+              shadow="0 14px 32px rgba(22,163,74,0.28)"
+              minWidth={isMobile ? '100%' : 286}
+            />
+            <BotaoTopoPremium
+              icon="📋⚡"
+              title="Nova proposta"
+              subtitle="Criar proposta rápida"
               onClick={abrirModalProposta}
-              style={{
-                border: '1px solid rgba(37,99,235,.28)',
-                cursor: 'pointer',
-                minHeight: 74,
-                minWidth: isMobile ? '100%' : 220,
-                padding: '12px 16px',
-                borderRadius: 22,
-                color: '#fff',
-                background: 'linear-gradient(135deg,#1d4ed8 0%,#2563eb 52%,#0f172a 100%)',
-                boxShadow: '0 14px 30px rgba(37,99,235,.22)',
-                fontWeight: 950,
-                fontSize: 15,
-              }}
-            >
-              Nova proposta
-            </button>
+              gradient="linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%)"
+              shadow="0 14px 32px rgba(37,99,235,0.24)"
+              minWidth={isMobile ? '100%' : 260}
+            />
             <div style={{ display: 'none' }}>
               <div style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, color: colors.muted }}>Modelo ativo</div>
               <div style={{ marginTop: 4, fontWeight: 900, color: colors.text }}>
@@ -3610,12 +3568,12 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(6, 1fr)', gap: 14, marginBottom: 18 }}>
-          <ResumoCard titulo="Salvos" valor={String(resumo.totalDocumentos)} darkMode={darkMode} />
-          <ResumoCard titulo="Pendentes" valor={String(resumo.pendentes)} darkMode={darkMode} />
-          <ResumoCard titulo="Aprovados" valor={String(resumo.aprovados)} darkMode={darkMode} />
-          <ResumoCard titulo="Convertidos" valor={String(resumo.convertidos)} darkMode={darkMode} />
-          <ResumoCard titulo="Taxa" valor={`${resumo.taxaAprovacao.toFixed(0)}%`} darkMode={darkMode} />
-          <ResumoCard titulo="Ticket" valor={moeda(resumo.ticketMedio)} darkMode={darkMode} />
+          <ResumoCard titulo="Salvos" valor={String(resumo.totalDocumentos)} darkMode={darkMode} icone="💾" />
+          <ResumoCard titulo="Pendentes" valor={String(resumo.pendentes)} darkMode={darkMode} icone="🕒" />
+          <ResumoCard titulo="Aprovados" valor={String(resumo.aprovados)} darkMode={darkMode} icone="✅" />
+          <ResumoCard titulo="Convertidos" valor={String(resumo.convertidos)} darkMode={darkMode} icone="🎯" />
+          <ResumoCard titulo="Taxa" valor={`${resumo.taxaAprovacao.toFixed(0)}%`} darkMode={darkMode} icone="📈" />
+          <ResumoCard titulo="Ticket" valor={moeda(resumo.ticketMedio)} darkMode={darkMode} icone="🛒" />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14, marginBottom: 18 }}>
@@ -3624,7 +3582,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
             <div style={{ fontSize: isMobile ? 26 : 34, fontWeight: 900, color: darkMode ? '#f0fdf4' : '#166534' }}>{moeda(resumo.totalAprovado)}</div>
           </div>
           <div style={{ ...cardStyle, background: darkMode ? '#2a1207' : '#fff7ed', borderColor: 'rgba(249,115,22,0.28)' }}>
-            <div style={{ fontSize: 13, fontWeight: 900, color: darkMode ? '#fdba74' : '#c2410c', marginBottom: 6 }}>📌 Cancelados</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: darkMode ? '#fdba74' : '#c2410c', marginBottom: 6 }}>❌ Cancelados</div>
             <div style={{ fontSize: isMobile ? 26 : 34, fontWeight: 900, color: darkMode ? '#fff7ed' : '#7c2d12' }}>{resumo.cancelados}</div>
           </div>
         </div>
@@ -3684,6 +3642,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     }}
                   >
                     <div>
+                      <div style={{ fontSize: 24, lineHeight: 1, marginBottom: 4 }}>{isPropostaComercial(orc) ? '📋' : '📄'}</div>
                       <div style={{ fontSize: 11, fontWeight: 900, color: colors.muted, textTransform: 'uppercase', letterSpacing: .7 }}>Doc.</div>
                       <div style={{ marginTop: 4, fontSize: 20, fontWeight: 950, color: colors.text }}>#{orc.numero}</div>
                     </div>
@@ -3719,13 +3678,39 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                           color: statusColor,
                           border: `1px solid ${statusColor}55`,
                           background: `${statusColor}12`,
+                          gap: 4,
                         }}>
-                          {orc.status}
+                          {orc.status === 'Aprovado' ? '✅' : orc.status === 'Convertido' ? '🎯' : orc.status === 'Cancelado' ? '❌' : '🕒'} {orc.status}
                         </span>
                       </div>
 
-                      <div style={{ marginTop: 7, color: colors.muted, fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: isMobile ? 'normal' : 'nowrap' }}>
-                        👤 {orc.cliente?.nome || 'Cliente não informado'} {orc.data ? `• ${orc.data}` : ''}
+                      <div style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '6px 12px',
+                            borderRadius: 10,
+                            width: 'fit-content',
+                            maxWidth: '100%',
+                            fontSize: 13,
+                            fontWeight: orc.cliente?.nome ? 900 : 700,
+                            color: orc.cliente?.nome ? (darkMode ? '#e9d5ff' : '#6b21a8') : colors.muted,
+                            background: orc.cliente?.nome
+                              ? (darkMode ? 'rgba(88,28,135,0.22)' : '#faf5ff')
+                              : (darkMode ? 'rgba(15,23,42,0.55)' : '#f8fafc'),
+                            border: `1px solid ${orc.cliente?.nome ? (darkMode ? 'rgba(192,132,252,0.35)' : '#ddd6fe') : (darkMode ? 'rgba(148,163,184,0.22)' : '#e2e8f0')}`,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: isMobile ? 'normal' : 'nowrap',
+                          }}
+                        >
+                          👤 {orc.cliente?.nome || 'Cliente não informado'}
+                        </span>
+                        {orc.data ? (
+                          <span style={{ color: colors.muted, fontSize: 13, fontWeight: 700 }}>{orc.data}</span>
+                        ) : null}
                       </div>
                     </div>
 
@@ -3737,33 +3722,41 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     <div style={{ display: 'grid', gap: 6 }}>
                       <button
                         onClick={() => visualizarOrcamentoInterno(orc.id)}
-                        style={{ ...buttonBase, background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', minHeight: 34, height: 34, borderRadius: 12 }}
+                        style={listaAcaoBtn('linear-gradient(135deg,#2563eb,#1d4ed8)')}
+                        onMouseEnter={(e) => bindHoverListaBtn(e.currentTarget, true)}
+                        onMouseLeave={(e) => bindHoverListaBtn(e.currentTarget, false)}
                       >
-                        👁 Visualizar
+                        👁️ Visualizar
                       </button>
                       <button
                         type="button"
                         className={`connect-zap-btn${zapOrcCarregando === orc.id ? ' connect-zap-btn--loading' : ''}`}
                         disabled={zapOrcCarregando === orc.id}
                         onClick={() => void compartilharLinkOrcamento(orc)}
-                        style={{ ...buttonBase, background: 'linear-gradient(135deg,#16a34a,#065f46)', color: '#fff', minHeight: 34, height: 34, borderRadius: 12, touchAction: 'manipulation' }}
+                        style={{ ...listaAcaoBtn('linear-gradient(135deg,#16a34a,#065f46)'), touchAction: 'manipulation' }}
+                        onMouseEnter={(e) => bindHoverListaBtn(e.currentTarget, true)}
+                        onMouseLeave={(e) => bindHoverListaBtn(e.currentTarget, false)}
                       >
-                        {zapOrcCarregando === orc.id ? '⏳ Abrindo…' : '📲 WhatsApp'}
+                        {zapOrcCarregando === orc.id ? '⏳ Abrindo…' : '💬 WhatsApp'}
                       </button>
                     </div>
 
                     <div style={{ display: 'grid', gap: 6 }}>
                       <button
                         onClick={() => abrirMenuOrcamento(orc)}
-                        style={{ ...buttonBase, background: darkMode ? '#1f2937' : '#eef2ff', color: colors.text, minHeight: 34, height: 34, borderRadius: 12, border: `1px solid ${darkMode ? 'rgba(255,255,255,.10)' : '#dbeafe'}` }}
+                        style={listaAcaoBtn(darkMode ? '#1f2937' : '#eef2ff', colors.text, darkMode ? 'rgba(255,255,255,.10)' : '#dbeafe')}
+                        onMouseEnter={(e) => bindHoverListaBtn(e.currentTarget, true)}
+                        onMouseLeave={(e) => bindHoverListaBtn(e.currentTarget, false)}
                       >
-                        ⚙ Ações
+                        ⋯ Ações
                       </button>
                       <button
                         onClick={() => editarOrcamento(orc)}
-                        style={{ ...buttonBase, background: 'linear-gradient(135deg,#0f172a,#334155)', color: '#fff', minHeight: 34, height: 34, borderRadius: 12 }}
+                        style={listaAcaoBtn('linear-gradient(135deg,#0f172a,#334155)')}
+                        onMouseEnter={(e) => bindHoverListaBtn(e.currentTarget, true)}
+                        onMouseLeave={(e) => bindHoverListaBtn(e.currentTarget, false)}
                       >
-                        ✎ Editar
+                        ✏️ Editar
                       </button>
                     </div>
                   </div>
@@ -3881,7 +3874,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
             </div>
             <div style={{ display: 'grid', gap: 14 }}>
               <div style={cardStyle}>
-                <label style={labelStyle}>Cliente</label>
+                <label style={labelStyle}>👤 Cliente</label>
                 <input
                   value={clienteBusca}
                   onChange={(e) => {
@@ -3929,11 +3922,13 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                       gap: 4,
                     }}
                   >
-                    <div style={{ fontWeight: 900, color: darkMode ? '#dcfce7' : '#166534' }}>{clienteSelecionado.nome}</div>
-                    <div style={{ fontSize: 13, color: colors.muted }}>📞 {clienteSelecionado.telefone || 'Sem telefone'}</div>
-                    <div style={{ fontSize: 13, color: colors.muted }}>🪪 {clienteSelecionado.tipoPessoa === 'PJ' ? 'PJ' : 'PF'} {clienteSelecionado.cpf ? `• CPF: ${clienteSelecionado.cpf}` : ''} {clienteSelecionado.cnpj ? `• CNPJ: ${clienteSelecionado.cnpj}` : ''}</div>
-                    {clienteSelecionado.email ? <div style={{ fontSize: 13, color: colors.muted }}>✉️ {clienteSelecionado.email}</div> : null}
-                    {clienteSelecionado.endereco ? <div style={{ fontSize: 13, color: colors.muted }}>📍 Endereço do cliente: {clienteSelecionado.endereco}</div> : null}
+                    <div style={{ fontWeight: 900, color: darkMode ? '#dcfce7' : '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>👤</span> {clienteSelecionado.nome}
+                    </div>
+                    <div style={{ fontSize: 13, color: colors.text, fontWeight: 700 }}>📞 {clienteSelecionado.telefone || 'Sem telefone'}</div>
+                    <div style={{ fontSize: 13, color: colors.muted, fontWeight: 700 }}>🪪 {clienteSelecionado.tipoPessoa === 'PJ' ? 'PJ' : 'PF'} {clienteSelecionado.cpf ? `• CPF: ${clienteSelecionado.cpf}` : ''} {clienteSelecionado.cnpj ? `• CNPJ: ${clienteSelecionado.cnpj}` : ''}</div>
+                    {clienteSelecionado.email ? <div style={{ fontSize: 13, color: colors.text, fontWeight: 700 }}>📧 {clienteSelecionado.email}</div> : null}
+                    {clienteSelecionado.endereco ? <div style={{ fontSize: 13, color: colors.text, fontWeight: 700 }}>📍 {clienteSelecionado.endereco}</div> : null}
                   </div>
                 )}
 
@@ -4454,10 +4449,21 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                             </div>
                           </div>
                         ) : (
-                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '120px 140px 1fr', gap: 8 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'minmax(168px, 0.9fr) 140px 1fr', gap: 8 }}>
                             <div>
                               <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>{item.tipoCalculo === 'peso' ? 'Peso' : item.tipoCadastro === 'servico' ? 'Qtd. serviço' : 'Qtd'}</label>
-                              <input type={item.tipoCalculo === 'peso' ? 'text' : 'number'} inputMode={item.tipoCalculo === 'peso' ? 'decimal' : 'numeric'} min={item.tipoCalculo === 'peso' ? undefined : 1} value={item.tipoCalculo === 'peso' ? formatarPesoCampo(item.quantidade) : item.quantidade} onChange={(e) => alterarQuantidadeItem(item.id, item.tipoCalculo === 'peso' ? textoPesoParaKg(e.target.value) : Number(e.target.value || 1))} style={inputStyle} />
+                              <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
+                                <input
+                                  type={item.tipoCalculo === 'peso' ? 'text' : 'number'}
+                                  inputMode={item.tipoCalculo === 'peso' ? 'decimal' : 'numeric'}
+                                  min={item.tipoCalculo === 'peso' ? undefined : 1}
+                                  value={item.tipoCalculo === 'peso' ? formatarPesoCampo(item.quantidade) : item.quantidade}
+                                  onChange={(e) => alterarQuantidadeItem(item.id, item.tipoCalculo === 'peso' ? textoPesoParaKg(e.target.value) : Number(e.target.value || 1))}
+                                  style={{ ...inputStyle, flex: 1, minWidth: 0, width: 'auto' }}
+                                />
+                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={qtdStepBtnPlus}>+</button>
+                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={qtdStepBtnMinus}>-</button>
+                              </div>
                             </div>
                             <div>
                               <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>R$ Unitário</label>
@@ -4481,8 +4487,12 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                             Total do item: <span style={{ color: '#22c55e' }}>{moeda(calcularTotalItem(item))}</span>
                           </div>
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            <button onClick={() => ajustarQuantidadeItem(item.id, 1)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(34,197,94,0.22)' }}>+</button>
-                            <button onClick={() => ajustarQuantidadeItem(item.id, -1)} style={{ ...buttonBase, background: darkMode ? '#334155' : '#e2e8f0', color: darkMode ? '#fff' : '#111827', padding: '10px 14px' }}>-</button>
+                            {item.tipoCalculo === 'm2' ? (
+                              <>
+                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={qtdStepBtnPlus}>+</button>
+                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={qtdStepBtnMinus}>-</button>
+                              </>
+                            ) : null}
                             <button onClick={() => alterarVisibilidadeItemCliente(item.id)} style={{ ...buttonBase, background: item.mostrarCliente === false ? 'linear-gradient(135deg,#f97316,#ea580c)' : darkMode ? '#334155' : '#e2e8f0', color: item.mostrarCliente === false ? '#fff' : darkMode ? '#fff' : '#111827', padding: '10px 14px' }}>{item.mostrarCliente === false ? 'Mostrar ao cliente' : 'Ocultar do cliente'}</button>
                             <button onClick={() => editarItem(item)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(37,99,235,0.25)' }}>Editar</button>
                             <button onClick={() => removerItem(item.id)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(239,68,68,0.22)' }}>Excluir</button>
@@ -4503,7 +4513,9 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                   border: `1px solid ${darkMode ? 'rgba(34,197,94,0.28)' : '#bbf7d0'}`,
                 }}
               >
-                <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 12, color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.6 }}>Resumo financeiro</div>
+                <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 12, color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>📊</span> Resumo financeiro
+                </div>
                 <div style={{ display: 'grid', gap: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, color: colors.text }}>
                     <span>Subtotal</span>
@@ -4522,7 +4534,8 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                   </div>
                   <div style={{ borderTop: `1px solid ${colors.inputBorder}`, marginTop: 4, paddingTop: 12 }}>
                     <div style={{ fontSize: 11, fontWeight: 900, color: colors.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Total</div>
-                    <div style={{ fontSize: isMobile ? 28 : 34, fontWeight: 950, color: darkMode ? '#4ade80' : '#15803d', lineHeight: 1.05, letterSpacing: -0.5 }}>
+                    <div style={{ fontSize: isMobile ? 28 : 36, fontWeight: 950, color: darkMode ? '#4ade80' : '#15803d', lineHeight: 1.05, letterSpacing: -0.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: isMobile ? 24 : 28 }}>💰</span>
                       {moeda(total)}
                     </div>
                   </div>
@@ -4607,13 +4620,32 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     <input type="number" min={0} step="0.01" value={valorEntrega === 0 ? '' : valorEntrega} placeholder="0,00" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setValorEntrega(e.target.value === '' ? 0 : Number(e.target.value))} style={inputStyle} />
                   </div>
                   {clienteSelecionado && (
-                    <div>
-                      <label style={labelStyle}>Endereço de entrega</label>
+                    <div
+                      style={{
+                        padding: 12,
+                        borderRadius: 12,
+                        background: darkMode ? 'rgba(88,28,135,0.18)' : '#faf5ff',
+                        border: `1.5px solid ${enderecoEntregaFocused ? (darkMode ? '#c084fc' : '#9333ea') : (darkMode ? 'rgba(192,132,252,0.35)' : '#ddd6fe')}`,
+                        boxShadow: enderecoEntregaFocused ? (darkMode ? '0 0 0 3px rgba(192,132,252,0.18)' : '0 0 0 3px rgba(147,51,234,0.12)') : 'none',
+                        transition: 'border-color .18s ease, box-shadow .18s ease',
+                      }}
+                    >
+                      <label style={{ ...labelStyle, color: darkMode ? '#e9d5ff' : '#6b21a8', fontWeight: 900, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        📍 Endereço de entrega
+                      </label>
                       <input
                         value={enderecoEntrega}
                         onChange={(e) => setEnderecoEntrega(e.target.value)}
+                        onFocus={() => setEnderecoEntregaFocused(true)}
+                        onBlur={() => setEnderecoEntregaFocused(false)}
                         placeholder="Preencha se for diferente do cadastro"
-                        style={inputStyle}
+                        style={{
+                          ...inputStyle,
+                          background: darkMode ? '#1e1033' : '#ffffff',
+                          border: `1px solid ${enderecoEntregaFocused ? (darkMode ? '#c084fc' : '#9333ea') : (darkMode ? 'rgba(192,132,252,0.35)' : '#c4b5fd')}`,
+                          color: colors.text,
+                          fontWeight: 700,
+                        }}
                       />
                     </div>
                   )}
@@ -4663,7 +4695,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                   >
                     WhatsApp
                   </button>
-                  <button type="button" disabled={salvandoOrcamento} onClick={gerarPDF} style={{ ...actionButtonStyle('visualizar'), opacity: salvandoOrcamento ? 0.7 : 1 }}>
+                  <button type="button" disabled={salvandoOrcamento} onClick={() => void gerarPDF()} style={{ ...actionButtonStyle('visualizar'), opacity: salvandoOrcamento ? 0.7 : 1 }}>
                     Gerar PDF
                   </button>
                 </div>
@@ -4861,7 +4893,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               <div>
                 <label style={labelStyle}>🔗 Link compartilhável do documento</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 46px', gap: 8 }}>
-                  <input readOnly value={gerarLinkDocumento(orcamentoMenuAberto.id, orcamentoMenuAberto)} style={inputStyle} />
+                  <input readOnly value={orcamentoMenuAberto.link || 'Salve ou visualize para gerar o link com token.'} style={inputStyle} />
                   <button type="button" onClick={() => void copiarLinkOrcamento(orcamentoMenuAberto)} style={{ ...buttonBase, background: darkMode ? '#2b313a' : '#e5e7eb', color: colors.text, minHeight: 28, height: 28 }}>📋</button>
                 </div>
               </div>
@@ -4905,7 +4937,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(112px,1fr))', gap: 8 }}>
-                <button onClick={() => { alterarStatusOrcamento(orcamentoMenuAberto.id, 'Aprovado', 'Orçamento aprovado!'); fecharMenuOrcamento() }} style={actionButtonStyle('aprovar')}>Aprovar</button>
+                <button onClick={() => { alterarStatusOrcamento(orcamentoMenuAberto.id, 'Aprovado', 'Orçamento aprovado!'); fecharMenuOrcamento() }} style={actionButtonStyle('aprovar')}>✅ Aprovar</button>
                 <button onClick={() => { alterarStatusOrcamento(orcamentoMenuAberto.id, 'Cancelado', 'Orçamento cancelado.'); fecharMenuOrcamento() }} style={actionButtonStyle('cancelar')}>Cancelar</button>
                 <button onClick={() => { gerarVenda(orcamentoMenuAberto); fecharMenuOrcamento() }} style={actionButtonStyle('venda')}>{orcamentoSomenteProdutos(orcamentoMenuAberto) ? 'Finalizar Venda' : 'Gerar Venda'}</button>
                 <button
@@ -4913,7 +4945,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                   title={!orcamentoTemServico(orcamentoMenuAberto) ? 'OS fica disponível apenas para orçamento de serviço.' : 'Criar ordem de serviço'}
                   onClick={() => { gerarOS(orcamentoMenuAberto); fecharMenuOrcamento() }}
                   style={{ ...actionButtonStyle('os'), opacity: orcamentoTemServico(orcamentoMenuAberto) ? 1 : 0.45, cursor: orcamentoTemServico(orcamentoMenuAberto) ? 'pointer' : 'not-allowed' }}
-                >Gerar OS</button>
+                >🎯 Gerar OS</button>
               </div>
             </div>
           </div>
@@ -4923,7 +4955,75 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
   )
 }
 
-function ResumoCard({ titulo, valor, darkMode }: { titulo: string; valor: string; darkMode: boolean }) {
+function BotaoTopoPremium({
+  icon,
+  title,
+  subtitle,
+  onClick,
+  gradient,
+  shadow,
+  minWidth = 260,
+}: {
+  icon: string
+  title: string
+  subtitle: string
+  onClick: () => void
+  gradient: string
+  shadow: string
+  minWidth?: number | string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: 0,
+        cursor: 'pointer',
+        minHeight: 48,
+        height: 48,
+        minWidth,
+        width: typeof minWidth === 'string' && minWidth.includes('%') ? minWidth : undefined,
+        padding: 0,
+        borderRadius: 16,
+        overflow: 'hidden',
+        color: '#fff',
+        background: gradient,
+        boxShadow: shadow,
+        transition: 'transform .18s ease, box-shadow .18s ease',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-1px)'
+        e.currentTarget.style.boxShadow = shadow.replace('0.24', '0.32').replace('0.28', '0.36').replace('0.22', '0.30')
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)'
+        e.currentTarget.style.boxShadow = shadow
+      }}
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: '56px 1fr 28px', alignItems: 'center', height: '100%' }}>
+        <div
+          style={{
+            display: 'grid',
+            placeItems: 'center',
+            fontSize: 22,
+            height: '100%',
+            borderRight: '1px solid rgba(255,255,255,0.18)',
+            background: 'rgba(255,255,255,0.08)',
+          }}
+        >
+          {icon}
+        </div>
+        <div style={{ textAlign: 'left', padding: '0 12px' }}>
+          <div style={{ fontSize: 14, fontWeight: 950, lineHeight: 1.1 }}>{title}</div>
+          <div style={{ marginTop: 4, fontSize: 11, fontWeight: 800, opacity: 0.88 }}>{subtitle}</div>
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 900, opacity: 0.92, paddingRight: 8 }}>›</div>
+      </div>
+    </button>
+  )
+}
+
+function ResumoCard({ titulo, valor, darkMode, icone }: { titulo: string; valor: string; darkMode: boolean; icone?: string }) {
   return (
     <div
       style={{
@@ -4934,7 +5034,10 @@ function ResumoCard({ titulo, valor, darkMode }: { titulo: string; valor: string
         boxShadow: darkMode ? '0 10px 26px rgba(0,0,0,0.16)' : '0 10px 26px rgba(0,0,0,0.06)',
       }}
     >
-      <div style={{ fontSize: 13, fontWeight: 800, color: darkMode ? '#94a3b8' : '#6b7280', marginBottom: 8 }}>{titulo}</div>
+      <div style={{ fontSize: 13, fontWeight: 800, color: darkMode ? '#94a3b8' : '#6b7280', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+        {icone ? <span>{icone}</span> : null}
+        <span>{titulo}</span>
+      </div>
       <div style={{ fontSize: 26, fontWeight: 900, color: darkMode ? '#f8fafc' : '#111827', lineHeight: 1 }}>{valor}</div>
     </div>
   )

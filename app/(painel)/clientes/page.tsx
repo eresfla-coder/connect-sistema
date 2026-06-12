@@ -152,6 +152,7 @@ export default function ClientesPage() {
     setClientes(normalizados)
     if (!selecionadoId && normalizados[0]) setSelecionadoId(normalizados[0].id)
     try { salvarLocalStorageUsuario(CLIENTES_KEY, uid, normalizados) } catch {}
+    console.info('[CLIENTES_LOAD]', { modulo: 'clientes', origem: 'supabase', quantidade: normalizados.length, userId: uid })
     setLoading(false)
   }
 

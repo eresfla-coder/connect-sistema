@@ -12,6 +12,7 @@ import {
   removerContratoPersistido,
   type ContratoServico,
 } from '@/lib/contratosPersistencia'
+import { carregarClientesPainelDetalhado } from '@/lib/clientes-painel'
 import { timestampVersaoPublica } from '@/lib/empresaPublica'
 import { supabase } from '@/lib/supabase-browser'
 
@@ -90,13 +91,35 @@ export default function ContratosPage() {
 
   useEffect(() => {
     void recarregarContratos()
-    try {
-      const clientesSalvos = localStorage.getItem('connect_clientes')
-      if (clientesSalvos) {
-        const lista = JSON.parse(clientesSalvos)
-        if (Array.isArray(lista)) setClientes(lista)
+
+    const aplicarClientes = (lista: Awaited<ReturnType<typeof carregarClientesPainelDetalhado>>['clientes']) => {
+      setClientes(
+        lista.map((cliente) => ({
+          id: cliente.id,
+          nome: cliente.nome,
+          telefone: cliente.telefone,
+          cpf: cliente.cpf,
+          cnpj: cliente.cnpj,
+          endereco: cliente.endereco,
+          tipoPessoa: cliente.tipoPessoa,
+        })),
+      )
+    }
+
+    void carregarClientesPainelDetalhado('contratos').then(({ clientes: lista }) => {
+      aplicarClientes(lista)
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session?.user?.id) return
+      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
+        void carregarClientesPainelDetalhado('contratos').then(({ clientes: lista }) => {
+          aplicarClientes(lista)
+        })
       }
-    } catch {}
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   useEffect(() => {

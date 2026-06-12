@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import {
+  carregarClientesCadastro,
   enderecoClienteCompleto,
-  lerClientesCadastro,
   type ClienteCadastro,
 } from '@/lib/clientesCadastro'
 
@@ -27,7 +27,7 @@ export function SeletorClienteCadastrado({
   const [idSelecionado, setIdSelecionado] = useState(valueId)
 
   useEffect(() => {
-    setClientes(lerClientesCadastro())
+    void carregarClientesCadastro().then(setClientes)
   }, [])
 
   useEffect(() => {

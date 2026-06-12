@@ -7,6 +7,8 @@ import { normalizarTelefoneWhatsapp } from '@/lib/recibo-publico'
 import { mensagemOrcamentoAprovadoParaEmpresa } from '@/lib/whatsappMensagens'
 import { logoUrlAbsolutaPublica, mergeConfigPublicacao } from '@/lib/documentosPublicos'
 import { montarUrlPublicaDocumento, siteUrlPublico } from '@/lib/empresaPublica'
+import { lerLocalStorageUsuario, obterUserIdPainel } from '@/lib/connect-user-storage'
+import { supabase } from '@/lib/supabase-browser'
 import { urlQrCode } from '@/lib/pdfPremium'
 import { iconeFormaPagamento, listaFormasPagamentoOrcamento, textoPagamentoOrcamento } from '@/lib/orcamento-pagamento'
 import {
@@ -480,15 +482,24 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           } catch {}
         }
 
-        // Release v43: fallback público por ID para links curtos enviados via WhatsApp/domínio novo.
+        // Dono autenticado: busca segura via Bearer (Sprint Segurança — sem token público).
         if (!payload && !docPublico && id) {
           try {
-            const resp = await fetch(`/api/public-docs?tipo=orcamento&documentoId=${encodeURIComponent(id)}`, { cache: 'no-store' })
-            if (resp.ok) {
-              const dados = await resp.json()
-              docPublico = dados?.payload || null
-              if (docPublico && typeof window !== 'undefined') {
-                try { localStorage.setItem(`${STORAGE_KEY}_public_${docPublico.id || id}`, JSON.stringify(docPublico)) } catch {}
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session?.access_token) {
+              const resp = await fetch(
+                `/api/public-docs?document_type=orcamento&document_id=${encodeURIComponent(id)}`,
+                {
+                  cache: 'no-store',
+                  headers: { Authorization: `Bearer ${session.access_token}` },
+                },
+              )
+              if (resp.ok) {
+                const dados = await resp.json()
+                docPublico = dados?.payload || null
+                if (docPublico && typeof window !== 'undefined') {
+                  try { localStorage.setItem(`${STORAGE_KEY}_public_${docPublico.id || id}`, JSON.stringify(docPublico)) } catch {}
+                }
               }
             }
           } catch {}
@@ -509,10 +520,14 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
 
         if (cancelado) return
 
-        const saved = localStorage.getItem(STORAGE_KEY)
-        const lista = saved ? JSON.parse(saved) : []
+        const userId = await obterUserIdPainel()
+        const listaScoped = lerLocalStorageUsuario<any[]>(STORAGE_KEY, userId, [])
         const fallbackPublico = typeof window !== 'undefined' ? localStorage.getItem(`${STORAGE_KEY}_public_${id}`) : null
-        const encontrado = payload || docPublico || findOrcamento(Array.isArray(lista) ? lista : [], id) || (fallbackPublico ? JSON.parse(fallbackPublico) : null)
+        const encontrado =
+          payload ||
+          docPublico ||
+          findOrcamento(Array.isArray(listaScoped) ? listaScoped : [], id) ||
+          (fallbackPublico ? JSON.parse(fallbackPublico) : null)
         if (!payload && encontrado && documentoIdPublico) {
           ;(encontrado as any).id = Number(documentoIdPublico) || (encontrado as any).id
         }
@@ -624,9 +639,14 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
       }
 
       try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.access_token) {
+          headers.Authorization = `Bearer ${session.access_token}`
+        }
         const resp = await fetch('/api/public-docs', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             tipo: 'orcamento',
             documentoId: id,
@@ -651,27 +671,40 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
       } catch {}
 
       try {
-        const resp = await fetch(
-          `/api/public-docs?tipo=orcamento&documentoId=${encodeURIComponent(id)}`,
-          { cache: 'no-store' },
-        )
-        if (resp.ok) {
-          const json = await resp.json()
-          if (json?.token && !cancelado) {
-            setLinkPublicoQr(
-              montarUrlPublicaDocumento('/impressao-orcamento', id, {
-                token: String(json.token),
-                preview: true,
-                v: json.updated_at,
-              }),
-            )
-            return
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.access_token) {
+          const resp = await fetch(
+            `/api/public-docs?document_type=orcamento&document_id=${encodeURIComponent(id)}`,
+            {
+              cache: 'no-store',
+              headers: { Authorization: `Bearer ${session.access_token}` },
+            },
+          )
+          if (resp.ok) {
+            const json = await resp.json()
+            if (json?.token && !cancelado) {
+              setLinkPublicoQr(
+                montarUrlPublicaDocumento('/impressao-orcamento', id, {
+                  token: String(json.token),
+                  preview: true,
+                  v: json.updated_at,
+                }),
+              )
+              return
+            }
           }
         }
       } catch {}
 
-      if (!cancelado) {
-        setLinkPublicoQr(`${siteUrlPublico()}/impressao-orcamento/${id}?preview=1`)
+      if (!cancelado && orc) {
+        setLinkPublicoQr(
+          search.get('p') || search.get('token')
+            ? montarUrlPublicaDocumento('/impressao-orcamento', id, {
+                token: String(search.get('p') || search.get('token')),
+                preview: true,
+              })
+            : '',
+        )
       }
     }
 
