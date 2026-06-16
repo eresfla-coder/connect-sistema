@@ -12,6 +12,36 @@ export function itemOrcamentoOcultarDetalheClienteM2(item: { tipoCalculo?: strin
   return item?.tipoCalculo === 'm2'
 }
 
+/** Ocultar qtd/unitário no PDF/link do cliente para este item. */
+export function deveOcultarDetalhesItemOrcamentoCliente(
+  item: {
+    tipoCalculo?: string
+    ocultarDoCliente?: boolean
+    esconderDetalhes?: boolean
+    calculoInterno?: boolean
+    ocultarDetalhesCliente?: boolean
+  },
+  ocultarM2Documento?: boolean,
+): boolean {
+  if (item.ocultarDoCliente === true) return true
+  if (item.esconderDetalhes === true) return true
+  if (item.calculoInterno === true) return true
+  if (item.tipoCalculo === 'm2') {
+    if (item.ocultarDetalhesCliente === true) return true
+    if (ocultarM2Documento) return true
+  }
+  return false
+}
+
+/** Tabela DESCRIÇÃO | TOTAL só quando todos os itens ocultam detalhes. */
+export function tabelaOrcamentoSimplificadaCliente(
+  itens: Array<Parameters<typeof deveOcultarDetalhesItemOrcamentoCliente>[0]>,
+  ocultarM2Documento?: boolean,
+): boolean {
+  if (!itens.length) return false
+  return itens.every((item) => deveOcultarDetalhesItemOrcamentoCliente(item, ocultarM2Documento))
+}
+
 export function orcamentoDeveOcultarM2Cliente(
   itens: Array<{ tipoCalculo?: string }>,
   flagManual?: boolean,

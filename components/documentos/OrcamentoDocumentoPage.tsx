@@ -12,10 +12,10 @@ import { supabase } from '@/lib/supabase-browser'
 import { urlQrCode } from '@/lib/pdfPremium'
 import { iconeFormaPagamento, listaFormasPagamentoOrcamento, textoPagamentoOrcamento } from '@/lib/orcamento-pagamento'
 import {
-  itemOrcamentoOcultarDetalheClienteM2,
+  tabelaOrcamentoSimplificadaCliente,
+  deveOcultarDetalhesItemOrcamentoCliente,
   normalizarTextoObservacao,
   OBSERVACAO_PADRAO_ORCAMENTO,
-  orcamentoDeveOcultarM2Cliente,
   validadeOrcamentoAtiva,
 } from '@/lib/orcamentoTextos'
 
@@ -48,6 +48,10 @@ type ItemOrcamento = {
   metragem?: number
   valorM2?: number
   unidadeLabel?: string
+  ocultarDoCliente?: boolean
+  esconderDetalhes?: boolean
+  calculoInterno?: boolean
+  ocultarDetalhesCliente?: boolean
 }
 
 type Orcamento = {
@@ -191,7 +195,12 @@ function unidadeItem(item: ItemOrcamento) {
 }
 
 function quantidadeItem(item: ItemOrcamento) {
-  if (itemOrcamentoOcultarDetalheClienteM2(item)) return ''
+  if (item.tipoCalculo === 'm2') {
+    const metragem = Number(item.metragem || 0)
+    if (metragem > 0) {
+      return metragem.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    }
+  }
   if (item.tipoCalculo === 'peso') {
     return Number(item.quantidade || 0).toLocaleString('pt-BR', {
       minimumFractionDigits: 3,
@@ -202,8 +211,8 @@ function quantidadeItem(item: ItemOrcamento) {
   return numero(Number(item.quantidade || 0))
 }
 
-function ocultarDetalhesItemCliente(item: ItemOrcamento) {
-  return itemOrcamentoOcultarDetalheClienteM2(item)
+function ocultarDetalhesItemCliente(item: ItemOrcamento, ocultarM2Documento?: boolean) {
+  return deveOcultarDetalhesItemOrcamentoCliente(item, ocultarM2Documento)
 }
 
 function findOrcamento(lista: any[], idParam: string) {
@@ -1031,7 +1040,8 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
   const entrega = texto(orc.prazoEntrega, '3 dias')
   const pagamento = textoPagamentoOrcamento(orc)
   const pagamentoLista = listaFormasPagamentoOrcamento(orc)
-  const ocultarM2 = orcamentoDeveOcultarM2Cliente(itens, Boolean(orc.ocultarValorUnitarioM2))
+  const ocultarM2Doc = Boolean(orc.ocultarValorUnitarioM2)
+  const tabelaSimplificada = tabelaOrcamentoSimplificadaCliente(itens, ocultarM2Doc)
   const descricaoProposta = texto(orc.descricaoProposta, '')
   const observacao = normalizarTextoObservacao(
     texto(
@@ -1154,35 +1164,36 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         ) : null}
 
         <section className="orc-table orc-table-screen">
-          <div className={`orc-thead ${ocultarM2 ? 'orc-thead-m2-cliente' : ''}`}>
-            {!ocultarM2 ? <span>Item</span> : null}
+          <div className={`orc-thead ${tabelaSimplificada ? 'orc-thead-m2-cliente' : ''}`}>
+            {!tabelaSimplificada ? <span>Item</span> : null}
             <span>Descrição</span>
-            {!ocultarM2 ? <span>Un.</span> : null}
-            {!ocultarM2 ? <span>Qtde</span> : null}
-            {!ocultarM2 ? <span>Valor Unit.</span> : null}
-            <span className={ocultarM2 ? 'orc-th-valor' : ''}>{ocultarM2 ? 'Total' : 'Subtotal'}</span>
+            {!tabelaSimplificada ? <span>Un.</span> : null}
+            {!tabelaSimplificada ? <span>Qtde</span> : null}
+            {!tabelaSimplificada ? <span>Valor Unit.</span> : null}
+            <span className={tabelaSimplificada ? 'orc-th-valor' : ''}>{tabelaSimplificada ? 'Total' : 'Subtotal'}</span>
           </div>
 
           {itensParaMostrar.map((item, index) => {
+            const ocultarDetalhesLinha = ocultarDetalhesItemCliente(item, ocultarM2Doc)
             return (
               <div
-                className={`orc-row ${ocultarM2 ? 'orc-row-m2-cliente' : ''}`}
+                className={`orc-row ${tabelaSimplificada ? 'orc-row-m2-cliente' : ''}`}
                 key={String(item.id || index)}
               >
-                {!ocultarM2 ? (
+                {!tabelaSimplificada ? (
                   <div className="orc-index">{String(index + 1).padStart(2, '0')}</div>
                 ) : null}
                 <div className="orc-desc">
                   <strong>{texto(item.nome, 'Item')}</strong>
                   {texto(item.descricao, '') && <small>{texto(item.descricao, '')}</small>}
                 </div>
-                {!ocultarM2 ? (
+                {!tabelaSimplificada ? (
                   <>
                     <div className="orc-unit">
-                      <span>{unidadeItem(item)}</span>
+                      <span>{ocultarDetalhesLinha ? '—' : unidadeItem(item)}</span>
                     </div>
-                    <div className="orc-center">{quantidadeItem(item)}</div>
-                    <div className="orc-money">{moeda(valorUnitario(item))}</div>
+                    <div className="orc-center">{ocultarDetalhesLinha ? '—' : quantidadeItem(item)}</div>
+                    <div className="orc-money">{ocultarDetalhesLinha ? '—' : moeda(valorUnitario(item))}</div>
                   </>
                 ) : null}
                 <div className="orc-line-total">{moeda(totalItem(item))}</div>
