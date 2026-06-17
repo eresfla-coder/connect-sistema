@@ -1240,9 +1240,9 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
               <span>Endereço do cliente</span>
               <strong>{enderecoCliente || '—'}</strong>
             </article>
-            <article>
+            <article className="orc-address-entrega">
               <span>Endereço de entrega</span>
-              <strong>{enderecoEntregaExibir || '—'}</strong>
+              <strong className="orc-address-entrega-texto">{enderecoEntregaExibir || '—'}</strong>
             </article>
           </section>
         ) : null}
@@ -1473,6 +1473,26 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           font-weight: 800;
           word-break: break-word;
         }
+        .orc-address-entrega {
+          background: linear-gradient(180deg, #fef9c3 0%, #fef08a 100%);
+          border-left: 4px solid #dc2626;
+        }
+        .orc-address-entrega span {
+          color: #b91c1c;
+          font-size: 12px;
+          letter-spacing: 0.05em;
+        }
+        .orc-address-entrega-texto {
+          font-size: 17px !important;
+          font-weight: 950 !important;
+          color: #991b1b !important;
+          line-height: 1.4 !important;
+          background: linear-gradient(transparent 58%, #fde047 58%);
+          display: inline;
+          box-decoration-break: clone;
+          -webkit-box-decoration-break: clone;
+          padding: 0 3px 1px;
+        }
         .orc-table { margin-top: 14px; border: 1px solid #dbe5ef; border-radius: 14px; overflow: hidden; }
 
         .orc-table-print { display: none; }
@@ -1623,6 +1643,9 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           .orc-address-row article { min-height: 42px !important; padding: 5px 7px !important; }
           .orc-address-row span { font-size: 8px !important; margin-bottom: 2px !important; }
           .orc-address-row strong { font-size: 9px !important; line-height: 1.25 !important; }
+          .orc-address-entrega { background: #fef9c3 !important; border-left: 3px solid #dc2626 !important; }
+          .orc-address-entrega span { color: #b91c1c !important; font-size: 9px !important; font-weight: 950 !important; }
+          .orc-address-entrega-texto { font-size: 12px !important; color: #991b1b !important; font-weight: 950 !important; line-height: 1.3 !important; background: linear-gradient(transparent 58%, #fde047 58%) !important; }
 
           .orc-table-screen { margin-top: 4px !important; }
           .orc-thead { padding: 4px 6px !important; font-size: 9px !important; }

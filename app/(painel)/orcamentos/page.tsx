@@ -19,6 +19,7 @@ import {
 } from '@/lib/orcamentoTextos'
 import { lerLocalStorageUsuario, obterUserIdPainel, salvarLocalStorageUsuario, storageKeyUsuario } from '@/lib/connect-user-storage'
 import { carregarClientesPainelDetalhado, clientePainelParaOrcamento, formatarEnderecoClienteVisual } from '@/lib/clientes-painel'
+import { puxarStorageDireto, salvarStorageDireto } from '@/lib/connect-supabase-direct'
 import { garantirPublicacaoOrcamento, type PublicacaoOrcamentoResult } from '@/lib/garantir-publicacao-orcamento'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOrcamentosExcel } from '@/lib/export-modulos'
@@ -201,7 +202,22 @@ type Toast = {
 const CONFIG_KEY = 'connect_configuracoes'
 const FORMAS_KEY = 'connect_formas_pagamento'
 const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
+const ORCAMENTOS_EXCLUIDOS_CLOUD_KEY = 'connect_orcamentos_excluidos'
 const ORCAMENTOS_DELETED_PREFIX = 'connect_orcamentos_deleted_'
+const ORCAMENTO_LOCAL_PENDENTE_MS = 3 * 60 * 1000
+
+const exclusoesRecentesOrcamentos = new Map<string, number>()
+let bloquearSyncOrcamentosAte = 0
+
+function parseOrcamentosStorageRaw(raw: string | null): OrcamentoSalvo[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as OrcamentoSalvo[]) : []
+  } catch {
+    return []
+  }
+}
 const OS_KEY = 'connect_ordens_servico_salvas'
 const VENDAS_KEY = 'connect_vendas_salvas'
 const PRODUTOS_KEY = 'connect_produtos'
@@ -299,6 +315,86 @@ function salvarDeletedOrcamentos(ids: Set<string>, userId?: string | null) {
   try {
     localStorage.setItem(chaveOrcamentosDeleted(userId), JSON.stringify(Array.from(ids)))
   } catch {}
+}
+
+function orcamentoPendenteSyncRecente(item: OrcamentoSalvo) {
+  return Number(item.atualizadoEm || 0) >= Date.now() - ORCAMENTO_LOCAL_PENDENTE_MS
+}
+
+async function carregarExcluidosNuvem(userId: string) {
+  const local = lerDeletedOrcamentos(userId)
+  try {
+    const dados = await puxarStorageDireto([ORCAMENTOS_EXCLUIDOS_CLOUD_KEY])
+    const payload = dados[ORCAMENTOS_EXCLUIDOS_CLOUD_KEY] as { ids?: unknown[] } | undefined
+    const idsNuvem = Array.isArray(payload?.ids) ? payload.ids.map((item) => String(item)) : []
+    if (!idsNuvem.length) return local
+    const merged = new Set([...local, ...idsNuvem])
+    salvarDeletedOrcamentos(merged, userId)
+    return merged
+  } catch (error) {
+    console.warn('[orcamentos] falha ao carregar excluídos da nuvem:', error)
+    return local
+  }
+}
+
+async function sincronizarExcluidosNuvem(userId?: string | null) {
+  if (!userId) return
+  const deletedIds = lerDeletedOrcamentos(userId)
+  try {
+    await salvarStorageDireto(ORCAMENTOS_EXCLUIDOS_CLOUD_KEY, {
+      ids: Array.from(deletedIds),
+      updated_at: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.warn('[orcamentos] falha ao sincronizar excluídos na nuvem:', error)
+  }
+}
+
+async function sincronizarListaOrcamentosNuvem(lista: OrcamentoSalvo[]) {
+  try {
+    await salvarStorageDireto(ORCAMENTOS_KEY, lista)
+  } catch (error) {
+    console.warn('[orcamentos] falha ao sincronizar lista na nuvem:', error)
+  }
+}
+
+function marcarExclusaoRecente(id: number | string) {
+  exclusoesRecentesOrcamentos.set(String(id), Date.now())
+  bloquearSyncOrcamentosAte = Date.now() + 6000
+}
+
+function orcamentoFoiExcluidoRecentemente(id: number | string) {
+  const quando = exclusoesRecentesOrcamentos.get(String(id))
+  if (!quando) return false
+  if (Date.now() - quando > 120000) {
+    exclusoesRecentesOrcamentos.delete(String(id))
+    return false
+  }
+  return true
+}
+
+function filtrarOrcamentosAtivos(lista: OrcamentoSalvo[], userId?: string | null) {
+  const deletedIds = lerDeletedOrcamentos(userId)
+  return lista.filter((item) => {
+    const id = String(item?.id || '')
+    return id && !deletedIds.has(id) && !orcamentoFoiExcluidoRecentemente(id)
+  })
+}
+
+function purgarOrcamentoDeTodasChavesLocal(id: number) {
+  if (typeof window === 'undefined') return
+  const idStr = String(id)
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i)
+    if (!key || (key !== ORCAMENTOS_KEY && !key.startsWith(`${ORCAMENTOS_KEY}_`))) continue
+    const lista = parseOrcamentosStorageRaw(localStorage.getItem(key))
+    const filtrada = lista.filter((item) => String(item?.id || '') !== idStr)
+    if (filtrada.length !== lista.length) {
+      try {
+        localStorage.setItem(key, JSON.stringify(filtrada))
+      } catch {}
+    }
+  }
 }
 
 const NOVO_CLIENTE_INICIAL = {
@@ -1161,29 +1257,39 @@ export default function OrcamentoPage() {
 
   function carregarOrcamentosLocalFallback() {
     try {
-      const userId = userIdOrcamentosRef.current
-      const lista = lerLocalStorageUsuario<OrcamentoSalvo[]>(ORCAMENTOS_KEY, userId, [])
-      if (Array.isArray(lista) && lista.length) {
-        const deletedIds = lerDeletedOrcamentos(userId)
-        setOrcamentosSalvos(
-          deduplicarOrcamentosPorId(
-            lista
-              .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
-              .filter((item) => !deletedIds.has(String(item?.id || '')))
-          )
-        )
+      const lista = lerOrcamentosLocalStorage()
+      if (lista.length > 0) {
+        setOrcamentosSalvos(lista)
       }
-    } catch {}
+    } catch (error) {
+      console.error('[orcamentos] fallback local falhou:', error)
+    }
   }
 
-  function parseOrcamentosStorageRaw(raw: string | null): OrcamentoSalvo[] {
-    if (!raw) return []
-    try {
-      const parsed = JSON.parse(raw)
-      return Array.isArray(parsed) ? (parsed as OrcamentoSalvo[]) : []
-    } catch {
-      return []
+  function recuperarOrcamentosQualquerChave(): OrcamentoSalvo[] {
+    if (typeof window === 'undefined') return []
+    const mapa = new Map<string, OrcamentoSalvo>()
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)
+      if (!key) continue
+      if (key !== ORCAMENTOS_KEY && !key.startsWith(`${ORCAMENTOS_KEY}_`)) continue
+      const lista = parseOrcamentosStorageRaw(localStorage.getItem(key))
+      for (const item of lista) {
+        if (!item?.id) continue
+        const chave = String(item.id)
+        if (!mapa.has(chave)) mapa.set(chave, item)
+      }
     }
+    return Array.from(mapa.values()).sort((a, b) => Number(b.id) - Number(a.id))
+  }
+
+  function normalizarListaOrcamentosLocal(lista: OrcamentoSalvo[], userId?: string | null) {
+    const deletedIds = lerDeletedOrcamentos(userId)
+    return deduplicarOrcamentosPorId(
+      lista
+        .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+        .filter((item) => !deletedIds.has(String(item?.id || ''))) as OrcamentoSalvo[],
+    )
   }
 
   function lerOrcamentosLocalStorage() {
@@ -1200,12 +1306,17 @@ export default function OrcamentoPage() {
         }
       }
 
+      if (!lista.length) {
+        lista = recuperarOrcamentosQualquerChave()
+        if (lista.length && userId) {
+          try {
+            salvarLocalStorageUsuario(ORCAMENTOS_KEY, userId, lista)
+          } catch {}
+        }
+      }
+
       if (!Array.isArray(lista)) return [] as OrcamentoSalvo[]
-      const deletedIds = lerDeletedOrcamentos(userId)
-      const normalizados = lista
-        .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
-        .filter((item) => !deletedIds.has(String(item?.id || ''))) as OrcamentoSalvo[]
-      return deduplicarOrcamentosPorId(normalizados)
+      return normalizarListaOrcamentosLocal(lista, userId)
     } catch (error) {
       console.error('[orcamentos] erro ao ler localStorage:', error)
       return [] as OrcamentoSalvo[]
@@ -1225,7 +1336,12 @@ export default function OrcamentoPage() {
     }
   }
 
-  function mesclarOrcamentos(cloud: OrcamentoSalvo[], local: OrcamentoSalvo[], userId?: string | null) {
+  function mesclarOrcamentos(
+    cloud: OrcamentoSalvo[],
+    local: OrcamentoSalvo[],
+    userId?: string | null,
+    opts?: { nuvemConfiavel?: boolean },
+  ) {
     const deletedIds = lerDeletedOrcamentos(userId)
     const mapaCloud = new Map<string, OrcamentoSalvo>()
     const mapaLocal = new Map<string, OrcamentoSalvo>()
@@ -1246,31 +1362,59 @@ export default function OrcamentoPage() {
     const ids = new Set([...mapaCloud.keys(), ...mapaLocal.keys()])
     return deduplicarOrcamentosPorId(
       Array.from(ids)
-      .map((id) => {
-        const remoto = mapaCloud.get(id)
-        const itemLocal = mapaLocal.get(id)
-        if (remoto && itemLocal) return mesclarParOrcamentos(remoto, itemLocal)
-        return aplicarStatusResolvido((remoto || itemLocal) as OrcamentoSalvo, itemLocal || null)
-      })
-      .sort((a, b) => Number(b.id) - Number(a.id))
+        .map((id) => {
+          const remoto = mapaCloud.get(id)
+          const itemLocal = mapaLocal.get(id)
+          if (remoto && itemLocal) return mesclarParOrcamentos(remoto, itemLocal)
+          if (remoto) return aplicarStatusResolvido(remoto, itemLocal || null)
+          if (itemLocal) {
+            if (opts?.nuvemConfiavel && !orcamentoPendenteSyncRecente(itemLocal)) return null
+            if (orcamentoFoiExcluidoRecentemente(id)) return null
+            return aplicarStatusResolvido(itemLocal)
+          }
+          return null
+        })
+        .filter((item): item is OrcamentoSalvo => Boolean(item))
+        .sort((a, b) => Number(b.id) - Number(a.id)),
     )
   }
 
-  function aplicarOrcamentos(lista: OrcamentoSalvo[], contexto: string) {
+  function aplicarOrcamentos(
+    lista: OrcamentoSalvo[],
+    contexto: string,
+    opts?: { nuvemConfiavel?: boolean },
+  ) {
     const userId = userIdOrcamentosRef.current
     const deletedIds = lerDeletedOrcamentos(userId)
     const locais = lerOrcamentosLocalStorage()
       .map((item) => aplicarStatusResolvido(item))
       .filter((item) => !deletedIds.has(String(item.id)))
     if (lista.length === 0 && locais.length > 0) {
+      const locaisPendentes = locais.filter((item) => orcamentoPendenteSyncRecente(item))
+      if (opts?.nuvemConfiavel && locaisPendentes.length === 0) {
+        console.warn('[orcamentos] nuvem vazia — removendo cache local antigo (exclusão em outro aparelho).', {
+          contexto,
+          locaisDescartados: locais.length,
+        })
+        setOrcamentosSalvos([])
+        try {
+          persistirListaOrcamentosLocal([])
+          void sincronizarListaOrcamentosNuvem([])
+        } catch (error) {
+          console.error('[orcamentos] erro ao limpar cache local:', { contexto, error })
+        }
+        return false
+      }
+
       console.warn('[orcamentos] Supabase retornou vazio, mantendo cache local.', {
         contexto,
         locais: locais.length,
+        pendentes: locaisPendentes.length,
         idsLocais: locais.map((item) => item.id).slice(0, 8),
       })
-      setOrcamentosSalvos(locais)
+      setOrcamentosSalvos(locaisPendentes.length > 0 ? locaisPendentes : locais)
       try {
-        persistirListaOrcamentosLocal(locais)
+        persistirListaOrcamentosLocal(locaisPendentes.length > 0 ? locaisPendentes : locais)
       } catch (error) {
         console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
       }
@@ -1281,24 +1425,46 @@ export default function OrcamentoPage() {
       lista.filter((item) => !deletedIds.has(String(item?.id || ''))),
       locais,
       userId,
+      opts,
     )
+
+    if (listaNormalizada.length === 0) {
+      const recuperados = filtrarOrcamentosAtivos(recuperarOrcamentosQualquerChave(), userId)
+      if (recuperados.length > 0 && !opts?.nuvemConfiavel) {
+        console.warn('[orcamentos] recuperados de chaves alternativas do localStorage', {
+          contexto,
+          total: recuperados.length,
+        })
+        setOrcamentosSalvos(recuperados)
+        try {
+          persistirListaOrcamentosLocal(recuperados)
+        } catch (error) {
+          console.error('[orcamentos] erro ao salvar recuperados:', { contexto, error })
+        }
+        return false
+      }
+    }
 
     if (
       listaNormalizada.length === 0 &&
-      orcamentosCountRef.current > 0 &&
-      locais.length === 0 &&
-      lista.length === 0
+      (orcamentosCountRef.current > 0 || locais.length > 0)
     ) {
+      const locaisAtivos = filtrarOrcamentosAtivos(locais, userId)
       console.warn('[orcamentos] ignorando limpeza suspeita da lista', {
         contexto,
         emTela: orcamentosCountRef.current,
+        locais: locaisAtivos.length,
       })
+      if (locaisAtivos.length > 0) {
+        setOrcamentosSalvos(locaisAtivos)
+      }
       return false
     }
 
-    setOrcamentosSalvos(listaNormalizada)
+    const listaFinal = filtrarOrcamentosAtivos(listaNormalizada, userId)
+    setOrcamentosSalvos(listaFinal)
     try {
-      persistirListaOrcamentosLocal(listaNormalizada)
+      persistirListaOrcamentosLocal(listaFinal)
     } catch (error) {
       console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
     }
@@ -1355,6 +1521,10 @@ export default function OrcamentoPage() {
   }
 
   async function carregarOrcamentosSupabase(motivo = 'manual') {
+    if (Date.now() < bloquearSyncOrcamentosAte) {
+      syncOrcamentosPendenteRef.current = true
+      return
+    }
     if (syncOrcamentosRodandoRef.current) {
       syncOrcamentosPendenteRef.current = true
       return
@@ -1362,7 +1532,6 @@ export default function OrcamentoPage() {
     syncOrcamentosRodandoRef.current = true
     try {
       const mobile = isMobileOrcamentos()
-      const locaisAntes = lerOrcamentosLocalStorage()
 
       const auth = await obterAuthOrcamentos(mobile ? 8 : 5)
       const userId = auth?.userId || null
@@ -1373,8 +1542,8 @@ export default function OrcamentoPage() {
       }
       userIdOrcamentosRef.current = userId
 
-      const locais = locaisAntes.length ? locaisAntes : lerOrcamentosLocalStorage()
-      const deletedIds = lerDeletedOrcamentos(userId)
+      const deletedIds = await carregarExcluidosNuvem(userId)
+      const locais = filtrarOrcamentosAtivos(lerOrcamentosLocalStorage(), userId)
 
       const { data, error } = await supabase
         .from('orcamentos')
@@ -1391,17 +1560,26 @@ export default function OrcamentoPage() {
       }).filter((item) => !deletedIds.has(String(item?.id || '')))
 
       if (normalizados.length === 0 && locais.length > 0) {
-        console.warn('[Orcamentos] Supabase retornou lista vazia. Tentando subir cache local antes de exibir.')
-        for (const orcamento of locais) {
-          await persistirOrcamentoSupabase(orcamento, userId)
+        const locaisPendentes = locais.filter(
+          (item) => !deletedIds.has(String(item.id)) && orcamentoPendenteSyncRecente(item),
+        )
+        if (locaisPendentes.length > 0) {
+          console.warn('[Orcamentos] nuvem vazia com itens pendentes recentes — enviando para Supabase.')
+          for (const orcamento of locaisPendentes) {
+            await persistirOrcamentoComRetry(orcamento, userId)
+          }
+          aplicarOrcamentos(locaisPendentes, 'carregar-vazio-com-cache')
+        } else {
+          aplicarOrcamentos([], 'carregar-nuvem-vazia', { nuvemConfiavel: true })
         }
-        aplicarOrcamentos(locais, 'carregar-vazio-com-cache')
         return
       }
 
-      const listaFinal = mesclarOrcamentos(normalizados, locais, userId)
+      const listaFinal = mesclarOrcamentos(normalizados, locais, userId, { nuvemConfiavel: true })
       const faltandoOuMaisRecenteNaNuvem = locais.filter((local) => {
-        const remoto = normalizados.find((item) => String(item.id) === String(local.id))
+        const id = String(local.id)
+        if (deletedIds.has(id) || orcamentoFoiExcluidoRecentemente(id)) return false
+        const remoto = normalizados.find((item) => String(item.id) === id)
         if (!remoto) return true
         return Number(local.atualizadoEm || 0) > Number(remoto.atualizadoEm || 0)
       })
@@ -1410,7 +1588,7 @@ export default function OrcamentoPage() {
           await persistirOrcamentoComRetry(orcamento, userId)
         }
       }
-      aplicarOrcamentos(listaFinal, 'carregarOrcamentosSupabase')
+      aplicarOrcamentos(listaFinal, 'carregarOrcamentosSupabase', { nuvemConfiavel: true })
       ultimaCargaOrcamentosRef.current = Date.now()
     } catch (error) {
       console.error('[Orcamentos] erro ao carregar do Supabase:', error)
@@ -1419,7 +1597,8 @@ export default function OrcamentoPage() {
       syncOrcamentosRodandoRef.current = false
       if (syncOrcamentosPendenteRef.current) {
         syncOrcamentosPendenteRef.current = false
-        window.setTimeout(() => void carregarOrcamentosSupabase('sync-pendente'), 350)
+        const atraso = Math.max(400, bloquearSyncOrcamentosAte - Date.now() + 100)
+        window.setTimeout(() => void carregarOrcamentosSupabase('sync-pendente'), atraso)
       }
     }
   }
@@ -1440,26 +1619,21 @@ export default function OrcamentoPage() {
       }
 
       const row = orcamentoParaUpsertSupabase(orcamento, userId)
+      const deletedIds = lerDeletedOrcamentos(userId)
+      if (deletedIds.has(String(orcamento.id)) || orcamentoFoiExcluidoRecentemente(orcamento.id)) {
+        return false
+      }
       removerOrcamentoDeDeleted(Number(orcamento.id), userId)
-
-      const { data: existente } = await supabase
-        .from('orcamentos')
-        .select('local_id')
-        .eq('user_id', userId)
-        .eq('local_id', row.local_id)
-        .maybeSingle()
 
       logOrcamentoSave({
         origem: 'supabase-upsert',
         id: row.local_id,
         numero: orcamento.numero,
-        jaExistia: Boolean(existente?.local_id),
       })
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('orcamentos')
         .upsert(row, { onConflict: 'user_id,local_id' })
-        .select('local_id,payload')
 
       if (error) {
         const err = error as { code?: string; message?: string; details?: string; hint?: string }
@@ -1658,22 +1832,31 @@ export default function OrcamentoPage() {
     }
   }
 
-  async function excluirOrcamentoSupabase(orcamento: OrcamentoSalvo) {
+  async function excluirOrcamentoSupabase(orcamento: OrcamentoSalvo, userIdParam?: string | null) {
     try {
-      const { data } = await supabase.auth.getUser()
-      const userId = data?.user?.id
-      if (!userId) return
+      const userId = userIdParam || userIdOrcamentosRef.current || (await obterUserIdOrcamentos(2))
+      if (!userId) return false
       marcarOrcamentoComoDeletado(Number(orcamento.id), userId)
 
-      const { error } = await supabase
-        .from('orcamentos')
-        .delete()
-        .eq('user_id', userId)
-        .eq('local_id', String(orcamento.id))
+      for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
+        const { error } = await supabase
+          .from('orcamentos')
+          .delete()
+          .eq('user_id', userId)
+          .eq('local_id', String(orcamento.id))
 
-      if (error) console.warn('[orcamentos] erro ao excluir:', error.message)
+        if (!error) {
+          await sincronizarExcluidosNuvem(userId)
+          return true
+        }
+        console.warn('[orcamentos] erro ao excluir:', error.message)
+        if (tentativa < 2) await aguardarOrcamentos(400)
+      }
+      await sincronizarExcluidosNuvem(userId)
+      return false
     } catch (e) {
       console.warn('[orcamentos] erro ao excluir:', e)
+      return false
     }
   }
 
@@ -1781,16 +1964,15 @@ export default function OrcamentoPage() {
     }
 
     void (async () => {
-      const auth = await obterAuthOrcamentos(4)
+      const auth = await obterAuthOrcamentos(6)
       if (auth?.userId) userIdOrcamentosRef.current = auth.userId
       const listaImediata = lerOrcamentosLocalStorage()
       if (listaImediata.length > 0) {
         setOrcamentosSalvos(listaImediata)
         ultimaCargaOrcamentosRef.current = Date.now()
       }
+      await carregarOrcamentosSupabase('abertura-painel')
     })()
-
-    void carregarOrcamentosSupabase('abertura-painel')
 
     void obterUserIdPainel().then((userId) => {
       try {
@@ -1819,23 +2001,17 @@ export default function OrcamentoPage() {
 
   useEffect(() => {
     function carregarDadosLocaisV78() {
-      void obterUserIdPainel().then((userId) => {
+      void (async () => {
+        const userId = await obterUserIdPainel()
         if (userId) userIdOrcamentosRef.current = userId
         try {
-          const lista = lerLocalStorageUsuario<OrcamentoSalvo[]>(ORCAMENTOS_KEY, userId, [])
-          if (Array.isArray(lista) && lista.length > 0 && ultimaCargaOrcamentosRef.current === 0) {
-            const deletedIds = lerDeletedOrcamentos(userId)
-            setOrcamentosSalvos(
-              deduplicarOrcamentosPorId(
-                lista
-                  .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
-                  .filter((item) => !deletedIds.has(String(item?.id || ''))),
-              ),
-            )
+          const lista = lerOrcamentosLocalStorage()
+          if (lista.length > 0 && ultimaCargaOrcamentosRef.current === 0) {
+            setOrcamentosSalvos(lista)
           }
         } catch {}
-      })
-      void carregarOrcamentosSupabase('connect-cloud-hydrated')
+        await carregarOrcamentosSupabase('connect-cloud-hydrated')
+      })()
       void obterUserIdPainel().then((userId) => {
         try {
           const lista = lerLocalStorageUsuario<unknown[]>(PRODUTOS_KEY, userId, [])
@@ -1862,20 +2038,19 @@ export default function OrcamentoPage() {
 
   useEffect(() => {
     let ativo = true
+    let debounceSync: ReturnType<typeof setTimeout> | null = null
 
     const rodarCargaSupabase = (motivo: string) => {
-      if (!ativo) return
-      void carregarOrcamentosSupabase(motivo)
+      if (!ativo || Date.now() < bloquearSyncOrcamentosAte) return
+      if (debounceSync) clearTimeout(debounceSync)
+      debounceSync = setTimeout(() => {
+        void carregarOrcamentosSupabase(motivo)
+      }, 1200)
     }
-
-    const timers = [
-      window.setTimeout(() => rodarCargaSupabase('auth-estabilizando-350ms'), 350),
-      window.setTimeout(() => rodarCargaSupabase('auth-estabilizando-1500ms'), 1500),
-      window.setTimeout(() => rodarCargaSupabase('auth-estabilizando-3500ms'), 3500),
-    ]
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!ativo || !session?.user?.id) return
+      if (event === 'INITIAL_SESSION') return
       rodarCargaSupabase(`auth-${event}`)
       void carregarClientesPainelDetalhado('orcamentos').then(({ clientes: lista }) => {
         setClientes(lista.map((cliente, index) => clientePainelParaOrcamento(cliente, index)))
@@ -1893,14 +2068,14 @@ export default function OrcamentoPage() {
     const interval = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
       const tempoSemCarga = Date.now() - ultimaCargaOrcamentosRef.current
-      if (tempoSemCarga > 30000 || orcamentosCountRef.current === 0) {
+      if (tempoSemCarga > 120000) {
         rodarCargaSupabase('polling-leve')
       }
-    }, 25000)
+    }, 90000)
 
     return () => {
       ativo = false
-      timers.forEach((timer) => window.clearTimeout(timer))
+      if (debounceSync) clearTimeout(debounceSync)
       subscription.unsubscribe()
       window.removeEventListener('focus', aoFoco)
       document.removeEventListener('visibilitychange', aoVoltarVisivel)
@@ -2136,7 +2311,7 @@ export default function OrcamentoPage() {
     const interval = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
       sincronizarAprovacoesPublicas(false)
-    }, 20000)
+    }, 60000)
 
     return () => {
       window.removeEventListener('focus', rodarSync)
@@ -2215,6 +2390,7 @@ export default function OrcamentoPage() {
     }
     setOrcamentosSalvos(listaNormalizada)
     persistirListaOrcamentosLocal(listaNormalizada)
+    void sincronizarListaOrcamentosNuvem(listaNormalizada)
     window.dispatchEvent(new Event('connect-data-change'))
   }
 
@@ -3184,11 +3360,17 @@ export default function OrcamentoPage() {
     const confirmar = window.confirm('Deseja excluir este orçamento?')
     if (!confirmar) return
     const userId = userIdOrcamentosRef.current || (await obterUserIdOrcamentos(2))
+    marcarExclusaoRecente(id)
     marcarOrcamentoComoDeletado(id, userId)
+    purgarOrcamentoDeTodasChavesLocal(id)
     const orcamento = orcamentosSalvos.find((item) => item.id === id)
     const listaAtualizada = orcamentosSalvos.filter((item) => item.id !== id)
     salvarListaOrcamentos(listaAtualizada)
-    if (orcamento) void excluirOrcamentoSupabase(orcamento)
+    if (userId) await sincronizarExcluidosNuvem(userId)
+    if (orcamento) await excluirOrcamentoSupabase(orcamento, userId)
+    else if (userId) await sincronizarExcluidosNuvem(userId)
+    await sincronizarListaOrcamentosNuvem(listaAtualizada)
+    bloquearSyncOrcamentosAte = Date.now() + 4000
     if (editandoOrcamentoId === id) novoOrcamento()
     const { data: { session: sessDel } } = await supabase.auth.getSession()
     void registrarLogSistema(sessDel?.access_token || '', 'excluiu_orcamento', {
@@ -3608,6 +3790,17 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
     color: darkMode ? '#f8fafc' : '#64748b',
     border: `1px solid ${darkMode ? 'rgba(148,163,184,0.25)' : '#cbd5e1'}`,
     boxShadow: 'none',
+  }
+
+  const qtdStepBtnListaMobile: React.CSSProperties = isMobile
+    ? { width: 36, minWidth: 36, minHeight: 40, height: 40, fontSize: 18 }
+    : {}
+
+  const inputItemListaStyle: React.CSSProperties = {
+    ...inputStyle,
+    width: '100%',
+    minWidth: 0,
+    boxSizing: 'border-box',
   }
 
   const actionButtonStyle = (variant: 'editar' | 'visualizar' | 'deletar' | 'copiar' | 'aprovar' | 'cancelar' | 'venda' | 'os' | 'gravar'): React.CSSProperties => {
@@ -4690,56 +4883,69 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                         </div>
 
                         {item.tipoCalculo === 'm2' ? (
-                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(5, minmax(96px, 1fr))', gap: 8 }}>
-                            <div>
+                          <div
+                            style={{
+                              display: 'grid',
+                              gap: 8,
+                              gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(5, minmax(96px, 1fr))',
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
                               <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>Largura</label>
                               <input
                                 type="text"
                                 inputMode="decimal"
                                 value={formatarDecimalVisual(item.largura)}
                                 onChange={(e) => alterarLarguraItemLista(item.id, textoParaNumeroDecimal(e.target.value))}
-                                style={inputStyle}
+                                style={inputItemListaStyle}
                                 placeholder="0,00"
                               />
                             </div>
-                            <div>
+                            <div style={{ minWidth: 0 }}>
                               <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>Altura</label>
                               <input
                                 type="text"
                                 inputMode="decimal"
                                 value={formatarDecimalVisual(item.altura)}
                                 onChange={(e) => alterarAlturaItemLista(item.id, textoParaNumeroDecimal(e.target.value))}
-                                style={inputStyle}
+                                style={inputItemListaStyle}
                                 placeholder="0,00"
                               />
                             </div>
-                            <div>
-                              <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>Qtd</label>
-                              <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
-                                <input
-                                  type="number"
-                                  inputMode="numeric"
-                                  min={1}
-                                  value={Math.max(1, Number(item.quantidade || 1))}
-                                  onChange={(e) => alterarQuantidadeItem(item.id, Number(e.target.value || 1))}
-                                  style={{ ...inputStyle, flex: 1, minWidth: 0, width: 'auto' }}
-                                />
-                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={qtdStepBtnPlus}>+</button>
-                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={qtdStepBtnMinus}>-</button>
-                              </div>
-                            </div>
-                            <div>
+                            <div style={{ minWidth: 0 }}>
                               <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>R$ / m²</label>
                               <input
                                 type="text"
                                 inputMode="decimal"
                                 value={formatarDecimalVisual(Number(item.valorM2 ?? item.valor ?? 0))}
                                 onChange={(e) => alterarValorItem(item.id, textoParaNumeroDecimal(e.target.value))}
-                                style={inputStyle}
+                                style={inputItemListaStyle}
                                 placeholder="0,00"
                               />
                             </div>
-                            <div>
+                            <div style={{ minWidth: 0 }}>
+                              <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>Qtd</label>
+                              <div style={{ display: 'flex', alignItems: 'stretch', gap: isMobile ? 4 : 6 }}>
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  min={1}
+                                  value={Math.max(1, Number(item.quantidade || 1))}
+                                  onChange={(e) => alterarQuantidadeItem(item.id, Number(e.target.value || 1))}
+                                  style={{
+                                    ...inputItemListaStyle,
+                                    flex: isMobile ? '0 0 56px' : 1,
+                                    width: isMobile ? 56 : 'auto',
+                                    minWidth: isMobile ? 56 : 0,
+                                    textAlign: 'center',
+                                    padding: isMobile ? '8px 4px' : undefined,
+                                  }}
+                                />
+                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={{ ...qtdStepBtnPlus, ...qtdStepBtnListaMobile }}>+</button>
+                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={{ ...qtdStepBtnMinus, ...qtdStepBtnListaMobile }}>-</button>
+                              </div>
+                            </div>
+                            <div style={{ minWidth: 0, gridColumn: isMobile ? '1 / -1' : undefined }}>
                               <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>Total</label>
                               <div style={totalBoxStyle}>💰 {moeda(calcularTotalItem(item))}</div>
                             </div>
@@ -4772,8 +4978,8 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                                 />
                                 {item.tipoCalculo !== 'peso' ? (
                                   <>
-                                    <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={qtdStepBtnPlus}>+</button>
-                                    <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={qtdStepBtnMinus}>-</button>
+                                    <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={{ ...qtdStepBtnPlus, ...qtdStepBtnListaMobile }}>+</button>
+                                    <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={{ ...qtdStepBtnMinus, ...qtdStepBtnListaMobile }}>-</button>
                                   </>
                                 ) : null}
                               </div>

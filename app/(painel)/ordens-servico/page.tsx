@@ -1457,8 +1457,9 @@ export default function OrdemServicoPage() {
     document.addEventListener('visibilitychange', aoVoltarParaAba)
 
     const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
       sincronizarAprovacoesOSPublicas(false)
-    }, 20000)
+    }, 60000)
 
     return () => {
       window.removeEventListener('focus', rodarSync)
@@ -1469,7 +1470,7 @@ export default function OrdemServicoPage() {
 
   useEffect(() => {
     void reenviarOsPendentesNuvem()
-    const timer = window.setInterval(() => void reenviarOsPendentesNuvem(), 25000)
+    const timer = window.setInterval(() => void reenviarOsPendentesNuvem(), 60000)
     const aoVisivel = () => {
       if (document.visibilityState === 'visible') void reenviarOsPendentesNuvem()
     }

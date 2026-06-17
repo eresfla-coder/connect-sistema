@@ -1,5 +1,5 @@
 export const CONNECT_CLOUD_KEYS = [
-  'connect_ordens_servico_salvas', 'connect_orcamentos_salvos', 'connect_clientes',
+  'connect_ordens_servico_salvas', 'connect_orcamentos_salvos', 'connect_orcamentos_excluidos', 'connect_clientes',
   'connect_produtos', 'connect_servicos', 'connect_categorias', 'connect_formas_pagamento',
   'connect_configuracoes', 'connect_vendas_salvas', 'connect_recibos_salvos',
   'connect_recibo_visualizacao', 'connect_financeiro_titulos', 'connect_financeiro_pagamentos',

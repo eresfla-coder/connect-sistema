@@ -353,7 +353,7 @@ function detectarRiscos(
   return lista.slice(0, 4)
 }
 
-async function carregarDadosDashboard(): Promise<DadosDashboard> {
+async function carregarDadosDashboard(opts?: { pularSupabase?: boolean }): Promise<DadosDashboard> {
   let orcamentos = (lerLocalJson<Record<string, unknown>[]>(ORCAMENTOS_KEY, []) || []).map(normalizarOrcamentoDashboard)
   let ordens = (lerLocalJson<Record<string, unknown>[]>(OS_KEY, []) || []).map(normalizarOsDashboard)
   const { lerLocalStorageUsuario, obterUserIdPainel } = await import('@/lib/connect-user-storage')
@@ -390,6 +390,7 @@ async function carregarDadosDashboard(): Promise<DadosDashboard> {
   }
 
   try {
+    if (!opts?.pularSupabase) {
     let queryOrc = supabase.from('orcamentos').select('*').order('created_at', { ascending: false })
     if (userId) queryOrc = queryOrc.eq('user_id', userId)
     const { data, error } = await queryOrc
@@ -399,9 +400,11 @@ async function carregarDadosDashboard(): Promise<DadosDashboard> {
         localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(orcamentos))
       } catch {}
     }
+    }
   } catch {}
 
   try {
+    if (!opts?.pularSupabase) {
     let queryOs = supabase.from('ordens_servico').select('*').order('created_at', { ascending: false })
     if (userId) queryOs = queryOs.eq('user_id', userId)
     const { data, error } = await queryOs
@@ -410,6 +413,7 @@ async function carregarDadosDashboard(): Promise<DadosDashboard> {
       try {
         localStorage.setItem(OS_KEY, JSON.stringify(ordens))
       } catch {}
+    }
     }
   } catch {}
 
@@ -550,20 +554,32 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let ativo = true
-    const carregar = async () => {
-      const dados = await carregarDadosDashboard()
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    let ultimaCargaNuvem = 0
+    const INTERVALO_MIN_NUVEM_MS = 120000
+
+    const carregar = async (forcarNuvem = false) => {
+      const agora = Date.now()
+      const pularSupabase = !forcarNuvem && agora - ultimaCargaNuvem < INTERVALO_MIN_NUVEM_MS
+      const dados = await carregarDadosDashboard({ pularSupabase })
+      if (!pularSupabase) ultimaCargaNuvem = agora
       if (ativo) setDashboardDados(dados)
     }
-    carregar()
+
+    void carregar(true)
+
     const onChange = () => {
-      carregar()
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => void carregar(false), 3000)
     }
+
     window.addEventListener('storage', onChange)
     window.addEventListener('connect-data-change', onChange)
     window.addEventListener('connect-cloud-updated', onChange)
     window.addEventListener('connect-financeiro-change', onChange)
     return () => {
       ativo = false
+      if (debounceTimer) clearTimeout(debounceTimer)
       window.removeEventListener('storage', onChange)
       window.removeEventListener('connect-data-change', onChange)
       window.removeEventListener('connect-cloud-updated', onChange)

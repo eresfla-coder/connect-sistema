@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser'
 
 const DEVICE_KEY = 'connect_device_id_v1'
 const DEVICE_LABEL_KEY = 'connect_device_label_v1'
-const CHECK_INTERVAL = 120000
+const CHECK_INTERVAL = 300000
 
 function criarIdDispositivo() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
