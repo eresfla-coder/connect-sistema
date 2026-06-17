@@ -46,9 +46,44 @@ export function logClientesLoad(
   console.info('[CLIENTES_LOAD]', { modulo, origem, quantidade, userId, detalhe })
 }
 
+function deduplicarPartesEndereco(partes: string[]): string {
+  const vistos = new Set<string>()
+  const saida: string[] = []
+  for (const parte of partes) {
+    const normalizada = String(parte || '').trim()
+    if (!normalizada) continue
+    const chave = normalizada.toLowerCase()
+    if (vistos.has(chave)) continue
+    vistos.add(chave)
+    saida.push(normalizada)
+  }
+  return saida.join(' • ')
+}
+
 function enderecoCompleto(item: Record<string, unknown>): string {
-  const partes = [item.endereco, item.bairro, item.cidade, item.cep].map((v) => String(v || '').trim()).filter(Boolean)
-  return partes.join(' • ')
+  const logradouro = String(item.endereco || '').trim()
+  const extras = [item.bairro, item.cidade, item.cep]
+    .map((v) => String(v || '').trim())
+    .filter(Boolean)
+
+  const segmentos = logradouro
+    .split('•')
+    .map((parte) => parte.trim())
+    .filter(Boolean)
+
+  return deduplicarPartesEndereco([...segmentos, ...extras])
+}
+
+/** Endereço legível no painel/PDF sem repetir bairro/cidade/CEP. */
+export function formatarEnderecoClienteVisual(endereco?: string | null): string {
+  const bruto = String(endereco || '').trim()
+  if (!bruto) return ''
+  return deduplicarPartesEndereco(
+    bruto
+      .split('•')
+      .map((parte) => parte.trim())
+      .filter(Boolean),
+  )
 }
 
 export function normalizarClientePainel(item: unknown, index = 0): ClientePainel | null {

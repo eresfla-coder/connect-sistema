@@ -18,7 +18,7 @@ import {
   resolverValidadePadraoOrcamento,
 } from '@/lib/orcamentoTextos'
 import { lerLocalStorageUsuario, obterUserIdPainel, salvarLocalStorageUsuario, storageKeyUsuario } from '@/lib/connect-user-storage'
-import { carregarClientesPainelDetalhado, clientePainelParaOrcamento } from '@/lib/clientes-painel'
+import { carregarClientesPainelDetalhado, clientePainelParaOrcamento, formatarEnderecoClienteVisual } from '@/lib/clientes-painel'
 import { garantirPublicacaoOrcamento, type PublicacaoOrcamentoResult } from '@/lib/garantir-publicacao-orcamento'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOrcamentosExcel } from '@/lib/export-modulos'
@@ -3529,8 +3529,11 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
     padding: '10px 12px',
     boxSizing: 'border-box',
     outline: 'none',
-    fontSize: 14,
+    fontSize: isMobile ? 16 : 14,
   }
+
+  const mobileFormInsetTop = isMobile ? 'calc(max(env(safe-area-inset-top, 0px), 48px) + 56px)' : '24px'
+  const mobileFormInsetBottom = isMobile ? 'max(12px, env(safe-area-inset-bottom, 0px))' : '24px'
 
   const buttonBase: React.CSSProperties = {
     height: 34,
@@ -4055,14 +4058,14 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         {formAberto && (
           <div onClick={() => setFormAberto(false)} style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(15,23,42,0.42)', backdropFilter: 'blur(3px)' }} />
         )}
-        <div style={formAberto ? { ...shellStyle, position: 'fixed', right: isMobile ? 8 : 24, top: isMobile ? 8 : 24, bottom: isMobile ? 8 : 24, zIndex: 1000, width: isMobile ? 'calc(100vw - 16px)' : 980, maxWidth: 'calc(100vw - 32px)', overflowY: 'auto', boxShadow: '0 30px 80px rgba(15,23,42,0.28)' } : { display: 'none' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,7fr) minmax(260px,3fr)', gap: 16, alignItems: 'start' }}>
-            <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: -4 }}>
-              <div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: colors.text }}>{editandoOrcamentoId ? 'Editar orçamento' : 'Novo orçamento'}</div>
-                <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4 }}>Preencha os dados e salve o documento.</div>
+        <div style={formAberto ? { ...shellStyle, position: 'fixed', right: isMobile ? 8 : 24, top: mobileFormInsetTop, bottom: mobileFormInsetBottom, zIndex: 1000, width: isMobile ? 'calc(100vw - 16px)' : 980, maxWidth: 'calc(100vw - 32px)', overflowY: 'auto', WebkitOverflowScrolling: 'touch', boxShadow: '0 30px 80px rgba(15,23,42,0.28)' } : { display: 'none' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,7fr) minmax(260px,3fr)', gap: isMobile ? 12 : 16, alignItems: 'start' }}>
+            <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: 12, marginBottom: isMobile ? 4 : -4, flexWrap: 'wrap' }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: isMobile ? 20 : 24, fontWeight: 900, color: colors.text, lineHeight: 1.15 }}>{editandoOrcamentoId ? 'Editar orçamento' : 'Novo orçamento'}</div>
+                <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4, fontSize: isMobile ? 13 : 14, lineHeight: 1.4 }}>Preencha os dados e salve o documento.</div>
               </div>
-              <button onClick={() => setFormAberto(false)} style={{ ...buttonBase, minHeight: 38, padding: '8px 14px', background: darkMode ? '#1f2937' : '#eef2f7', color: colors.text }}>Fechar</button>
+              <button onClick={() => setFormAberto(false)} style={{ ...buttonBase, minHeight: 40, padding: '10px 16px', background: darkMode ? '#1f2937' : '#eef2f7', color: colors.text, fontSize: 12, flexShrink: 0 }}>Fechar</button>
             </div>
             <div style={{ display: 'grid', gap: 14 }}>
               <div style={cardStyle}>
@@ -4106,21 +4109,25 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                   <div
                     style={{
                       marginTop: 10,
-                      padding: 12,
+                      padding: isMobile ? 12 : 14,
                       borderRadius: 14,
                       border: `1px solid ${darkMode ? 'rgba(34,197,94,0.30)' : '#bbf7d0'}`,
                       background: darkMode ? '#0d1f16' : '#f0fdf4',
                       display: 'grid',
-                      gap: 4,
+                      gap: 6,
                     }}
                   >
-                    <div style={{ fontWeight: 900, color: darkMode ? '#dcfce7' : '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontWeight: 900, color: darkMode ? '#dcfce7' : '#166534', display: 'flex', alignItems: 'center', gap: 6, fontSize: isMobile ? 15 : 16, lineHeight: 1.25, wordBreak: 'break-word' }}>
                       <span>👤</span> {clienteSelecionado.nome}
                     </div>
-                    <div style={{ fontSize: 13, color: colors.text, fontWeight: 700 }}>📞 {clienteSelecionado.telefone || 'Sem telefone'}</div>
-                    <div style={{ fontSize: 13, color: colors.muted, fontWeight: 700 }}>🪪 {clienteSelecionado.tipoPessoa === 'PJ' ? 'PJ' : 'PF'} {clienteSelecionado.cpf ? `• CPF: ${clienteSelecionado.cpf}` : ''} {clienteSelecionado.cnpj ? `• CNPJ: ${clienteSelecionado.cnpj}` : ''}</div>
-                    {clienteSelecionado.email ? <div style={{ fontSize: 13, color: colors.text, fontWeight: 700 }}>📧 {clienteSelecionado.email}</div> : null}
-                    {clienteSelecionado.endereco ? <div style={{ fontSize: 13, color: colors.text, fontWeight: 700 }}>📍 {clienteSelecionado.endereco}</div> : null}
+                    <div style={{ fontSize: 13, color: colors.text, fontWeight: 700, lineHeight: 1.35 }}>📞 {clienteSelecionado.telefone || 'Sem telefone'}</div>
+                    <div style={{ fontSize: 12, color: colors.muted, fontWeight: 700, lineHeight: 1.35 }}>🪪 {clienteSelecionado.tipoPessoa === 'PJ' ? 'PJ' : 'PF'} {clienteSelecionado.cpf ? `• CPF: ${clienteSelecionado.cpf}` : ''} {clienteSelecionado.cnpj ? `• CNPJ: ${clienteSelecionado.cnpj}` : ''}</div>
+                    {clienteSelecionado.email ? <div style={{ fontSize: 13, color: colors.text, fontWeight: 700, lineHeight: 1.35, wordBreak: 'break-all' }}>📧 {clienteSelecionado.email}</div> : null}
+                    {clienteSelecionado.endereco ? (
+                      <div style={{ fontSize: 12, color: colors.text, fontWeight: 700, lineHeight: 1.45, wordBreak: 'break-word' }}>
+                        📍 {formatarEnderecoClienteVisual(clienteSelecionado.endereco)}
+                      </div>
+                    ) : null}
                   </div>
                 )}
 
@@ -4359,7 +4366,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               <div style={cardStyle}>
                 <label style={labelStyle}>Produto / Serviço</label>
 
-                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(0,1fr))', gap: 8, marginBottom: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(0,1fr))', gap: isMobile ? 8 : 8, marginBottom: 12 }}>
                   {[
                     { key: 'produto', label: 'Produto', cor: '#f97316' },
                     { key: 'servico', label: 'Serviço', cor: '#2563eb' },
@@ -4383,9 +4390,13 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                       }}
                       style={{
                         ...buttonBase,
-                        background: filtroItem === opcao.key ? opcao.cor : darkMode ? '#e5e7eb' : '#f1f5f9',
-                        color: filtroItem === opcao.key ? '#fff' : '#111827',
-                        borderColor: filtroItem === opcao.key ? opcao.cor : 'rgba(148,163,184,0.30)',
+                        minHeight: isMobile ? 44 : 34,
+                        height: 'auto',
+                        padding: isMobile ? '10px 8px' : '0 12px',
+                        fontSize: isMobile ? 12 : 10,
+                        background: filtroItem === opcao.key ? opcao.cor : darkMode ? '#1e293b' : '#f8fafc',
+                        color: filtroItem === opcao.key ? '#fff' : colors.text,
+                        borderColor: filtroItem === opcao.key ? opcao.cor : colors.inputBorder,
                       }}
                     >
                       {opcao.label}
@@ -4398,7 +4409,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     style={{
                       display: 'grid',
                       gap: 8,
-                      gridTemplateColumns: isMobile ? '1fr 1fr' : 'minmax(180px, 1fr) minmax(96px, 0.55fr) minmax(96px, 0.55fr) minmax(72px, 0.45fr) minmax(150px, auto)',
+                      gridTemplateColumns: isMobile ? '1fr' : 'minmax(180px, 1fr) minmax(96px, 0.55fr) minmax(96px, 0.55fr) minmax(72px, 0.45fr) minmax(96px, 0.55fr) minmax(150px, auto)',
                       alignItems: 'stretch',
                     }}
                   >
@@ -4475,6 +4486,13 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     />
 
                     {produtoSelecionado ? (
+                      <div style={{ display: 'grid', gap: 10 }}>
+                        {!usaCampoM2 && !usaCampoPeso ? (
+                          <div style={{ padding: '10px 12px', borderRadius: 12, background: darkMode ? '#172554' : '#eff6ff', border: '1px solid #3b82f6', color: darkMode ? '#dbeafe' : '#1e3a8a', fontWeight: 800, fontSize: isMobile ? 14 : 15, lineHeight: 1.35, wordBreak: 'break-word' }}>
+                            ✅ {produtoSelecionado.nome}
+                            <div style={{ marginTop: 4, fontSize: 12, fontWeight: 700, opacity: 0.9 }}>Cadastro: {moeda(produtoSelecionado.valor)} — ajuste abaixo antes de adicionar</div>
+                          </div>
+                        ) : null}
                       <div
                         style={{
                           display: 'grid',
@@ -4540,19 +4558,35 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                           {editandoId !== null ? 'Atualizar item' : 'Adicionar item'}
                         </button>
                       </div>
+                      </div>
                     ) : (
-                      <div style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>
-                        Selecione o produto para informar quantidade e preço antes de adicionar.
+                      <div
+                        style={{
+                          marginTop: 4,
+                          padding: isMobile ? 12 : 10,
+                          borderRadius: 12,
+                          border: `1px dashed ${darkMode ? 'rgba(147,197,253,0.35)' : '#bfdbfe'}`,
+                          background: darkMode ? '#0f172a' : '#f8fbff',
+                          color: colors.muted,
+                          fontSize: 13,
+                          fontWeight: 700,
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        🔎 Pesquise e toque no produto. Depois informe <strong>quantidade</strong> e <strong>preço</strong> antes de adicionar.
                       </div>
                     )}
                   </div>
                 )}
 
-                {produtoSelecionado && (
-                  <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: darkMode ? '#172554' : '#eff6ff', border: '1px solid #3b82f6', color: darkMode ? '#dbeafe' : '#1e3a8a', fontWeight: 800 }}>
-                    Selecionado: {produtoSelecionado.nome} • {usaCampoM2 ? `${moeda(produtoSelecionado.valor)} / m²` : usaCampoPeso ? `${moeda(produtoSelecionado.valor)} / kg` : moeda(produtoSelecionado.valor)}
-                    {usaCampoM2 ? <div style={{ marginTop: 6 }}>Área calculada: {Number(metragemAtual || 0).toFixed(2)} m²</div> : null}
-                    {usaCampoPeso && quantidade > 0 ? <div style={{ marginTop: 6 }}>Peso informado: {quantidade < 1 ? `${Math.round(quantidade * 1000)} g` : `${formatarPesoKgVisual(quantidade)} kg`}</div> : null}
+                {produtoSelecionado && (usaCampoM2 || usaCampoPeso) && (
+                  <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: darkMode ? '#172554' : '#eff6ff', border: '1px solid #3b82f6', color: darkMode ? '#dbeafe' : '#1e3a8a', fontWeight: 800, lineHeight: 1.4 }}>
+                    <div style={{ fontSize: isMobile ? 14 : 15 }}>✅ Selecionado: {produtoSelecionado.nome}</div>
+                    <div style={{ marginTop: 6, fontSize: isMobile ? 15 : 16, color: darkMode ? '#4ade80' : '#15803d' }}>
+                      Preço cadastro: {usaCampoM2 ? `${moeda(produtoSelecionado.valor)} / m²` : usaCampoPeso ? `${moeda(produtoSelecionado.valor)} / kg` : moeda(produtoSelecionado.valor)}
+                    </div>
+                    {usaCampoM2 ? <div style={{ marginTop: 6, fontSize: 13 }}>Área calculada: {Number(metragemAtual || 0).toFixed(2)} m²</div> : null}
+                    {usaCampoPeso && quantidade > 0 ? <div style={{ marginTop: 6, fontSize: 13 }}>Peso informado: {quantidade < 1 ? `${Math.round(quantidade * 1000)} g` : `${formatarPesoKgVisual(quantidade)} kg`}</div> : null}
                   </div>
                 )}
 

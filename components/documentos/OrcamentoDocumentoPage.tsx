@@ -7,6 +7,7 @@ import { normalizarTelefoneWhatsapp } from '@/lib/recibo-publico'
 import { mensagemOrcamentoAprovadoParaEmpresa } from '@/lib/whatsappMensagens'
 import { logoUrlAbsolutaPublica, mergeConfigPublicacao } from '@/lib/documentosPublicos'
 import { montarUrlPublicaDocumento, siteUrlPublico } from '@/lib/empresaPublica'
+import { formatarEnderecoClienteVisual } from '@/lib/clientes-painel'
 import { lerLocalStorageUsuario, obterUserIdPainel } from '@/lib/connect-user-storage'
 import { supabase } from '@/lib/supabase-browser'
 import { urlQrCode } from '@/lib/pdfPremium'
@@ -148,10 +149,12 @@ function clienteEmail(cliente: any, fallback = ''): string {
 
 function clienteEndereco(cliente: any, fallback = ''): string {
   if (!cliente || typeof cliente !== 'object') return fallback
-  const endereco = String(cliente.endereco || '').trim()
+  const endereco = formatarEnderecoClienteVisual(String(cliente.endereco || '').trim())
   if (endereco) return endereco
-  const partes = [cliente.endereco, cliente.bairro, cliente.cidade, cliente.cep].filter(Boolean)
-  return partes.length ? partes.join(' • ') : fallback
+  const partes = [cliente.bairro, cliente.cidade, cliente.cep]
+    .map((v) => String(v || '').trim())
+    .filter(Boolean)
+  return partes.length ? formatarEnderecoClienteVisual(partes.join(' • ')) : fallback
 }
 
 function calcularMetragemDocumento(largura?: number, altura?: number) {
@@ -1114,7 +1117,7 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
   const telCliente = clienteTelefone(orc.cliente, '')
   const emailCliente = clienteEmail(orc.cliente, '')
   const enderecoCliente = clienteEndereco(orc.cliente, '')
-  const enderecoEntregaDoc = String(orc.enderecoEntrega || '').trim()
+  const enderecoEntregaDoc = formatarEnderecoClienteVisual(String(orc.enderecoEntrega || '').trim())
   const enderecoEntregaExibir = enderecoEntregaDoc || enderecoCliente
   const data = parseDataBR(orc.data)
   const validadeBruta = texto(orc.validadeProposta || orc.validade, '')
