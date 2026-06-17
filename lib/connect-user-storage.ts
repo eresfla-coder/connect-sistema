@@ -27,14 +27,23 @@ function listaPareceDemo(lista: unknown): boolean {
 
 export async function obterUserIdPainel(): Promise<string | null> {
   try {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.user?.id) {
-      cachearUserIdPainel(session.user.id)
-      return session.user.id
+    const sessionWrap = await Promise.race([
+      supabase.auth.getSession(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+    ])
+    if (sessionWrap?.data?.session?.user?.id) {
+      cachearUserIdPainel(sessionWrap.data.session.user.id)
+      return sessionWrap.data.session.user.id
     }
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user?.id) cachearUserIdPainel(user.id)
-    return user?.id || null
+    const userWrap = await Promise.race([
+      supabase.auth.getUser(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+    ])
+    if (userWrap?.data?.user?.id) {
+      cachearUserIdPainel(userWrap.data.user.id)
+      return userWrap.data.user.id
+    }
+    return obterUserIdPainelSync()
   } catch {
     return obterUserIdPainelSync()
   }

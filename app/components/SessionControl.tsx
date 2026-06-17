@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'
+import { fetchWithTimeout } from '@/lib/fetch-with-timeout'
 
 const DEVICE_KEY = 'connect_device_id_v1'
 const DEVICE_LABEL_KEY = 'connect_device_label_v1'
@@ -71,17 +72,21 @@ export default function SessionControl() {
       const token = await getAccessToken()
       if (!token) return null
 
-      const resposta = await fetch(path, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+      const resposta = await fetchWithTimeout(
+        path,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            deviceId: getDeviceId(),
+            deviceLabel: getDeviceLabel(),
+          }),
         },
-        body: JSON.stringify({
-          deviceId: getDeviceId(),
-          deviceLabel: getDeviceLabel(),
-        }),
-      })
+        5000,
+      )
 
       return resposta.json().catch(() => null)
     }

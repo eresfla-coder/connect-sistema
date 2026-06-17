@@ -9,8 +9,20 @@ const iso = (dias = 0) => {
   return data.toISOString().split('T')[0]
 }
 
+export const DEMO_COOKIE = 'connect_demo_ativo'
+
+function setDemoCookie(active: boolean) {
+  if (typeof document === 'undefined') return
+  if (active) {
+    document.cookie = `${DEMO_COOKIE}=sim; path=/; max-age=86400; SameSite=Lax`
+  } else {
+    document.cookie = `${DEMO_COOKIE}=; path=/; max-age=0; SameSite=Lax`
+  }
+}
+
 export function marcarSessaoReal() {
   if (typeof window === 'undefined') return
+  setDemoCookie(false)
   window.sessionStorage.setItem(REAL_SESSION_KEY, 'sim')
   window.localStorage.setItem(REAL_SESSION_KEY, 'sim')
 }
@@ -89,6 +101,7 @@ export function resetDemoData() {
 
 export function sairDemoMode() {
   if (typeof window === 'undefined') return
+  setDemoCookie(false)
   window.localStorage.removeItem(DEMO_FLAG_KEY)
   window.localStorage.removeItem(DEMO_SEEDED_KEY)
   window.sessionStorage.removeItem('connect_trial_notice')
@@ -110,6 +123,7 @@ export function isDemoMode() {
 export function ativarModoDemo() {
   if (typeof window === 'undefined') return
   limparSessaoReal()
+  setDemoCookie(true)
   seedDemoData(true)
 }
 

@@ -12,7 +12,7 @@ const nextConfig = {
       {
         source: '/:path*',
         headers: [
-          { key: 'X-Connect-Version', value: 'v96-estabilidade' },
+          { key: 'X-Connect-Version', value: 'v97-middleware-failfast' },
         ],
       },
     ]
