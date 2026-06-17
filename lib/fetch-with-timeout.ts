@@ -31,9 +31,9 @@ export async function fetchWithTimeout(
   }
 }
 
-/** Promise.race com timeout — útil para getSession/getUser no edge. */
+/** Promise.race com timeout — útil para getSession/getUser no edge e queries Supabase. */
 export async function withTimeout<T, F = T>(
-  promise: Promise<T>,
+  promise: PromiseLike<T>,
   timeoutMs: number,
   onTimeout: () => F,
 ): Promise<T | F> {

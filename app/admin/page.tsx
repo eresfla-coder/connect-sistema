@@ -10,6 +10,7 @@ import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetrica
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
 import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
+import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
 
 type FiltroStatus = 'todos' | 'trial' | 'ativo' | 'bloqueado' | 'vencidos' | 'risco'
@@ -247,6 +248,7 @@ export default function AdminSaasMasterPage() {
   const [uso, setUso] = useState<UsoSistema>({ clientes: 0, produtos: 0, orcamentos: 0, ordens: 0, financeiro: 0, crm: 0 })
   const [metaLocal, setMetaLocal] = useState<Record<string, MetaCliente>>({})
   const [loading, setLoading] = useState(true)
+  const [erroAdmin, setErroAdmin] = useState('')
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<FiltroStatus>('todos')
   const [aba, setAba] = useState<'clientes' | 'sessoes' | 'metricas' | 'saude'>('clientes')
@@ -290,8 +292,36 @@ export default function AdminSaasMasterPage() {
 
   useEffect(() => {
     setMetaLocal(readMeta())
-    void carregarTudo()
+    void iniciarAdmin()
   }, [])
+
+  async function iniciarAdmin() {
+    console.log('[ADMIN_PAGE_START]')
+    setLoading(true)
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        console.log('[ADMIN_PAGE_START]', { redirect: '/login?redirect=/admin' })
+        router.replace('/login?redirect=/admin')
+        return
+      }
+
+      const acesso = await consultarAcessoPainel(session.access_token)
+      if (!acesso.adminLogado) {
+        console.log('[ADMIN_PAGE_START]', { redirect: '/dashboard', admin: false })
+        router.replace('/dashboard')
+        return
+      }
+
+      await carregarTudo(session.access_token)
+    } catch (error) {
+      console.error('[ADMIN_PAGE_START]', error)
+      setErroAdmin('Não foi possível carregar o painel admin. Tente novamente.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (aba !== 'saude') return
@@ -418,38 +448,54 @@ export default function AdminSaasMasterPage() {
     }
   }
 
-  async function carregarTudo() {
+  async function carregarClientesAdmin(token: string): Promise<PerfilAdmin[]> {
+    const acumulado: PerfilAdmin[] = []
+    let page = 1
+    let hasMore = true
+
+    while (hasMore && page <= 20) {
+      const response = await fetch(`/api/admin/clientes?page=${page}&limit=50`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (response.status === 403) {
+        router.push('/dashboard')
+        return []
+      }
+
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        console.error('ADMIN_PERFIS_ERROR', payload?.error)
+        return acumulado
+      }
+
+      acumulado.push(...((payload?.clientes as PerfilAdmin[]) || []))
+      hasMore = Boolean(payload?.pagination?.hasMore)
+      page += 1
+    }
+
+    return acumulado
+  }
+
+  async function carregarTudo(accessToken?: string) {
     setLoading(true)
+    setErroAdmin('')
+
     const { data: { user } } = await supabase.auth.getUser()
 
     if (!user) {
-      router.push('/login')
+      router.push('/login?redirect=/admin')
+      setLoading(false)
       return
     }
-
-    const email = (user.email || '').trim().toLowerCase()
 
     const { data: { session } } = await supabase.auth.getSession()
+    const token = accessToken || session?.access_token || ''
 
-    const response = await fetch('/api/admin/clientes', {
-      headers: {
-        Authorization: `Bearer ${session?.access_token || ''}`,
-      },
-    })
-
-    if (response.status === 403) {
-      router.push('/dashboard')
-      return
-    }
-
-    const payload = await response.json()
-
-    if (!response.ok) {
-      console.error('ADMIN_PERFIS_ERROR', payload?.error)
-      setClientes([])
-    } else {
-      setClientes((payload?.clientes as PerfilAdmin[]) || [])
-    }
+    const listaClientes = token ? await carregarClientesAdmin(token) : []
+    setClientes(listaClientes)
 
     try {
       const { data: sessaoData } = await supabase
@@ -477,18 +523,11 @@ export default function AdminSaasMasterPage() {
 
   async function refreshClientes() {
     const { data: { session } } = await supabase.auth.getSession()
+    const accessToken = session?.access_token || ''
+    if (!accessToken) return
 
-    const response = await fetch('/api/admin/clientes', {
-      headers: {
-        Authorization: `Bearer ${session?.access_token || ''}`,
-      },
-    })
-
-    const payload = await response.json()
-
-    if (response.ok) {
-      setClientes((payload?.clientes as PerfilAdmin[]) || [])
-    }
+    const lista = await carregarClientesAdmin(accessToken)
+    setClientes(lista)
   }
 
   async function atualizarCliente(id: string, updates: Partial<PerfilAdmin>) {
@@ -1038,6 +1077,14 @@ export default function AdminSaasMasterPage() {
     return (
       <div style={styles.loaderWrap}>
         <div style={styles.loaderBox}>Carregando painel master SaaS...</div>
+        {erroAdmin ? (
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <p style={{ color: '#fecaca', fontWeight: 700 }}>{erroAdmin}</p>
+            <button type="button" onClick={() => void iniciarAdmin()} style={{ marginTop: 8, padding: '10px 16px', borderRadius: 10, border: 'none', cursor: 'pointer' }}>
+              Tentar novamente
+            </button>
+          </div>
+        ) : null}
       </div>
     )
   }

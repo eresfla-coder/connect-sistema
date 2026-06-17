@@ -43,6 +43,12 @@ function siteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'https://connect-sistema-teste.vercel.app').replace(/\/$/, '')
 }
 
+const PERFIS_ADMIN_COLS =
+  'id,email,ativo,vencimento,status,plano_tier,data_criacao,valor_plano,telefone,nome_empresa,ultimo_pagamento,status_pagamento,sistema_cliente,observacoes'
+
+const ADMIN_CLIENTES_LIMIT_DEFAULT = 50
+const ADMIN_CLIENTES_LIMIT_MAX = 100
+
 /* =========================
    GET CLIENTES ADMIN
 ========================= */
@@ -51,10 +57,18 @@ export async function GET(req: Request) {
   try {
     await requireAdminFromRequest(req)
 
-    const { data, error } = await supabaseAdmin
+    const url = new URL(req.url)
+    const page = Math.max(1, Number.parseInt(url.searchParams.get('page') || '1', 10) || 1)
+    const limitRaw = Number.parseInt(url.searchParams.get('limit') || String(ADMIN_CLIENTES_LIMIT_DEFAULT), 10)
+    const limit = Math.min(ADMIN_CLIENTES_LIMIT_MAX, Math.max(1, limitRaw || ADMIN_CLIENTES_LIMIT_DEFAULT))
+    const offset = (page - 1) * limit
+    const rangeEnd = offset + limit - 1
+
+    const { data, error, count } = await supabaseAdmin
       .from('perfis')
-      .select('*')
+      .select(PERFIS_ADMIN_COLS, { count: 'exact' })
       .order('data_criacao', { ascending: false })
+      .range(offset, rangeEnd)
 
     if (error) {
       return NextResponse.json(
@@ -63,9 +77,18 @@ export async function GET(req: Request) {
       )
     }
 
+    const total = count ?? (data?.length || 0)
+    const hasMore = offset + (data?.length || 0) < total
+
     return NextResponse.json({
       ok: true,
       clientes: data || [],
+      pagination: {
+        page,
+        limit,
+        total,
+        hasMore,
+      },
     })
   } catch (error: any) {
     const status = error?.message === 'Acesso negado.' || error?.message === 'Sessão ausente.' || error?.message === 'Sessão inválida.' ? 403 : 500

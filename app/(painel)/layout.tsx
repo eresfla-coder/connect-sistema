@@ -5,14 +5,13 @@ import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'
 import PainelShell from './components/painel/PainelShell'
 import ConnectLoading from '@/components/ui/ConnectLoading'
-import { fetchWithTimeout } from '@/lib/fetch-with-timeout'
+import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import { installDemoGuard, isDemoMode, logContextoAcessoSeguro, marcarSessaoReal, sairDemoMode, seedDemoData } from '@/lib/connect-demo'
 import { cachearUserIdPainel } from '@/lib/connect-user-storage'
 import { limparChavesGlobaisAposMigracao } from '@/lib/orcamentos-local'
 
 const AVISO_KEY = 'connect_trial_notice'
 const SESSAO_TIMEOUT_MS = 1500
-const ACESSO_API_TIMEOUT_MS = 8000
 const SAFETY_TIMEOUT_MS = 10000
 
 type AcessoApiResponse = {
@@ -49,6 +48,7 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
   const pathname = usePathname()
   const [verificando, setVerificando] = useState(true)
   const [avisoLento, setAvisoLento] = useState(false)
+  const [erroValidacao, setErroValidacao] = useState('')
 
   const rotaPublicaImpressao =
     pathname?.startsWith('/impressao-orcamento') ||
@@ -79,18 +79,11 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
     }, SAFETY_TIMEOUT_MS)
 
     async function consultarAcessoApi(token: string) {
-      const res = await fetchWithTimeout(
-        '/api/painel/acesso',
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: 'no-store',
-        },
-        ACESSO_API_TIMEOUT_MS,
-      )
-      return (await res.json().catch(() => null)) as AcessoApiResponse | null
+      return consultarAcessoPainel(token)
     }
 
     async function verificarSessao() {
+      setErroValidacao('')
       try {
         const { data: { session }, error } = await getSessionComTimeout(SESSAO_TIMEOUT_MS)
 
@@ -116,6 +109,7 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
             console.warn('[painel] API de acesso indisponível — modo degradado', apiError)
             setAvisoLento(true)
             setVerificando(false)
+            console.log('[PAINEL_READY]', { modo: 'degradado_api' })
             return
           }
 
@@ -123,15 +117,18 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
 
           if (!acesso?.ok) {
             if (acesso?.reason === 'timeout') {
-              router.replace('/manutencao')
+              setErroValidacao('Validação demorou demais. Tente novamente.')
+              setVerificando(false)
               return
             }
             if (acesso?.reason === 'sem_sessao' || acesso?.reason === 'sessao_invalida') {
+              console.log('[PAINEL_REDIRECT]', { destino: '/login', reason: acesso?.reason })
               router.replace('/login')
               return
             }
             setAvisoLento(true)
             setVerificando(false)
+            console.log('[PAINEL_READY]', { modo: 'degradado_acesso', reason: acesso?.reason })
             return
           }
 
@@ -168,6 +165,7 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
           })
 
           setVerificando(false)
+          console.log('[PAINEL_READY]', { userId: acesso.userId, admin: acesso.adminLogado })
           return
         }
 
@@ -184,10 +182,12 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
         }
 
         setVerificando(false)
+        console.log('[PAINEL_REDIRECT]', { destino: '/login', motivo: 'sem_sessao' })
         router.replace('/login')
       } catch (error) {
         console.error('ERRO_VERIFICAR_SESSAO_PAINEL:', error)
         if (!ativo) return
+        setErroValidacao('Não foi possível validar o acesso. Tente novamente.')
         setAvisoLento(true)
         setVerificando(false)
       }
@@ -197,24 +197,25 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!ativo) return
+
+      if (event === 'SIGNED_OUT') {
+        if (isDemoMode()) {
+          setVerificando(false)
+          return
+        }
+        console.log('[PAINEL_REDIRECT]', { destino: '/login', event })
+        router.replace('/login')
+        return
+      }
 
       if (session?.user) {
         marcarSessaoReal()
         sairDemoMode()
         cachearUserIdPainel(session.user.id)
         setVerificando(false)
-        return
       }
-
-      if (isDemoMode()) {
-        seedDemoData(false)
-        setVerificando(false)
-        return
-      }
-
-      router.replace('/login')
     })
 
     return () => {
@@ -237,6 +238,30 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
         }}
       >
         <ConnectLoading label="Validando acesso..." />
+        {erroValidacao ? (
+          <div style={{ textAlign: 'center', padding: 16 }}>
+            <p style={{ color: '#b91c1c', fontWeight: 700 }}>{erroValidacao}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setVerificando(true)
+                window.location.reload()
+              }}
+              style={{
+                marginTop: 8,
+                padding: '10px 18px',
+                borderRadius: 10,
+                border: 'none',
+                background: '#0ea5e9',
+                color: '#fff',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : null}
       </div>
     )
   }

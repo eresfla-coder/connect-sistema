@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/api-auth'
-import { coletarBackupUsuario, salvarBackupNuvem } from '@/lib/backup-server'
+import { BackupTimeoutError, coletarBackupUsuario, salvarBackupNuvem } from '@/lib/backup-server'
 import type { ConnectBackupPayload } from '@/lib/backup-connect'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
@@ -55,6 +55,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, backupId, payload })
   } catch (error: unknown) {
+    if (error instanceof BackupTimeoutError) {
+      return NextResponse.json({ ok: false, message: error.message }, { status: 503 })
+    }
     const message = error instanceof Error ? error.message : 'Falha ao criar backup.'
     return NextResponse.json({ ok: false, message }, { status: 400 })
   }

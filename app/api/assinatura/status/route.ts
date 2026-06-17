@@ -15,6 +15,7 @@ function getBearerToken(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  console.log('[STATUS_START]')
   try {
     const token = getBearerToken(request)
     if (!token) {
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
         ...snapshotAssinaturaAdmin(documentosUsados),
         documentosUsados,
       }
+      console.log('[STATUS_END]', { isAdminMaster: true })
       return NextResponse.json({
         ok: true,
         perfil,
@@ -60,6 +62,7 @@ export async function GET(request: NextRequest) {
       documentosUsados: documentosUsados || atualizado.snapshot.documentosUsados,
     }
 
+    console.log('[STATUS_END]', { isAdminMaster: false })
     return NextResponse.json({
       ok: true,
       perfil: atualizado.perfil,
@@ -69,8 +72,10 @@ export async function GET(request: NextRequest) {
       dica: 'Envie x-connect-docs-count no header para contagem de documentos do cliente.',
       notaContagemCliente: 'Use contarDocumentosLocal() no browser para contagem real.',
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erro ao consultar assinatura.'
+    console.error('[STATUS_RESULT]', message)
     console.error('ASSINATURA_STATUS_ERROR', error)
-    return NextResponse.json({ ok: false, message: error?.message || 'Erro ao consultar assinatura.' }, { status: 500 })
+    return NextResponse.json({ ok: false, message }, { status: 500 })
   }
 }

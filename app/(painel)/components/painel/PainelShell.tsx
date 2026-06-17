@@ -17,6 +17,7 @@ import {
   contarOrdensPainelSync,
   lerOrcamentosPainelSync,
 } from "@/lib/orcamentos-local";
+import { consultarAcessoPainel } from "@/lib/connect-auth-client";
 import { obterUserIdPainel } from "@/lib/connect-user-storage";
 
 const TrialBanner = dynamic(() => import("@/components/assinatura/TrialBanner"), { ssr: false });
@@ -72,16 +73,8 @@ async function verificarAdminViaApi(): Promise<boolean> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
   if (!token) return false;
-  try {
-    const resp = await fetch("/api/assinatura/status", {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-    });
-    const payload = await resp.json().catch(() => null);
-    return Boolean(payload?.isAdminMaster);
-  } catch {
-    return false;
-  }
+  const acesso = await consultarAcessoPainel(token);
+  return Boolean(acesso.adminLogado);
 }
 
 export default function PainelLayout({
@@ -123,64 +116,43 @@ export default function PainelLayout({
   useEffect(() => {
     let ativo = true;
 
-    async function aplicarAdminDetectado(adminMaster: boolean) {
-      if (!ativo) return;
-      setAdminLogado(adminMaster);
-    }
-
-    async function resolverAdmin(tentativas = 5) {
+    async function resolverAdminUmaVez() {
       try {
         if (isDemoMode()) {
           if (ativo) setAdminLogado(false);
           return;
         }
 
-        for (let i = 1; i <= tentativas; i += 1) {
-          const adminMaster = await verificarAdminViaApi();
-          if (adminMaster) {
-            await aplicarAdminDetectado(true);
-            return;
-          }
-          if (i < tentativas) {
-            await new Promise((resolve) => setTimeout(resolve, 180 + i * 120));
-          } else if (ativo) {
-            setAdminLogado(false);
-          }
-        }
+        const adminMaster = await verificarAdminViaApi();
+        if (ativo) setAdminLogado(adminMaster);
       } catch {
         if (ativo) setAdminLogado(false);
       }
     }
 
-    void resolverAdmin();
+    void resolverAdminUmaVez();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!ativo) return;
       if (isDemoMode()) {
         setAdminLogado(false);
         return;
       }
-      if (session?.access_token) {
-        void verificarAdminViaApi().then((ok) => {
-          if (ativo) setAdminLogado(ok);
+      if (event === "SIGNED_IN" && session?.access_token) {
+        void consultarAcessoPainel(session.access_token, { forcar: true }).then((acesso) => {
+          if (ativo) setAdminLogado(Boolean(acesso.adminLogado));
         });
-        return;
       }
-
-      void resolverAdmin(3);
+      if (event === "SIGNED_OUT") {
+        setAdminLogado(false);
+      }
     });
-
-    const onFocus = () => {
-      void resolverAdmin();
-    };
-    window.addEventListener("focus", onFocus);
 
     return () => {
       ativo = false;
       subscription.unsubscribe();
-      window.removeEventListener("focus", onFocus);
     };
-  }, [pathname]);
+  }, []);
 
   useEffect(() => {
     const verificarTela = () => {

@@ -3,8 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { emailDoUsuarioAuth } from '@/lib/access'
 import { ativarModoDemo, marcarSessaoReal, sairDemoMode } from '@/lib/connect-demo'
+import { consultarAcessoPainel, resolverDestinoPosLogin } from '@/lib/connect-auth-client'
 
 type ModoAuth = 'entrar' | 'criar'
 
@@ -34,6 +34,11 @@ function traduzirErroAuth(message?: string) {
 
 export default function LoginPage() {
   const router = useRouter()
+
+  function lerRedirectParam() {
+    if (typeof window === 'undefined') return ''
+    return new URLSearchParams(window.location.search).get('redirect') || ''
+  }
 
   const [modo, setModo] = useState<ModoAuth>('entrar')
   const [email, setEmail] = useState('')
@@ -77,16 +82,30 @@ export default function LoginPage() {
   useEffect(() => {
     let ativo = true
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!ativo || !session?.user) return
+    async function redirecionarSeJaLogado() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!ativo || !session?.access_token) return
+
       marcarSessaoReal()
       sairDemoMode()
-    })
+
+      const redirectParam = lerRedirectParam()
+      const acesso = await consultarAcessoPainel(session.access_token)
+      const destino = resolverDestinoPosLogin({
+        redirectParam,
+        adminLogado: acesso.adminLogado,
+      })
+
+      console.log('[LOGIN_REDIRECT]', { destino, jaLogado: true, admin: acesso.adminLogado })
+      router.replace(destino)
+    }
+
+    void redirecionarSeJaLogado()
 
     return () => {
       ativo = false
     }
-  }, [])
+  }, [router])
 
   function iniciarCooldown(segundos: number) {
     setCooldown(segundos)
@@ -139,6 +158,7 @@ export default function LoginPage() {
     if (!podeExecutar()) return
 
     setLoading(true)
+    console.log('[LOGIN_SUBMIT]')
 
     try {
       const emailNormalizado = email.trim().toLowerCase()
@@ -164,24 +184,27 @@ export default function LoginPage() {
         return
       }
 
+      console.log('[LOGIN_SUCCESS]')
+
       marcarSessaoReal()
       sairDemoMode()
 
       const { data: sessionData } = await supabase.auth.getSession()
       const token = sessionData?.session?.access_token
-      let destino: '/admin' | '/dashboard' = '/dashboard'
-      if (token) {
-        try {
-          const resp = await fetch('/api/assinatura/status', {
-            headers: { Authorization: `Bearer ${token}` },
-            cache: 'no-store',
-          })
-          const payload = await resp.json().catch(() => null)
-          if (payload?.isAdminMaster) destino = '/admin'
-        } catch {
-          /* mantém dashboard */
-        }
+
+      if (!token) {
+        setErro('Sessão não foi gravada. Tente novamente.')
+        return
       }
+
+      const redirectParam = lerRedirectParam()
+      const acesso = await consultarAcessoPainel(token, { forcar: true })
+      const destino = resolverDestinoPosLogin({
+        redirectParam,
+        adminLogado: acesso.adminLogado,
+      })
+
+      console.log('[LOGIN_REDIRECT]', { destino, admin: acesso.adminLogado, redirectParam })
       router.replace(destino)
     } catch (err: any) {
       setErro(traduzirErroAuth(err?.message || 'Failed to fetch'))

@@ -1,3 +1,7 @@
+import { fetchWithTimeout, FetchTimeoutError } from '@/lib/fetch-with-timeout'
+
+export const MERCADO_PAGO_TIMEOUT_MS = 8000
+
 export function siteUrlConnect() {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'https://connect-sistema-teste.vercel.app').replace(/\/$/, '')
 }
@@ -8,15 +12,27 @@ export async function chamarMercadoPago(path: string, init?: RequestInit) {
     throw new Error('MERCADO_PAGO_ACCESS_TOKEN não configurado.')
   }
 
-  const response = await fetch(`https://api.mercadopago.com${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
-    cache: 'no-store',
-  })
+  let response: Response
+  try {
+    response = await fetchWithTimeout(
+      `https://api.mercadopago.com${path}`,
+      {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...(init?.headers || {}),
+        },
+        cache: 'no-store',
+      },
+      MERCADO_PAGO_TIMEOUT_MS,
+    )
+  } catch (error) {
+    if (error instanceof FetchTimeoutError) {
+      throw new Error('Mercado Pago demorou para responder. Tente novamente em instantes.')
+    }
+    throw error
+  }
 
   const data = await response.json().catch(() => ({}))
 

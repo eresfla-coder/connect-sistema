@@ -2,11 +2,33 @@ import { NextRequest, NextResponse } from 'next/server'
 import { configRowSupabaseToPublica, mergeConfigPublicacao } from '@/lib/documentosPublicos'
 import { camposEmpresaNoPayload, enriquecerPayloadDocumentoPublico, timestampVersaoPublica } from '@/lib/empresaPublica'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { withTimeout } from '@/lib/fetch-with-timeout'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const TIPOS_PUBLICOS = new Set(['orcamento', 'ordem_servico', 'recibo', 'contrato', 'os'])
+const PUBLIC_DOCS_ROW_COLS =
+  'token,document_type,document_id,documento_id,tipo,user_id,payload,updated_at,created_at'
+const PUBLIC_DOCS_POST_BUDGET_MS = 8000
+const PUBLIC_DOCS_QUERY_TIMEOUT_MS = 3000
+const PUBLIC_DOCS_CONFIG_TIMEOUT_MS = 2000
+const CFG_EMPRESA_COLS =
+  'user_id,nome_empresa,telefone,celular_empresa,whatsapp_empresa,email,endereco,cidade_uf,responsavel,logo_url,cor_primaria,cor_secundaria,updated_at'
+
+class PublicDocsTimeoutError extends Error {
+  constructor(message = 'Publicação demorou demais. Tente novamente em instantes.') {
+    super(message)
+    this.name = 'PublicDocsTimeoutError'
+  }
+}
+
+function criarDeadlinePost() {
+  const limite = Date.now() + PUBLIC_DOCS_POST_BUDGET_MS
+  return () => {
+    if (Date.now() > limite) throw new PublicDocsTimeoutError()
+  }
+}
 
 function normalizarTipoPublico(documentTypeRaw: string) {
   const raw = String(documentTypeRaw || '').trim().toLowerCase()
@@ -38,38 +60,50 @@ async function buscarPublicDocumentPorTipoId(
   documentType: string,
   documentId: string
 ) {
-  const porColunasNovas = await supabaseAdmin
-    .from('public_documents')
-    .select('*')
-    .eq('document_type', documentType)
-    .eq('document_id', documentId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  const porColunasNovas = await withTimeout(
+    supabaseAdmin
+      .from('public_documents')
+      .select(PUBLIC_DOCS_ROW_COLS)
+      .eq('document_type', documentType)
+      .eq('document_id', documentId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    PUBLIC_DOCS_QUERY_TIMEOUT_MS,
+    () => ({ data: null, error: { message: 'timeout' } }),
+  )
 
   if (porColunasNovas.data || !porColunasNovas.error) {
     return porColunasNovas
   }
 
   if (documentType === 'ordem_servico') {
-    return supabaseAdmin
+    return withTimeout(
+      supabaseAdmin
+        .from('public_documents')
+        .select(PUBLIC_DOCS_ROW_COLS)
+        .in('tipo', ['ordem_servico', 'os'])
+        .eq('documento_id', documentId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      PUBLIC_DOCS_QUERY_TIMEOUT_MS,
+      () => ({ data: null, error: { message: 'timeout' } }),
+    )
+  }
+
+  return withTimeout(
+    supabaseAdmin
       .from('public_documents')
-      .select('*')
-      .in('tipo', ['ordem_servico', 'os'])
+      .select(PUBLIC_DOCS_ROW_COLS)
+      .eq('tipo', documentType)
       .eq('documento_id', documentId)
       .order('updated_at', { ascending: false })
       .limit(1)
-      .maybeSingle()
-  }
-
-  return supabaseAdmin
-    .from('public_documents')
-    .select('*')
-    .eq('tipo', documentType)
-    .eq('documento_id', documentId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+      .maybeSingle(),
+    PUBLIC_DOCS_QUERY_TIMEOUT_MS,
+    () => ({ data: null, error: { message: 'timeout' } }),
+  )
 }
 
 function gerarToken() {
@@ -193,7 +227,11 @@ async function userIdDoToken(
     const token = getBearerToken(req)
     if (!token) return ''
 
-    const { data, error } = await supabaseAdmin.auth.getUser(token)
+    const { data, error } = await withTimeout(
+      supabaseAdmin.auth.getUser(token),
+      PUBLIC_DOCS_QUERY_TIMEOUT_MS,
+      () => ({ data: { user: null }, error: { message: 'timeout' } }),
+    )
 
     if (error) {
       console.error('[SUPABASE_AUTH]', error)
@@ -417,6 +455,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const verificarTempo = criarDeadlinePost()
+
   try {
     let supabaseAdmin: ReturnType<typeof getSupabaseAdmin>
     try {
@@ -488,12 +528,18 @@ export async function POST(req: NextRequest) {
     let existente: any = null
     let erroBusca: any = null
 
+    const userIdBearerPromise = userIdDoToken(req, supabaseAdmin)
+
     if (tokenRecebido) {
-      const buscaPorToken = await supabaseAdmin
-        .from('public_documents')
-        .select('*')
-        .eq('token', tokenRecebido)
-        .maybeSingle()
+      const buscaPorToken = await withTimeout(
+        supabaseAdmin
+          .from('public_documents')
+          .select(PUBLIC_DOCS_ROW_COLS)
+          .eq('token', tokenRecebido)
+          .maybeSingle(),
+        PUBLIC_DOCS_QUERY_TIMEOUT_MS,
+        () => ({ data: null, error: { message: 'timeout' } }),
+      )
 
       existente = buscaPorToken.data
       erroBusca = buscaPorToken.error
@@ -505,12 +551,13 @@ export async function POST(req: NextRequest) {
       erroBusca = buscaPorDocumento.error
     }
 
-    if (erroBusca) {
+    if (erroBusca && erroBusca.message !== 'timeout') {
       console.error('[BUSCA_EXISTENTE]', erroBusca)
       return erroApi(erroBusca)
     }
 
-    const userIdBearer = await userIdDoToken(req, supabaseAdmin)
+    verificarTempo()
+    const userIdBearer = await userIdBearerPromise
     const isAprovacaoPublica = payloadIndicaAprovacaoPublica(payloadRecebido)
     const tokenConfere = Boolean(
       tokenRecebido &&
@@ -564,27 +611,28 @@ export async function POST(req: NextRequest) {
       ''
     ).trim()
 
-    let configEmpresaPublica: ReturnType<typeof mergeConfigPublicacao> | null = null
+    let configEmpresaPublica: ReturnType<typeof mergeConfigPublicacao> | null = mergeConfigPublicacao(
+      payloadRecebido?.config,
+      payloadRecebido?.cfg,
+    )
 
     if (userId) {
-      const { data: rowCfg } = await supabaseAdmin
-        .from('configuracoes_empresa')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle()
+      const { data: rowCfg } = await withTimeout(
+        supabaseAdmin.from('configuracoes_empresa').select(CFG_EMPRESA_COLS).eq('user_id', userId).maybeSingle(),
+        PUBLIC_DOCS_CONFIG_TIMEOUT_MS,
+        () => ({ data: null, error: null }),
+      )
 
       if (rowCfg) {
         configEmpresaPublica = mergeConfigPublicacao(
           payloadRecebido?.config,
           payloadRecebido?.cfg,
-          configRowSupabaseToPublica(rowCfg as Record<string, unknown>)
+          configRowSupabaseToPublica(rowCfg as Record<string, unknown>),
         )
       }
     }
 
-    if (!configEmpresaPublica) {
-      configEmpresaPublica = mergeConfigPublicacao(payloadRecebido?.config, payloadRecebido?.cfg)
-    }
+    verificarTempo()
 
     const versao = timestampVersaoPublica(existente?.updated_at || Date.now())
     const empresaCampos = camposEmpresaNoPayload(configEmpresaPublica, {
@@ -623,13 +671,12 @@ export async function POST(req: NextRequest) {
       if (!insertResult.error) return insertResult
 
       if (insertResult.error?.code === '23505') {
-        console.warn('[INSERT_PUBLIC_DOCS] Conflito único, tentando update', { tipo, documentoId })
+        console.warn('[INSERT_PUBLIC_DOCS] Conflito único, tentando update idempotente', { tipo, documentoId })
 
-        const porToken = token
-          ? await supabaseAdmin.from('public_documents').update(dadosSalvar).eq('token', token)
-          : { error: null }
-
-        if (!porToken.error) return porToken
+        if (token) {
+          const porToken = await supabaseAdmin.from('public_documents').update(dadosSalvar).eq('token', token)
+          if (!porToken.error) return porToken
+        }
 
         const porNovasColunas = await supabaseAdmin
           .from('public_documents')
@@ -657,14 +704,16 @@ export async function POST(req: NextRequest) {
       return insertResult
     }
 
-    const { error: erroSalvar } = await salvarPublicDocument()
+    verificarTempo()
+    const { error: erroSalvar } = await withTimeout(
+      salvarPublicDocument(),
+      PUBLIC_DOCS_QUERY_TIMEOUT_MS,
+      () => ({ error: { message: 'timeout ao salvar documento público' } }),
+    )
 
     if (erroSalvar) {
       console.error('[SALVAR_PUBLIC_DOCS]', {
-        code: erroSalvar.code,
         message: erroSalvar.message,
-        details: erroSalvar.details,
-        hint: erroSalvar.hint,
         tipo,
         documento_id: documentoId,
       })
@@ -700,6 +749,9 @@ export async function POST(req: NextRequest) {
       empresa_logo_og: payload.empresa_logo_og,
     })
   } catch (error) {
+    if (error instanceof PublicDocsTimeoutError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 503 })
+    }
     return erroApi(error)
   }
 }

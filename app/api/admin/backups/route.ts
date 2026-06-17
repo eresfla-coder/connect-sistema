@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdminFromRequest } from '@/lib/api-auth'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { restaurarBackupNuvem } from '@/lib/backup-server'
+import { restaurarBackupNuvem, BackupTimeoutError } from '@/lib/backup-server'
 import type { ConnectBackupPayload } from '@/lib/backup-connect'
 
 export const dynamic = 'force-dynamic'
@@ -83,6 +83,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true })
   } catch (error: unknown) {
+    if (error instanceof BackupTimeoutError) {
+      return NextResponse.json({ ok: false, message: error.message }, { status: 503 })
+    }
     const message = error instanceof Error ? error.message : 'Falha ao restaurar.'
     return NextResponse.json({ ok: false, message }, { status: 400 })
   }

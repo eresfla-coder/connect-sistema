@@ -45,24 +45,6 @@ function supabaseAnonFromToken(token: string) {
   })
 }
 
-async function consultarAdminMasterApi(request: NextRequest, token: string) {
-  try {
-    const origin = request.nextUrl.origin
-    const res = await fetchWithTimeout(
-      `${origin}/api/assinatura/status`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      },
-      5000,
-    )
-    const payload = await res.json().catch(() => null)
-    return Boolean(payload?.isAdminMaster)
-  } catch {
-    return false
-  }
-}
-
 export async function GET(request: NextRequest) {
   const token = getBearerToken(request)
   if (!token) {
@@ -88,9 +70,6 @@ export async function GET(request: NextRequest) {
     let adminLogado = isUsuarioAdmin({ email: emailNormalizado, perfil: perfilExistente })
     if (!adminLogado) {
       adminLogado = isUsuarioAdminServer({ email: emailNormalizado, perfil: perfilExistente })
-    }
-    if (!adminLogado) {
-      adminLogado = await consultarAdminMasterApi(request, token)
     }
 
     let perfil = perfilExistente

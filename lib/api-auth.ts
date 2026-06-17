@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { isAdminMasterServer } from '@/lib/access-server'
+import { isUsuarioAdminServer } from '@/lib/access-server'
 
 export function getBearerToken(request: NextRequest | Request) {
   const header = request.headers.get('authorization') || ''
@@ -20,6 +20,17 @@ export async function getUserFromRequest(request: NextRequest | Request) {
 export async function requireAdminFromRequest(request: NextRequest | Request) {
   const { user } = await getUserFromRequest(request)
   const email = String(user.email || '').toLowerCase()
-  if (!isAdminMasterServer(email)) throw new Error('Acesso negado.')
-  return user
+
+  if (isUsuarioAdminServer({ email })) return user
+
+  const supabase = getSupabaseAdmin()
+  const { data: perfil } = await supabase
+    .from('perfis')
+    .select('role,plano_tier,status,email')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  if (isUsuarioAdminServer({ email, perfil })) return user
+
+  throw new Error('Acesso negado.')
 }
