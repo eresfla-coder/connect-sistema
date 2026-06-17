@@ -14,7 +14,6 @@ import {
 } from '@/lib/orcamento-pagamento'
 import {
   OBSERVACAO_PADRAO_ORCAMENTO,
-  orcamentoDeveOcultarM2Cliente,
   validadeOrcamentoAtiva,
   resolverValidadePadraoOrcamento,
 } from '@/lib/orcamentoTextos'
@@ -368,6 +367,12 @@ function serializarCompactoOrcamento(dados: any, config: any) {
         q: Number(item?.quantidade || 0),
         v: Number(item?.valor || 0),
         t: Number(item?.total || (Number(item?.quantidade || 0) * Number(item?.valor || 0))),
+        tc: item?.tipoCalculo || undefined,
+        mg: item?.tipoCalculo === 'm2' ? Number(item?.metragem || 0) : undefined,
+        vm2: item?.tipoCalculo === 'm2' ? Number(item?.valorM2 ?? item?.valor ?? 0) : undefined,
+        lg: item?.tipoCalculo === 'm2' ? Number(item?.largura || 0) : undefined,
+        at: item?.tipoCalculo === 'm2' ? Number(item?.altura || 0) : undefined,
+        qtd: item?.tipoCalculo === 'm2' ? Math.max(1, Number(item?.quantidade || 1)) : undefined,
       }))
     : []
 
@@ -391,7 +396,7 @@ function serializarCompactoOrcamento(dados: any, config: any) {
     fp: String(dados?.formaPagamento || ''),
     fpl: Array.isArray(dados?.formasPagamentoLista) ? dados.formasPagamentoLista : undefined,
     opg: String(dados?.observacaoPagamento || ''),
-    om2: Boolean(dados?.ocultarValorUnitarioM2),
+    om2: dados?.ocultarValorUnitarioM2 === true,
     vd: String(dados?.validade || ''),
     pe: String(dados?.prazoEntrega || ''),
     eden: String(dados?.enderecoEntrega || ''),
@@ -611,7 +616,8 @@ function calcularTotalItem(item: ItemOrcamento) {
   if (item.tipoCalculo === 'm2') {
     const metragem = Number(item.metragem || calcularMetragem(item.largura, item.altura))
     const valorM2 = Number(item.valorM2 ?? item.valor ?? 0)
-    return metragem * valorM2
+    const quantidade = Math.max(1, Number(item.quantidade || 1))
+    return metragem * valorM2 * quantidade
   }
 
   return Number(item.quantidade || 0) * Number(item.valor || 0)
@@ -810,6 +816,30 @@ function aplicarStatusResolvido(
   }
 }
 
+function mesclarClienteOrcamento(
+  a: OrcamentoSalvo['cliente'],
+  b: OrcamentoSalvo['cliente'],
+): OrcamentoSalvo['cliente'] {
+  const objA = a && typeof a === 'object' ? (a as Record<string, unknown>) : null
+  const objB = b && typeof b === 'object' ? (b as Record<string, unknown>) : null
+  if (!objA && !objB) {
+    const nome = String((typeof b === 'string' ? b : '') || (typeof a === 'string' ? a : '')).trim()
+    return nome ? { id: 0, nome, telefone: '', email: '', endereco: '' } : null
+  }
+  return {
+    id: Number(objB?.id || objA?.id || 0),
+    nome: String(objB?.nome || objA?.nome || '').trim(),
+    telefone: String(objB?.telefone || objA?.telefone || objB?.whatsapp || objA?.whatsapp || '').trim(),
+    email: String(objB?.email || objA?.email || '').trim(),
+    endereco: String(objB?.endereco || objA?.endereco || '').trim(),
+    tipoPessoa: (objB?.tipoPessoa || objA?.tipoPessoa) as Cliente['tipoPessoa'],
+    cpf: String(objB?.cpf || objA?.cpf || '').trim() || undefined,
+    cnpj: String(objB?.cnpj || objA?.cnpj || '').trim() || undefined,
+    razaoSocial: String(objB?.razaoSocial || objA?.razaoSocial || '').trim() || undefined,
+    nomeFantasia: String(objB?.nomeFantasia || objA?.nomeFantasia || '').trim() || undefined,
+  }
+}
+
 function mesclarParOrcamentos(remoto: OrcamentoSalvo, local: OrcamentoSalvo): OrcamentoSalvo {
   const resolvido = resolverStatusOrcamento(
     fonteStatusDeOrcamento(local),
@@ -823,6 +853,10 @@ function mesclarParOrcamentos(remoto: OrcamentoSalvo, local: OrcamentoSalvo): Or
     ...remoto,
     ...maisRecente,
     id: local.id || remoto.id,
+    cliente: mesclarClienteOrcamento(maisRecente.cliente, mesclarClienteOrcamento(local.cliente, remoto.cliente)),
+    enderecoEntrega:
+      String(maisRecente.enderecoEntrega || local.enderecoEntrega || remoto.enderecoEntrega || '').trim() || undefined,
+    itens: (maisRecente.itens?.length ? maisRecente.itens : local.itens?.length ? local.itens : remoto.itens) || [],
     status: resolvido.status,
     aprovado: resolvido.aprovado,
     aprovadoEm: resolvido.aprovadoEm || maisRecente.aprovadoEm || local.aprovadoEm || remoto.aprovadoEm,
@@ -1037,15 +1071,10 @@ export default function OrcamentoPage() {
   const [formAberto, setFormAberto] = useState(false)
   const [formaPagamento, setFormaPagamento] = useState('PIX')
   const [formasPagamentoSelecionadas, setFormasPagamentoSelecionadas] = useState<string[]>(['Pix'])
-  const [ocultarValorUnitarioM2, setOcultarValorUnitarioM2] = useState(true)
+  const [ocultarValorUnitarioM2, setOcultarValorUnitarioM2] = useState(false)
   const [parcelasBoleto, setParcelasBoleto] = useState('')
   const [validade, setValidade] = useState('')
 
-  useEffect(() => {
-    if (itens.some((item) => item.tipoCalculo === 'm2')) {
-      setOcultarValorUnitarioM2(true)
-    }
-  }, [itens])
   const [prazoEntrega, setPrazoEntrega] = useState('')
   const [enderecoEntrega, setEnderecoEntrega] = useState('')
   const [enderecoEntregaFocused, setEnderecoEntregaFocused] = useState(false)
@@ -1206,27 +1235,27 @@ export default function OrcamentoPage() {
         idsLocais: locais.map((item) => item.id).slice(0, 8),
       })
       setOrcamentosSalvos(locais)
-      try {
-        salvarLocalStorageUsuario(ORCAMENTOS_KEY, userId, locais)
-      } catch (error) {
-        console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
-      }
-      return false
+    try {
+      persistirListaOrcamentosLocal(locais)
+    } catch (error) {
+      console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
     }
+    return false
+  }
 
-    const listaNormalizada = mesclarOrcamentos(
+  const listaNormalizada = mesclarOrcamentos(
       lista.filter((item) => !deletedIds.has(String(item?.id || ''))),
       locais,
       userId,
     )
-    setOrcamentosSalvos(listaNormalizada)
-    try {
-      salvarLocalStorageUsuario(ORCAMENTOS_KEY, userId, listaNormalizada)
-    } catch (error) {
-      console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
-    }
-    return true
+  setOrcamentosSalvos(listaNormalizada)
+  try {
+    persistirListaOrcamentosLocal(listaNormalizada)
+  } catch (error) {
+    console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
   }
+  return true
+}
 
   function isMobileOrcamentos() {
     if (typeof window === 'undefined') return false
@@ -1678,6 +1707,16 @@ export default function OrcamentoPage() {
       } catch {}
     }
 
+    void (async () => {
+      const auth = await obterAuthOrcamentos(4)
+      if (auth?.userId) userIdOrcamentosRef.current = auth.userId
+      const listaImediata = lerOrcamentosLocalStorage()
+      if (listaImediata.length > 0) {
+        setOrcamentosSalvos(listaImediata)
+        ultimaCargaOrcamentosRef.current = Date.now()
+      }
+    })()
+
     void carregarOrcamentosSupabase('abertura-painel')
 
     void obterUserIdPainel().then((userId) => {
@@ -1707,15 +1746,22 @@ export default function OrcamentoPage() {
 
   useEffect(() => {
     function carregarDadosLocaisV78() {
-      try {
-        const salvosOrcamentos = localStorage.getItem(ORCAMENTOS_KEY)
-        if (salvosOrcamentos) {
-          const lista = JSON.parse(salvosOrcamentos)
+      void obterUserIdPainel().then((userId) => {
+        if (userId) userIdOrcamentosRef.current = userId
+        try {
+          const lista = lerLocalStorageUsuario<OrcamentoSalvo[]>(ORCAMENTOS_KEY, userId, [])
           if (Array.isArray(lista) && lista.length > 0 && ultimaCargaOrcamentosRef.current === 0) {
-            setOrcamentosSalvos(lista.map((item) => ({ ...item, status: normalizarStatus(item.status) })))
+            const deletedIds = lerDeletedOrcamentos(userId)
+            setOrcamentosSalvos(
+              deduplicarOrcamentosPorId(
+                lista
+                  .map((item) => ({ ...item, status: normalizarStatus(item.status) }))
+                  .filter((item) => !deletedIds.has(String(item?.id || ''))),
+              ),
+            )
           }
-        }
-      } catch {}
+        } catch {}
+      })
       void carregarOrcamentosSupabase('connect-cloud-hydrated')
       void obterUserIdPainel().then((userId) => {
         try {
@@ -2067,6 +2113,20 @@ export default function OrcamentoPage() {
     }
   }
 
+  function persistirListaOrcamentosLocal(lista: OrcamentoSalvo[]) {
+    const gravar = (userId: string | null) => {
+      salvarLocalStorageUsuario(ORCAMENTOS_KEY, userId, lista)
+    }
+    if (userIdOrcamentosRef.current) {
+      gravar(userIdOrcamentosRef.current)
+      return
+    }
+    void obterUserIdPainel().then((userId) => {
+      if (userId) userIdOrcamentosRef.current = userId
+      gravar(userId)
+    })
+  }
+
   function salvarListaOrcamentos(lista: OrcamentoSalvo[]) {
     const deletedIds = lerDeletedOrcamentos(userIdOrcamentosRef.current)
     const listaSemDuplicatas = deduplicarOrcamentosPorId(
@@ -2081,7 +2141,7 @@ export default function OrcamentoPage() {
       })
     }
     setOrcamentosSalvos(listaNormalizada)
-    salvarLocalStorageUsuario(ORCAMENTOS_KEY, userIdOrcamentosRef.current, listaNormalizada)
+    persistirListaOrcamentosLocal(listaNormalizada)
     window.dispatchEvent(new Event('connect-data-change'))
   }
 
@@ -2398,7 +2458,7 @@ export default function OrcamentoPage() {
     setObservacao(config.rodapePdf || OBSERVACAO_PADRAO_ORCAMENTO)
     setFormaPagamento(config.formaPagamentoPadrao || formasPagamento[0] || 'PIX')
     setFormasPagamentoSelecionadas([config.formaPagamentoPadrao || formasPagamento[0] || 'Pix'])
-    setOcultarValorUnitarioM2(true)
+    setOcultarValorUnitarioM2(false)
     setParcelasBoleto('')
     setValidade(resolverValidadePadraoOrcamento(config.validadePadrao))
     setPrazoEntrega(config.prazoEntregaPadrao || '')
@@ -2425,8 +2485,9 @@ export default function OrcamentoPage() {
     setMostrarBuscaProduto(false)
 
     if (produto.tipoCalculo === 'm2') {
-      setLarguraItem(0)
-      setAlturaItem(0)
+      const ultimoM2 = [...itens].reverse().find((item) => item.tipoCalculo === 'm2' && item.nome === produto.nome)
+      setLarguraItem(Number(ultimoM2?.largura || 0))
+      setAlturaItem(Number(ultimoM2?.altura || 0))
       setQuantidade(1)
       return
     }
@@ -2608,7 +2669,7 @@ export default function OrcamentoPage() {
             ? {
                 ...item,
                 nome: produto.nome,
-                quantidade: 1,
+                quantidade: Math.max(1, Number(quantidade || 1)),
                 valor: Number(item.valorM2 ?? item.valor ?? produto.valor),
                 tipoCalculo: 'm2',
                 tipoCadastro: tipoCadastroProduto,
@@ -2624,21 +2685,40 @@ export default function OrcamentoPage() {
       )
       notificar(tipoCadastroProduto === 'servico' ? 'Serviço atualizado.' : 'Item atualizado.')
     } else {
-      const novoItem: ItemOrcamento = {
-        id: Date.now(),
-        nome: produto.nome,
-        quantidade: 1,
-        valor: produto.valor,
-        mostrarCliente: true,
-        tipoCalculo: 'm2',
-        tipoCadastro: tipoCadastroProduto,
-        unidadeLabel: 'm²',
-        largura: larguraItem,
-        altura: alturaItem,
-        metragem,
-        valorM2: produto.valor,
-      }
-      setItens((atual) => [...atual, novoItem])
+      setItens((atual) => {
+        const existente = atual.find(
+          (item) =>
+            item.tipoCalculo === 'm2' &&
+            item.nome === produto.nome &&
+            Number(item.largura || 0) === larguraItem &&
+            Number(item.altura || 0) === alturaItem,
+        )
+
+        if (existente) {
+          const acrescentar = Math.max(1, Number(quantidade || 1))
+          return atual.map((item) =>
+            item.id === existente.id
+              ? { ...item, quantidade: Math.max(1, Number(item.quantidade || 1) + acrescentar) }
+              : item,
+          )
+        }
+
+        const novoItem: ItemOrcamento = {
+          id: Date.now(),
+          nome: produto.nome,
+          quantidade: Math.max(1, Number(quantidade || 1)),
+          valor: produto.valor,
+          mostrarCliente: true,
+          tipoCalculo: 'm2',
+          tipoCadastro: tipoCadastroProduto,
+          unidadeLabel: 'm²',
+          largura: larguraItem,
+          altura: alturaItem,
+          metragem,
+          valorM2: produto.valor,
+        }
+        return [...atual, novoItem]
+      })
       notificar(tipoCadastroProduto === 'servico' ? 'Serviço adicionado.' : 'Item adicionado.')
     }
 
@@ -2655,7 +2735,7 @@ export default function OrcamentoPage() {
       setModoItem(item.tipoCadastro === 'servico' ? 'servico' : 'produto')
       setLarguraItem(Number(item.largura || 0))
       setAlturaItem(Number(item.altura || 0))
-      setQuantidade(1)
+      setQuantidade(Math.max(1, Number(item.quantidade || 1)))
     } else {
       setModoItem(item.tipoCadastro === 'servico' ? 'servico' : 'produto')
       setQuantidade(item.quantidade)
@@ -2673,7 +2753,7 @@ export default function OrcamentoPage() {
 
   function alterarQuantidadeItem(id: number, novaQtd: number) {
     if (!novaQtd || novaQtd <= 0) return
-    setItens((atual) => atual.map((item) => (item.id === id && item.tipoCalculo !== 'm2' ? { ...item, quantidade: novaQtd } : item)))
+    setItens((atual) => atual.map((item) => (item.id === id ? { ...item, quantidade: novaQtd } : item)))
   }
 
   function alterarValorItem(id: number, novoValor: number) {
@@ -2698,10 +2778,8 @@ export default function OrcamentoPage() {
       atual.map((item) => {
         if (item.id !== id) return item
         if (item.tipoCalculo === 'm2') {
-          const larguraAtual = Number(item.largura || 0)
-          const alturaAtual = Number(item.altura || 0)
-          const novaLargura = Math.max(0.01, Number((larguraAtual + direcao * 0.01).toFixed(2)))
-          return { ...item, largura: novaLargura, metragem: calcularMetragem(novaLargura, alturaAtual) }
+          const novaQuantidade = Math.max(1, Number(item.quantidade || 1) + direcao)
+          return { ...item, quantidade: novaQuantidade }
         }
         const passo = item.tipoCalculo === 'peso' ? 0.001 : 1
         const minimo = item.tipoCalculo === 'peso' ? 0.001 : 1
@@ -2748,6 +2826,9 @@ export default function OrcamentoPage() {
     setSalvandoOrcamento(true)
 
     try {
+      const auth = await obterAuthOrcamentos(8)
+      if (auth?.userId) userIdOrcamentosRef.current = auth.userId
+
       if (editandoOrcamentoId !== null) {
         const atual = orcamentosSalvos.find((item) => item.id === editandoOrcamentoId)
 
@@ -2765,7 +2846,7 @@ export default function OrcamentoPage() {
           formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
           formasPagamentoLista: formasPagamentoSelecionadas,
           observacaoPagamento: '',
-          ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
+          ocultarValorUnitarioM2,
           validade,
           prazoEntrega,
           enderecoEntrega: enderecoEntrega.trim() || undefined,
@@ -2821,7 +2902,7 @@ export default function OrcamentoPage() {
         formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
         formasPagamentoLista: formasPagamentoSelecionadas,
         observacaoPagamento: '',
-        ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
+        ocultarValorUnitarioM2,
         validade,
         prazoEntrega,
         enderecoEntrega: enderecoEntrega.trim() || undefined,
@@ -2977,7 +3058,7 @@ export default function OrcamentoPage() {
     setFormasPagamentoSelecionadas(pagExtraido.formas.length ? pagExtraido.formas : ['Pix'])
     setFormaPagamento(pagExtraido.formas[0] || 'Pix')
     setParcelasBoleto(String(orc.formaPagamento || '').includes('(') ? String(orc.formaPagamento || '').match(/\(([^)]+)\)/)?.[1] || '' : '')
-    setOcultarValorUnitarioM2(Boolean(orc.ocultarValorUnitarioM2))
+    setOcultarValorUnitarioM2(orc.ocultarValorUnitarioM2 === true)
     setValidade(orc.validade || '')
     setPrazoEntrega(orc.prazoEntrega || '')
     setEnderecoEntrega(orc.enderecoEntrega || orc.cliente?.endereco || '')
@@ -3117,7 +3198,7 @@ export default function OrcamentoPage() {
       formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
       formasPagamentoLista: formasPagamentoSelecionadas,
       observacaoPagamento: '',
-        ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
+        ocultarValorUnitarioM2,
       validade,
       prazoEntrega,
       enderecoEntrega: enderecoEntrega.trim() || undefined,
@@ -3212,7 +3293,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
         formasPagamentoLista: formasPagamentoSelecionadas,
         observacaoPagamento: '',
-        ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
+        ocultarValorUnitarioM2,
         validade,
         prazoEntrega,
         enderecoEntrega: enderecoEntrega.trim() || undefined,
@@ -3240,7 +3321,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
         formasPagamentoLista: formasPagamentoSelecionadas,
         observacaoPagamento: '',
-        ocultarValorUnitarioM2: orcamentoDeveOcultarM2Cliente(itens, ocultarValorUnitarioM2),
+        ocultarValorUnitarioM2,
         validade,
         prazoEntrega,
         enderecoEntrega: enderecoEntrega.trim() || undefined,
@@ -4204,7 +4285,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     style={{
                       display: 'grid',
                       gap: 8,
-                      gridTemplateColumns: isMobile ? '1fr 1fr' : 'minmax(180px, 1fr) minmax(108px, 0.7fr) minmax(108px, 0.7fr) minmax(150px, auto)',
+                      gridTemplateColumns: isMobile ? '1fr 1fr' : 'minmax(180px, 1fr) minmax(96px, 0.55fr) minmax(96px, 0.55fr) minmax(72px, 0.45fr) minmax(150px, auto)',
                       alignItems: 'stretch',
                     }}
                   >
@@ -4233,6 +4314,15 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                       value={formatarDecimalVisual(alturaItem)}
                       onChange={(e) => setAlturaItem(textoParaNumeroDecimal(e.target.value))}
                       placeholder="Altura"
+                      style={{ ...inputStyle, minWidth: 0 }}
+                    />
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={Math.max(1, Number(quantidade || 1))}
+                      onChange={(e) => setQuantidade(Math.max(1, Number(e.target.value || 1)))}
+                      placeholder="Qtd"
                       style={{ ...inputStyle, minWidth: 0 }}
                     />
                     <button
@@ -4387,7 +4477,10 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                             )}
                             {item.tipoCalculo === 'm2' && (
                               <div style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>
-                                Área calculada: {Number(item.metragem || 0).toFixed(2)} m²
+                                Área por peça: {Number(item.metragem || 0).toFixed(2)} m²
+                                {Number(item.quantidade || 1) > 1
+                                  ? ` • ${Number(item.quantidade || 1)} peças • Total: ${(Number(item.metragem || 0) * Number(item.quantidade || 1)).toFixed(2)} m²`
+                                  : ''}
                               </div>
                             )}
                           </div>
@@ -4409,7 +4502,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                         </div>
 
                         {item.tipoCalculo === 'm2' ? (
-                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(110px, 1fr))', gap: 8 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(5, minmax(96px, 1fr))', gap: 8 }}>
                             <div>
                               <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>Largura</label>
                               <input
@@ -4431,6 +4524,21 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                                 style={inputStyle}
                                 placeholder="0,00"
                               />
+                            </div>
+                            <div>
+                              <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>Qtd</label>
+                              <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  min={1}
+                                  value={Math.max(1, Number(item.quantidade || 1))}
+                                  onChange={(e) => alterarQuantidadeItem(item.id, Number(e.target.value || 1))}
+                                  style={{ ...inputStyle, flex: 1, minWidth: 0, width: 'auto' }}
+                                />
+                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={qtdStepBtnPlus}>+</button>
+                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={qtdStepBtnMinus}>-</button>
+                              </div>
                             </div>
                             <div>
                               <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>R$ / m²</label>
@@ -4487,12 +4595,6 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                             Total do item: <span style={{ color: '#22c55e' }}>{moeda(calcularTotalItem(item))}</span>
                           </div>
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            {item.tipoCalculo === 'm2' ? (
-                              <>
-                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={qtdStepBtnPlus}>+</button>
-                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={qtdStepBtnMinus}>-</button>
-                              </>
-                            ) : null}
                             <button onClick={() => alterarVisibilidadeItemCliente(item.id)} style={{ ...buttonBase, background: item.mostrarCliente === false ? 'linear-gradient(135deg,#f97316,#ea580c)' : darkMode ? '#334155' : '#e2e8f0', color: item.mostrarCliente === false ? '#fff' : darkMode ? '#fff' : '#111827', padding: '10px 14px' }}>{item.mostrarCliente === false ? 'Mostrar ao cliente' : 'Ocultar do cliente'}</button>
                             <button onClick={() => editarItem(item)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(37,99,235,0.25)' }}>Editar</button>
                             <button onClick={() => removerItem(item.id)} style={{ ...buttonBase, background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', padding: '10px 14px', boxShadow: '0 8px 18px rgba(239,68,68,0.22)' }}>Excluir</button>

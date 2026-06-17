@@ -26,6 +26,7 @@ type Cliente = {
   endereco?: string
   bairro?: string
   cidade?: string
+  cep?: string
   tipoPessoa?: 'PF' | 'PJ'
   cpf?: string
   cnpj?: string
@@ -147,8 +148,70 @@ function clienteEmail(cliente: any, fallback = ''): string {
 
 function clienteEndereco(cliente: any, fallback = ''): string {
   if (!cliente || typeof cliente !== 'object') return fallback
-  const partes = [cliente.endereco, cliente.bairro, cliente.cidade].filter(Boolean)
+  const endereco = String(cliente.endereco || '').trim()
+  if (endereco) return endereco
+  const partes = [cliente.endereco, cliente.bairro, cliente.cidade, cliente.cep].filter(Boolean)
   return partes.length ? partes.join(' • ') : fallback
+}
+
+function calcularMetragemDocumento(largura?: number, altura?: number) {
+  return Number((Number(largura || 0) * Number(altura || 0)).toFixed(4))
+}
+
+function normalizarItemDocumentoOrcamento(item: any): ItemOrcamento {
+  const tipoCalculo = item?.tipoCalculo || item?.tc || 'unidade'
+  const largura = Number(item?.largura ?? item?.lg ?? 0)
+  const altura = Number(item?.altura ?? item?.at ?? 0)
+  const metragemBase = Number(item?.metragem ?? item?.mg ?? 0)
+  const metragem =
+    tipoCalculo === 'm2'
+      ? metragemBase > 0
+        ? metragemBase
+        : calcularMetragemDocumento(largura, altura)
+      : metragemBase
+  const valorM2 = Number(item?.valorM2 ?? item?.vm2 ?? item?.valor ?? 0)
+
+  return {
+    ...item,
+    id: item?.id,
+    nome: String(item?.nome || item?.n || '').trim(),
+    quantidade: Math.max(1, Number(item?.quantidade ?? item?.q ?? item?.qtd ?? 1)),
+    valor: Number(item?.valor ?? item?.v ?? 0),
+    tipoCalculo,
+    largura: largura || undefined,
+    altura: altura || undefined,
+    metragem: tipoCalculo === 'm2' ? metragem : undefined,
+    valorM2: tipoCalculo === 'm2' ? valorM2 : undefined,
+  }
+}
+
+function normalizarDocumentoOrcamento(raw: any): Orcamento | null {
+  if (!raw || typeof raw !== 'object') return null
+  const doc = { ...raw } as Orcamento
+
+  if (doc.cliente && typeof doc.cliente === 'string') {
+    doc.cliente = { nome: doc.cliente, telefone: '', email: '', endereco: '' }
+  } else if (doc.cliente && typeof doc.cliente === 'object') {
+    const cl = doc.cliente as Record<string, unknown>
+    doc.cliente = {
+      nome: String(cl.nome || cl.n || '').trim(),
+      telefone: String(cl.telefone || cl.t || cl.whatsapp || '').trim(),
+      email: String(cl.email || cl.e || '').trim(),
+      endereco: String(cl.endereco || cl.en || '').trim(),
+      bairro: String(cl.bairro || '').trim() || undefined,
+      cidade: String(cl.cidade || '').trim() || undefined,
+      cep: String(cl.cep || '').trim() || undefined,
+    }
+  }
+
+  if (Array.isArray(doc.itens)) {
+    doc.itens = doc.itens.map((item) => normalizarItemDocumentoOrcamento(item))
+  }
+
+  doc.ocultarValorUnitarioM2 = doc.ocultarValorUnitarioM2 === true
+  doc.enderecoEntrega = String(doc.enderecoEntrega || (raw as any).eden || '').trim() || undefined
+
+  return doc
 }
 
 function moeda(valor?: number) {
@@ -177,7 +240,10 @@ function parseDataBR(valor?: string) {
 
 function totalItem(item: ItemOrcamento) {
   if (Number(item.total || 0) > 0) return Number(item.total || 0)
-  if (item.tipoCalculo === 'm2') return Number(item.metragem || 0) * Number(item.valorM2 ?? item.valor ?? 0)
+  if (item.tipoCalculo === 'm2') {
+    const quantidade = Math.max(1, Number(item.quantidade || 1))
+    return Number(item.metragem || 0) * Number(item.valorM2 ?? item.valor ?? 0) * quantidade
+  }
   return Number(item.quantidade || 0) * Number(item.valor || 0)
 }
 
@@ -196,9 +262,14 @@ function unidadeItem(item: ItemOrcamento) {
 
 function quantidadeItem(item: ItemOrcamento) {
   if (item.tipoCalculo === 'm2') {
-    const metragem = Number(item.metragem || 0)
-    if (metragem > 0) {
-      return metragem.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const metragemPorPeca = Number(
+      item.metragem ||
+        (Number(item.largura || 0) > 0 && Number(item.altura || 0) > 0 ? Number(item.largura) * Number(item.altura) : 0),
+    )
+    const quantidade = Math.max(1, Number(item.quantidade || 1))
+    const metragemTotal = metragemPorPeca * quantidade
+    if (metragemTotal > 0) {
+      return metragemTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     }
   }
   if (item.tipoCalculo === 'peso') {
@@ -249,14 +320,21 @@ function decodePayload(value: string | null) {
         endereco: compact.cl?.en || compact.cliente?.endereco || '',
       },
       itens: Array.isArray(compact.it)
-        ? compact.it.map((i: any, idx: number) => ({
-            id: idx + 1,
-            nome: i.n || i.nome || '',
-            quantidade: Number(i.q || i.quantidade || 0),
-            valor: Number(i.v || i.valor || 0),
-            total: Number(i.t || i.total || 0),
-          }))
-        : compact.itens || [],
+        ? compact.it.map((i: any, idx: number) =>
+            normalizarItemDocumentoOrcamento({
+              id: idx + 1,
+              nome: i.n || i.nome || '',
+              quantidade: Number(i.q || i.quantidade || i.qtd || 0),
+              valor: Number(i.v || i.valor || 0),
+              total: Number(i.t || i.total || 0),
+              tipoCalculo: i.tc || i.tipoCalculo,
+              metragem: i.mg ?? i.metragem,
+              valorM2: i.vm2 ?? i.valorM2,
+              largura: i.lg ?? i.largura,
+              altura: i.at ?? i.altura,
+            }),
+          )
+        : (compact.itens || []).map((item: any) => normalizarItemDocumentoOrcamento(item)),
       subtotal: Number(compact.sb || compact.subtotal || 0),
       entrega: Number(compact.en || compact.entrega || 0),
       desconto: Number(compact.ds || compact.desconto || 0),
@@ -272,7 +350,7 @@ function decodePayload(value: string | null) {
       condicoesPagamento: compact.cp || compact.condicoesPagamento,
       formasPagamentoLista: compact.fpl || compact.formasPagamentoLista,
       observacaoPagamento: compact.opg || compact.observacaoPagamento,
-      ocultarValorUnitarioM2: Boolean(compact.om2 ?? compact.ocultarValorUnitarioM2),
+      ocultarValorUnitarioM2: compact.om2 === true || compact.ocultarValorUnitarioM2 === true,
       validadeProposta: compact.vp || compact.validadeProposta,
       observacoesProposta: compact.op || compact.observacoesProposta,
       config: compact.em
@@ -344,6 +422,12 @@ function serializarOrcamentoPublico(dados: Orcamento, config: Config) {
         q: Number(item?.quantidade || 0),
         v: Number(item?.valor || 0),
         t: Number(item?.total || (Number(item?.quantidade || 0) * Number(item?.valor || 0))),
+        tc: item?.tipoCalculo || undefined,
+        mg: item?.tipoCalculo === 'm2' ? Number(item?.metragem || 0) : undefined,
+        vm2: item?.tipoCalculo === 'm2' ? Number(item?.valorM2 ?? item?.valor ?? 0) : undefined,
+        lg: item?.tipoCalculo === 'm2' ? Number(item?.largura || 0) : undefined,
+        at: item?.tipoCalculo === 'm2' ? Number(item?.altura || 0) : undefined,
+        qtd: item?.tipoCalculo === 'm2' ? Math.max(1, Number(item?.quantidade || 1)) : undefined,
       }))
     : []
 
@@ -379,7 +463,7 @@ function serializarOrcamentoPublico(dados: Orcamento, config: Config) {
     cp: String(dados?.condicoesPagamento || ''),
     fpl: Array.isArray(dados?.formasPagamentoLista) ? dados.formasPagamentoLista : undefined,
     opg: String(dados?.observacaoPagamento || ''),
-    om2: Boolean(dados?.ocultarValorUnitarioM2),
+    om2: dados?.ocultarValorUnitarioM2 === true,
     vp: String(dados?.validadeProposta || dados?.validade || ''),
     op: String(dados?.observacoesProposta || ''),
     em: {
@@ -540,7 +624,7 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         if (!payload && encontrado && documentoIdPublico) {
           ;(encontrado as any).id = Number(documentoIdPublico) || (encontrado as any).id
         }
-        setOrc(encontrado || null)
+        setOrc(normalizarDocumentoOrcamento(encontrado))
 
         const linkPublico = Boolean(tokenPublico || payload)
         const cfgLocal = getConfig()
@@ -1031,16 +1115,13 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
   const emailCliente = clienteEmail(orc.cliente, '')
   const enderecoCliente = clienteEndereco(orc.cliente, '')
   const enderecoEntregaDoc = String(orc.enderecoEntrega || '').trim()
-  const mostrarEnderecoEntrega =
-    Boolean(enderecoEntregaDoc) &&
-    enderecoEntregaDoc.toLowerCase() !== enderecoCliente.trim().toLowerCase()
   const data = parseDataBR(orc.data)
   const validadeBruta = texto(orc.validadeProposta || orc.validade, '')
   const validade = validadeOrcamentoAtiva(validadeBruta) ? validadeBruta.trim() : ''
-  const entrega = texto(orc.prazoEntrega, '3 dias')
+  const prazoEntregaDoc = texto(orc.prazoEntrega, '3 dias')
   const pagamento = textoPagamentoOrcamento(orc)
   const pagamentoLista = listaFormasPagamentoOrcamento(orc)
-  const ocultarM2Doc = Boolean(orc.ocultarValorUnitarioM2)
+  const ocultarM2Doc = orc?.ocultarValorUnitarioM2 === true
   const tabelaSimplificada = tabelaOrcamentoSimplificadaCliente(itens, ocultarM2Doc)
   const descricaoProposta = texto(orc.descricaoProposta, '')
   const observacao = normalizarTextoObservacao(
@@ -1123,10 +1204,12 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         ) : null}
 
         <section className="orc-info">
-          <article>
+          <article className="orc-info-cliente">
             <span>Cliente</span>
             <strong>{cliente}</strong>
-            {telCliente && <em>{telCliente}</em>}
+            {telCliente ? <em>{telCliente}</em> : null}
+            {enderecoCliente ? <p className="orc-info-detail">Endereço: {enderecoCliente}</p> : null}
+            {emailCliente ? <p className="orc-info-detail">E-mail: {emailCliente}</p> : null}
           </article>
           <article>
             <span>Data</span>
@@ -1143,18 +1226,11 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
             </article>
           ) : null}
           <article>
-            <span>Entrega</span>
-            <strong>{entrega}</strong>
+            <span>Prazo</span>
+            <strong>{prazoEntregaDoc}</strong>
+            {enderecoEntregaDoc ? <p className="orc-info-detail">Entrega em: {enderecoEntregaDoc}</p> : null}
           </article>
         </section>
-
-        {(emailCliente || enderecoCliente || mostrarEnderecoEntrega) && (
-          <section className="orc-client-extra">
-            {emailCliente && <span>E-mail: {emailCliente}</span>}
-            {enderecoCliente && <span>Endereço do cliente: {enderecoCliente}</span>}
-            {mostrarEnderecoEntrega && <span>Endereço de entrega: {enderecoEntregaDoc}</span>}
-          </section>
-        )}
 
         {isProposta && descricaoProposta ? (
           <section className="orc-prose-block">
@@ -1349,8 +1425,8 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         .orc-info span { display: block; font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: 950; margin-bottom: 6px; }
         .orc-info strong { display: inline-block; font-size: 18px; font-weight: 950; color: #0f172a; }
         .orc-info em { display: inline-block; margin-left: 8px; padding: 4px 12px; border-radius: 999px; background: var(--pdf-soft); color: var(--pdf-primary); font-size: 13px; font-style: normal; font-weight: 950; }
-        .orc-client-extra { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-        .orc-client-extra span { border: 1px solid #cbd5e1; border-radius: 14px; padding: 9px 13px; background: #f8fafc; color: #334155; font-size: 14px; font-weight: 850; line-height: 1.22; }
+        .orc-info-detail { margin: 6px 0 0; font-size: 12px; line-height: 1.35; color: #475569; font-weight: 700; }
+        .orc-info-cliente { min-width: 0; }
         .orc-table { margin-top: 14px; border: 1px solid #dbe5ef; border-radius: 14px; overflow: hidden; }
 
         .orc-table-print { display: none; }
@@ -1457,72 +1533,73 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           .orc-page { padding: 0 !important; }
           .no-print { display: none !important; }
           * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          @page { size: A4; margin: 6mm; }
+          @page { size: A4; margin: 4mm; }
 
           .orc-sheet {
             width: 100% !important;
             max-width: 100% !important;
             margin: 0 auto !important;
-            padding: 10px 12px 8px !important;
+            padding: 6px 8px 4px !important;
             border: 1px solid #dbe5ef !important;
-            border-radius: 14px !important;
+            border-radius: 10px !important;
             box-shadow: none !important;
           }
 
-          .orc-hero { grid-template-columns: minmax(0, 1fr) auto !important; padding: 10px 12px !important; margin-bottom: 8px !important; }
-          .orc-hero-logo { width: 64px !important; height: 64px !important; }
-          .orc-hero-brand h1 { font-size: 20px !important; }
-          .orc-hero-brand p { font-size: 11px !important; margin-top: 2px !important; }
-          .orc-qr-box img { width: 72px !important; height: 72px !important; }
-          .orc-hero-right { justify-self: end !important; }
-          .orc-hero-corner { align-items: flex-end !important; }
-          .orc-title-band { text-align: center !important; padding: 8px 8px 6px !important; margin-bottom: 6px !important; }
-          .orc-title-band h2 { font-size: 26px !important; }
-          .orc-kicker { font-size: 10px !important; margin-bottom: 4px !important; }
-          .orc-approval-status { margin-bottom: 6px !important; padding: 6px 10px !important; }
+          .orc-hero { grid-template-columns: minmax(0, 1fr) auto !important; padding: 6px 8px !important; margin-bottom: 4px !important; }
+          .orc-hero-logo { width: 52px !important; height: 52px !important; padding: 4px !important; }
+          .orc-hero-brand h1 { font-size: 16px !important; }
+          .orc-hero-brand p { font-size: 9px !important; margin-top: 1px !important; line-height: 1.2 !important; }
+          .orc-qr-box img { width: 56px !important; height: 56px !important; }
+          .orc-doc-pill { padding: 4px 8px !important; font-size: 9px !important; }
+          .orc-title-band { text-align: center !important; padding: 4px 6px 3px !important; margin-bottom: 4px !important; }
+          .orc-title-band h2 { font-size: 20px !important; }
+          .orc-kicker { font-size: 8px !important; margin-bottom: 2px !important; }
+          .orc-approval-status { margin-bottom: 4px !important; padding: 4px 8px !important; font-size: 10px !important; }
 
-          .orc-info { grid-template-columns: 1.25fr 1fr 1fr 1fr 1fr !important; }
+          .orc-info { grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr 1fr !important; }
           .orc-info article {
-            min-height: 52px !important;
-            padding: 8px 10px !important;
+            min-height: 38px !important;
+            padding: 5px 7px !important;
             display: block !important;
             border-right: 1px solid #dbe5ef !important;
             border-bottom: none !important;
           }
-          .orc-info span { font-size: 10px !important; margin-bottom: 2px !important; }
-          .orc-info strong { font-size: 13px !important; }
+          .orc-info span { font-size: 8px !important; margin-bottom: 1px !important; }
+          .orc-info strong { font-size: 11px !important; }
+          .orc-info em { font-size: 9px !important; padding: 2px 6px !important; margin-left: 4px !important; }
+          .orc-info-detail { font-size: 8.5px !important; margin-top: 3px !important; line-height: 1.25 !important; }
           .orc-info article:last-child { border-right: 0 !important; }
-          .orc-client-extra { margin-top: 6px !important; gap: 6px !important; }
-          .orc-client-extra span { font-size: 11px !important; padding: 5px 8px !important; }
 
-          .orc-table-screen { margin-top: 8px !important; }
-          .orc-thead { padding: 8px 12px !important; font-size: 11px !important; }
-          .orc-row { padding: 8px 12px !important; }
+          .orc-table-screen { margin-top: 4px !important; }
+          .orc-thead { padding: 4px 6px !important; font-size: 9px !important; }
+          .orc-row { padding: 3px 6px !important; }
+          .orc-index { width: 24px !important; height: 24px !important; font-size: 10px !important; border-radius: 8px !important; }
+          .orc-desc strong { font-size: 11px !important; }
+          .orc-desc small { font-size: 9px !important; margin-top: 1px !important; }
+          .orc-unit span { font-size: 9px !important; padding: 2px 8px !important; }
+          .orc-center, .orc-money { font-size: 10px !important; }
+          .orc-line-total { font-size: 12px !important; }
 
           .orc-footer {
-            grid-template-columns: 38% 30% 32% !important;
-            gap: 8px !important;
-            margin-top: 8px !important;
+            grid-template-columns: 36% 30% 34% !important;
+            gap: 5px !important;
+            margin-top: 5px !important;
             break-inside: avoid;
             page-break-inside: avoid;
           }
-          .orc-notes, .orc-total-card, .orc-pay { padding: 10px !important; border-radius: 10px !important; }
-          .orc-notes { min-width: 0 !important; break-inside: avoid; page-break-inside: avoid; }
-          .orc-obs-texto { font-size: 11px !important; line-height: 1.45 !important; }
-          .orc-total-card { min-width: 0 !important; break-inside: avoid; page-break-inside: avoid; }
-          .orc-total-card div { font-size: 12px !important; padding: 3px 0 !important; }
-          .orc-grand { padding: 8px 8px !important; margin-top: 4px !important; }
-          .orc-grand-label { font-size: 13px !important; }
-          .orc-grand-value { font-size: 15px !important; max-width: 62% !important; }
-          .orc-pay { break-inside: avoid; page-break-inside: avoid; }
-          .orc-pay h3 { font-size: 12px !important; margin-bottom: 6px !important; }
-          .orc-pay-badges { gap: 4px !important; flex-direction: column !important; align-items: stretch !important; }
-          .orc-pay-badge { font-size: 10px !important; padding: 4px 8px !important; justify-content: center !important; }
+          .orc-notes, .orc-total-card, .orc-pay { padding: 6px !important; border-radius: 8px !important; }
+          .orc-notes h3, .orc-pay h3 { font-size: 10px !important; margin-bottom: 4px !important; }
+          .orc-obs-texto { font-size: 9px !important; line-height: 1.35 !important; }
+          .orc-total-card div { font-size: 10px !important; padding: 2px 0 !important; }
+          .orc-grand { padding: 5px 6px !important; margin-top: 2px !important; }
+          .orc-grand-label { font-size: 10px !important; }
+          .orc-grand-value { font-size: 12px !important; max-width: 62% !important; }
+          .orc-pay-badge { font-size: 8px !important; padding: 2px 6px !important; }
 
           .orc-thead { display: grid !important; }
           .orc-row { display: grid !important; }
-          .orc-thead:not(.orc-thead-m2-cliente) { grid-template-columns: 70px 1fr 80px 90px 150px 170px !important; }
-          .orc-row:not(.orc-row-m2-cliente) { grid-template-columns: 70px 1fr 80px 90px 150px 170px !important; }
+          .orc-thead:not(.orc-thead-m2-cliente) { grid-template-columns: 44px 1fr 52px 62px 88px 92px !important; column-gap: 4px !important; }
+          .orc-row:not(.orc-row-m2-cliente) { grid-template-columns: 44px 1fr 52px 62px 88px 92px !important; column-gap: 4px !important; }
           .orc-thead-m2-cliente, .orc-row-m2-cliente { grid-template-columns: minmax(0, 1fr) 180px !important; }
           .orc-row > div:nth-child(n+3) { grid-column: auto !important; }
           .orc-line-total { text-align: right !important; font-size: 16px !important; }

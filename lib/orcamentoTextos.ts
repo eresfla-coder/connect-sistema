@@ -43,11 +43,10 @@ export function tabelaOrcamentoSimplificadaCliente(
 }
 
 export function orcamentoDeveOcultarM2Cliente(
-  itens: Array<{ tipoCalculo?: string }>,
+  _itens: Array<{ tipoCalculo?: string }>,
   flagManual?: boolean,
 ) {
-  if (flagManual) return true
-  return itens.some((item) => itemOrcamentoOcultarDetalheClienteM2(item))
+  return Boolean(flagManual)
 }
 
 /** Corrige "% duplicado" e parágrafos colados ao exibir observação no PDF. */
