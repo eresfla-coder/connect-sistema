@@ -31,8 +31,30 @@ type MenuItem = {
 const ORCAMENTOS_KEY = "connect_orcamentos_salvos";
 const OS_KEY = "connect_ordens_servico_salvas";
 const FINANCEIRO_KEY = "connect_financeiro_titulos";
+const ORCAMENTOS_DELETED_PREFIX = "connect_orcamentos_deleted_";
 const WHATSAPP_SUPORTE = "5584992181399";
 const THEME_KEY = "connect_theme";
+
+function lerDeletedOrcamentosIds(userId?: string | null) {
+  try {
+    const raw = localStorage.getItem(`${ORCAMENTOS_DELETED_PREFIX}${userId || "anon"}`);
+    const lista = raw ? (JSON.parse(raw) as string[]) : [];
+    return new Set(lista.map((item) => String(item)));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function contarItensUnicos(lista: unknown[], deletedIds?: Set<string>) {
+  if (!Array.isArray(lista)) return 0;
+  const ids = new Set<string>();
+  for (const item of lista) {
+    const id = String((item as { id?: unknown })?.id ?? "");
+    if (!id || deletedIds?.has(id)) continue;
+    ids.add(id);
+  }
+  return ids.size;
+}
 
 async function obterEmailLogadoPainel(): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -198,38 +220,40 @@ export default function PainelLayout({
   }, [isMobile, menuAberto]);
 
   useEffect(() => {
-    function atualizarBadges() {
+    let ativo = true;
+
+    async function atualizarBadges() {
+      const { obterUserIdPainel, lerLocalStorageUsuario } = await import("@/lib/connect-user-storage");
+      const userId = await obterUserIdPainel();
+      if (!ativo) return;
+
+      const deletedIds = lerDeletedOrcamentosIds(userId);
+
       try {
-        const salvos = localStorage.getItem(ORCAMENTOS_KEY);
-        const lista = salvos ? JSON.parse(salvos) : [];
-        setOrcamentosBadge(String(Array.isArray(lista) ? lista.length : 0));
+        const lista = lerLocalStorageUsuario<unknown[]>(ORCAMENTOS_KEY, userId, []);
+        setOrcamentosBadge(String(contarItensUnicos(lista, deletedIds)));
       } catch {
         setOrcamentosBadge("0");
       }
 
       try {
-        const salvos = localStorage.getItem(OS_KEY);
-        const lista = salvos ? JSON.parse(salvos) : [];
-        setOsBadge(String(Array.isArray(lista) ? lista.length : 0));
+        const lista = lerLocalStorageUsuario<unknown[]>(OS_KEY, userId, []);
+        setOsBadge(String(contarItensUnicos(lista)));
       } catch {
         setOsBadge("0");
       }
 
       try {
-        const rawOrc = localStorage.getItem(ORCAMENTOS_KEY);
+        const orcs = lerLocalStorageUsuario<unknown[]>(ORCAMENTOS_KEY, userId, []);
         const rawFin = localStorage.getItem(FINANCEIRO_KEY);
-        const orcs = rawOrc ? JSON.parse(rawOrc) : [];
         const fins = rawFin ? JSON.parse(rawFin) : [];
         const pendentes = Array.isArray(orcs)
-          ? orcs.filter(
-              (o: any) =>
-                !String(o?.status || "")
-                  .toLowerCase()
-                  .includes("aprov") &&
-                !String(o?.status || "")
-                  .toLowerCase()
-                  .includes("cancel"),
-            ).length
+          ? orcs.filter((o: any) => {
+              const id = String(o?.id ?? "");
+              if (!id || deletedIds.has(id)) return false;
+              const status = String(o?.status || "").toLowerCase();
+              return !status.includes("aprov") && !status.includes("cancel");
+            }).length
           : 0;
         const abertos = Array.isArray(fins)
           ? fins.filter(
@@ -245,15 +269,17 @@ export default function PainelLayout({
       }
     }
 
-    atualizarBadges();
-    window.addEventListener("storage", atualizarBadges);
-    window.addEventListener("connect-data-change", atualizarBadges);
-    window.addEventListener("connect-local-saved", atualizarBadges);
+    void atualizarBadges();
+    const onBadges = () => void atualizarBadges();
+    window.addEventListener("storage", onBadges);
+    window.addEventListener("connect-data-change", onBadges);
+    window.addEventListener("connect-local-saved", onBadges);
 
     return () => {
-      window.removeEventListener("storage", atualizarBadges);
-      window.removeEventListener("connect-data-change", atualizarBadges);
-      window.removeEventListener("connect-local-saved", atualizarBadges);
+      ativo = false;
+      window.removeEventListener("storage", onBadges);
+      window.removeEventListener("connect-data-change", onBadges);
+      window.removeEventListener("connect-local-saved", onBadges);
     };
   }, []);
 
