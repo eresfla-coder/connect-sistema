@@ -611,6 +611,17 @@ function calcularMetragem(largura?: number, altura?: number) {
   return Number((Number(largura || 0) * Number(altura || 0)).toFixed(4))
 }
 
+function parseQuantidadeTextoOrcamento(valor: string) {
+  const n = Number(String(valor || '').replace(/\D/g, ''))
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function resolverValorUnitarioAdicionar(texto: string, fallback: number) {
+  const bruto = String(texto || '').trim()
+  if (!bruto) return fallback
+  const n = textoParaNumeroDecimal(bruto)
+  return Number.isFinite(n) && n >= 0 ? n : fallback
+}
 
 function calcularTotalItem(item: ItemOrcamento) {
   if (item.tipoCalculo === 'm2') {
@@ -1056,6 +1067,9 @@ export default function OrcamentoPage() {
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
   const [produtoSelecionadoId, setProdutoSelecionadoId] = useState<number | null>(null)
   const [quantidade, setQuantidade] = useState(1)
+  const [quantidadeTexto, setQuantidadeTexto] = useState('1')
+  const [valorUnitarioTexto, setValorUnitarioTexto] = useState('')
+  const [qtdRascunhoItem, setQtdRascunhoItem] = useState<Record<number, string>>({})
   const [pesoInput, setPesoInput] = useState('')
 
   const [modoItem, setModoItem] = useState<TipoCadastroProduto>('produto')
@@ -2384,6 +2398,8 @@ export default function OrcamentoPage() {
   function limparCamposItem() {
     setProdutoBusca('')
     setQuantidade(0)
+    setQuantidadeTexto('1')
+    setValorUnitarioTexto('')
     setPesoInput('')
     setProdutoSelecionadoId(null)
     setModoItem('produto')
@@ -2548,11 +2564,15 @@ export default function OrcamentoPage() {
       setLarguraItem(Number(ultimoM2?.largura || 0))
       setAlturaItem(Number(ultimoM2?.altura || 0))
       setQuantidade(1)
+      setQuantidadeTexto('1')
+      setValorUnitarioTexto(formatarDecimalVisual(produto.valor))
       return
     }
 
     if (produto.tipoCalculo === 'peso') {
       setQuantidade(0)
+      setQuantidadeTexto('')
+      setValorUnitarioTexto(formatarDecimalVisual(produto.valor))
       setPesoInput('')
       setLarguraItem(0)
       setAlturaItem(0)
@@ -2560,6 +2580,8 @@ export default function OrcamentoPage() {
     }
 
     setQuantidade(1)
+    setQuantidadeTexto('1')
+    setValorUnitarioTexto(formatarDecimalVisual(produto.valor))
     setLarguraItem(0)
     setAlturaItem(0)
   }
@@ -2648,6 +2670,7 @@ export default function OrcamentoPage() {
 
     if (tipoCalculoProduto !== 'm2') {
       let quantidadeFinal = quantidade
+      const valorFinal = resolverValorUnitarioAdicionar(valorUnitarioTexto, produto.valor)
 
       if (tipoCalculoProduto === 'peso') {
         const pesoKg = textoPesoParaKg(pesoInput)
@@ -2658,9 +2681,12 @@ export default function OrcamentoPage() {
         }
 
         quantidadeFinal = pesoKg
-      } else if (!quantidade || quantidade <= 0) {
-        notificar('Digite uma quantidade válida.', 'error')
-        return
+      } else {
+        quantidadeFinal = parseQuantidadeTextoOrcamento(quantidadeTexto)
+        if (!quantidadeFinal) {
+          notificar('Digite uma quantidade válida.', 'error')
+          return
+        }
       }
 
       if (editandoId !== null) {
@@ -2671,7 +2697,7 @@ export default function OrcamentoPage() {
                   ...item,
                   nome: produto.nome,
                   quantidade: quantidadeFinal,
-                  valor: Number(item.valor || produto.valor),
+                  valor: valorFinal,
                   tipoCalculo: tipoCalculoProduto,
                   tipoCadastro: tipoCadastroProduto,
                   mostrarCliente: item.mostrarCliente !== false,
@@ -2690,7 +2716,7 @@ export default function OrcamentoPage() {
           id: Date.now(),
           nome: produto.nome,
           quantidade: quantidadeFinal,
-          valor: produto.valor,
+          valor: valorFinal,
           mostrarCliente: true,
           tipoCalculo: tipoCalculoProduto,
           tipoCadastro: tipoCadastroProduto,
@@ -2728,8 +2754,8 @@ export default function OrcamentoPage() {
             ? {
                 ...item,
                 nome: produto.nome,
-                quantidade: Math.max(1, Number(quantidade || 1)),
-                valor: Number(item.valorM2 ?? item.valor ?? produto.valor),
+                quantidade: Math.max(1, parseQuantidadeTextoOrcamento(quantidadeTexto) || Number(quantidade || 1)),
+                valor: resolverValorUnitarioAdicionar(valorUnitarioTexto, Number(item.valorM2 ?? item.valor ?? produto.valor)),
                 tipoCalculo: 'm2',
                 tipoCadastro: tipoCadastroProduto,
                 mostrarCliente: item.mostrarCliente !== false,
@@ -2737,7 +2763,7 @@ export default function OrcamentoPage() {
                 largura: larguraItem,
                 altura: alturaItem,
                 metragem,
-                valorM2: Number(item.valorM2 ?? item.valor ?? produto.valor),
+                valorM2: resolverValorUnitarioAdicionar(valorUnitarioTexto, Number(item.valorM2 ?? item.valor ?? produto.valor)),
               }
             : item
         )
@@ -2754,7 +2780,7 @@ export default function OrcamentoPage() {
         )
 
         if (existente) {
-          const acrescentar = Math.max(1, Number(quantidade || 1))
+          const acrescentar = Math.max(1, parseQuantidadeTextoOrcamento(quantidadeTexto) || Number(quantidade || 1))
           return atual.map((item) =>
             item.id === existente.id
               ? { ...item, quantidade: Math.max(1, Number(item.quantidade || 1) + acrescentar) }
@@ -2765,8 +2791,8 @@ export default function OrcamentoPage() {
         const novoItem: ItemOrcamento = {
           id: Date.now(),
           nome: produto.nome,
-          quantidade: Math.max(1, Number(quantidade || 1)),
-          valor: produto.valor,
+          quantidade: Math.max(1, parseQuantidadeTextoOrcamento(quantidadeTexto) || Number(quantidade || 1)),
+          valor: resolverValorUnitarioAdicionar(valorUnitarioTexto, produto.valor),
           mostrarCliente: true,
           tipoCalculo: 'm2',
           tipoCadastro: tipoCadastroProduto,
@@ -2774,7 +2800,7 @@ export default function OrcamentoPage() {
           largura: larguraItem,
           altura: alturaItem,
           metragem,
-          valorM2: produto.valor,
+          valorM2: resolverValorUnitarioAdicionar(valorUnitarioTexto, produto.valor),
         }
         return [...atual, novoItem]
       })
@@ -2795,9 +2821,12 @@ export default function OrcamentoPage() {
       setLarguraItem(Number(item.largura || 0))
       setAlturaItem(Number(item.altura || 0))
       setQuantidade(Math.max(1, Number(item.quantidade || 1)))
+      setQuantidadeTexto(String(Math.max(1, Number(item.quantidade || 1))))
     } else {
       setModoItem(item.tipoCadastro === 'servico' ? 'servico' : 'produto')
       setQuantidade(item.quantidade)
+      setQuantidadeTexto(String(item.quantidade || '1'))
+      setValorUnitarioTexto(formatarDecimalVisual(Number(item.valor || 0)))
       setPesoInput(item.tipoCalculo === 'peso' ? formatarPesoKgVisual(item.quantidade) : '')
       setLarguraItem(0)
       setAlturaItem(0)
@@ -2808,6 +2837,18 @@ export default function OrcamentoPage() {
     setItens((atual) => atual.filter((item) => item.id !== id))
     if (editandoId === id) limparCamposItem()
     notificar('Item removido.', 'info')
+  }
+
+  function finalizarQtdItemLista(id: number, valorBruto?: string) {
+    const bruto = valorBruto ?? qtdRascunhoItem[id]
+    if (bruto === undefined) return
+    const novaQtd = parseQuantidadeTextoOrcamento(bruto)
+    if (novaQtd > 0) alterarQuantidadeItem(id, novaQtd)
+    setQtdRascunhoItem((atual) => {
+      const proximo = { ...atual }
+      delete proximo[id]
+      return proximo
+    })
   }
 
   function alterarQuantidadeItem(id: number, novaQtd: number) {
@@ -2833,6 +2874,11 @@ export default function OrcamentoPage() {
   }
 
   function ajustarQuantidadeItem(id: number, direcao: 1 | -1) {
+    setQtdRascunhoItem((atual) => {
+      const proximo = { ...atual }
+      delete proximo[id]
+      return proximo
+    })
     setItens((atual) =>
       atual.map((item) => {
         if (item.id !== id) return item
@@ -4329,6 +4375,8 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                         setProdutoSelecionadoId(null)
                         setProdutoBusca('')
                         setQuantidade(key === 'peso' ? 0 : 1)
+                        setQuantidadeTexto(key === 'peso' ? '' : '1')
+                        setValorUnitarioTexto('')
                         setPesoInput('')
                         setLarguraItem(0)
                         setAlturaItem(0)
@@ -4382,13 +4430,20 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                       style={{ ...inputStyle, minWidth: 0 }}
                     />
                     <input
-                      type="number"
+                      type="text"
                       inputMode="numeric"
-                      min={1}
-                      value={Math.max(1, Number(quantidade || 1))}
-                      onChange={(e) => setQuantidade(Math.max(1, Number(e.target.value || 1)))}
+                      value={quantidadeTexto}
+                      onChange={(e) => setQuantidadeTexto(e.target.value.replace(/\D/g, ''))}
                       placeholder="Qtd"
-                      style={{ ...inputStyle, minWidth: 0 }}
+                      style={{ ...inputStyle, minWidth: 0, fontSize: isMobile ? 16 : undefined }}
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={valorUnitarioTexto}
+                      onChange={(e) => setValorUnitarioTexto(e.target.value)}
+                      placeholder="R$/m²"
+                      style={{ ...inputStyle, minWidth: 0, fontSize: isMobile ? 16 : undefined }}
                     />
                     <button
                       onClick={confirmarItemSelecionado}
@@ -4406,14 +4461,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                     </button>
                   </div>
                 ) : (
-                  <div
-                    style={{
-                      display: 'grid',
-                      gap: 8,
-                      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(110px, 140px) minmax(150px, auto)',
-                      alignItems: 'stretch',
-                    }}
-                  >
+                  <div style={{ display: 'grid', gap: 10 }}>
                     <input
                       value={produtoBusca}
                       onChange={(e) => {
@@ -4423,39 +4471,80 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                       }}
                       onFocus={() => setMostrarBuscaProduto(true)}
                       placeholder={filtroItem === 'servico' ? 'Pesquisar serviço...' : filtroItem === 'peso' ? 'Pesquisar produto por kg/peso...' : 'Pesquisar produto...'}
-                      style={{ ...inputStyle, minWidth: 0 }}
+                      style={{ ...inputStyle, minWidth: 0, fontSize: isMobile ? 16 : undefined }}
                     />
-                    <input
-                      type={usaCampoPeso ? 'text' : 'number'}
-                      inputMode={usaCampoPeso ? 'decimal' : 'numeric'}
-                      min={usaCampoPeso ? undefined : 1}
-                      value={usaCampoPeso ? pesoInput : (quantidade || '')}
-                      onChange={(e) => {
-                        if (usaCampoPeso) {
-                          const valor = tratarPesoInput(e.target.value)
-                          setPesoInput(valor)
-                          setQuantidade(textoPesoParaKg(valor))
-                          return
-                        }
 
-                        setQuantidade(Number(e.target.value || 0))
-                      }}
-                      placeholder={usaCampoPeso ? 'Ex: 0,65 ou 650' : modoItem === 'servico' ? 'Qtd.' : 'Qtd.'}
-                      style={{ ...inputStyle, minWidth: 0 }}
-                    />
-                    <button
-                      onClick={confirmarItemSelecionado}
-                      style={{
-                        ...buttonBase,
-                        background: 'linear-gradient(135deg,#22c55e,#16a34a)',
-                        color: '#fff',
-                        minHeight: 44,
-                        height: 44,
-                        width: isMobile ? '100%' : 'auto',
-                      }}
-                    >
-                      {editandoId !== null ? 'Atualizar item' : 'Adicionar item'}
-                    </button>
+                    {produtoSelecionado ? (
+                      <div
+                        style={{
+                          display: 'grid',
+                          gap: 10,
+                          gridTemplateColumns: isMobile ? '1fr' : 'minmax(120px, 0.7fr) minmax(160px, 1fr) auto',
+                          alignItems: 'end',
+                        }}
+                      >
+                        {usaCampoPeso ? (
+                          <div>
+                            <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>Peso</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={pesoInput}
+                              onChange={(e) => {
+                                const valor = tratarPesoInput(e.target.value)
+                                setPesoInput(valor)
+                                setQuantidade(textoPesoParaKg(valor))
+                              }}
+                              placeholder="Ex: 0,65 ou 650"
+                              style={{ ...inputStyle, width: '100%', fontSize: isMobile ? 16 : undefined }}
+                            />
+                          </div>
+                        ) : (
+                          <div>
+                            <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>Quantidade</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={quantidadeTexto}
+                              onChange={(e) => setQuantidadeTexto(e.target.value.replace(/\D/g, ''))}
+                              placeholder="1"
+                              style={{ ...inputStyle, width: '100%', fontSize: isMobile ? 16 : undefined }}
+                            />
+                          </div>
+                        )}
+
+                        <div>
+                          <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>R$ Unitário</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={valorUnitarioTexto}
+                            onChange={(e) => setValorUnitarioTexto(e.target.value)}
+                            placeholder="0,00"
+                            style={{ ...inputStyle, width: '100%', fontSize: isMobile ? 16 : undefined }}
+                          />
+                        </div>
+
+                        <button
+                          onClick={confirmarItemSelecionado}
+                          style={{
+                            ...buttonBase,
+                            background: 'linear-gradient(135deg,#22c55e,#16a34a)',
+                            color: '#fff',
+                            minHeight: 48,
+                            height: isMobile ? 48 : 44,
+                            width: isMobile ? '100%' : 'auto',
+                            gridColumn: isMobile ? '1 / -1' : undefined,
+                          }}
+                        >
+                          {editandoId !== null ? 'Atualizar item' : 'Adicionar item'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>
+                        Selecione o produto para informar quantidade e preço antes de adicionar.
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -4622,20 +4711,37 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                             </div>
                           </div>
                         ) : (
-                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'minmax(168px, 0.9fr) 140px 1fr', gap: 8 }}>
+                          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: isMobile ? '1fr' : 'minmax(168px, 0.9fr) 1fr 1fr', alignItems: 'end' }}>
                             <div>
                               <label style={{ ...labelStyle, marginBottom: 4, fontSize: 12 }}>{item.tipoCalculo === 'peso' ? 'Peso' : item.tipoCadastro === 'servico' ? 'Qtd. serviço' : 'Qtd'}</label>
                               <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
                                 <input
-                                  type={item.tipoCalculo === 'peso' ? 'text' : 'number'}
+                                  type={item.tipoCalculo === 'peso' ? 'text' : 'text'}
                                   inputMode={item.tipoCalculo === 'peso' ? 'decimal' : 'numeric'}
-                                  min={item.tipoCalculo === 'peso' ? undefined : 1}
-                                  value={item.tipoCalculo === 'peso' ? formatarPesoCampo(item.quantidade) : item.quantidade}
-                                  onChange={(e) => alterarQuantidadeItem(item.id, item.tipoCalculo === 'peso' ? textoPesoParaKg(e.target.value) : Number(e.target.value || 1))}
-                                  style={{ ...inputStyle, flex: 1, minWidth: 0, width: 'auto' }}
+                                  value={
+                                    item.tipoCalculo === 'peso'
+                                      ? formatarPesoCampo(item.quantidade)
+                                      : qtdRascunhoItem[item.id] ?? String(item.quantidade)
+                                  }
+                                  onChange={(e) => {
+                                    if (item.tipoCalculo === 'peso') {
+                                      alterarQuantidadeItem(item.id, textoPesoParaKg(e.target.value))
+                                      return
+                                    }
+                                    setQtdRascunhoItem((atual) => ({ ...atual, [item.id]: e.target.value.replace(/\D/g, '') }))
+                                  }}
+                                  onBlur={() => {
+                                    if (item.tipoCalculo !== 'peso') finalizarQtdItemLista(item.id)
+                                  }}
+                                  placeholder="1"
+                                  style={{ ...inputStyle, flex: 1, minWidth: 0, width: 'auto', fontSize: isMobile ? 16 : undefined }}
                                 />
-                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={qtdStepBtnPlus}>+</button>
-                                <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={qtdStepBtnMinus}>-</button>
+                                {item.tipoCalculo !== 'peso' ? (
+                                  <>
+                                    <button type="button" onClick={() => ajustarQuantidadeItem(item.id, 1)} style={qtdStepBtnPlus}>+</button>
+                                    <button type="button" onClick={() => ajustarQuantidadeItem(item.id, -1)} style={qtdStepBtnMinus}>-</button>
+                                  </>
+                                ) : null}
                               </div>
                             </div>
                             <div>
@@ -4645,7 +4751,7 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
                                 inputMode="decimal"
                                 value={formatarDecimalVisual(item.valor)}
                                 onChange={(e) => alterarValorItem(item.id, textoParaNumeroDecimal(e.target.value))}
-                                style={inputStyle}
+                                style={{ ...inputStyle, width: '100%', minWidth: 0, fontSize: isMobile ? 16 : undefined }}
                               />
                             </div>
                             <div>
