@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabase'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOsExcel } from '@/lib/export-modulos'
 import { lerLocalStorageUsuario, salvarLocalStorageUsuario } from '@/lib/connect-user-storage'
+import { lerOrcamentosPainelSync, salvarOrcamentosPainel } from '@/lib/orcamentos-local'
 import { carregarClientesPainelDetalhado } from '@/lib/clientes-painel'
 
 type Cliente = {
@@ -1402,15 +1403,8 @@ export default function OrdemServicoPage() {
       setClientes(lista.map((item, index) => normalizarCliente(item, index)))
     })
 
-    const orcSalvos = localStorage.getItem(ORCAMENTOS_KEY)
-    if (orcSalvos) {
-      try {
-        const listaOrc = JSON.parse(orcSalvos)
-        if (Array.isArray(listaOrc)) setOrcamentos(listaOrc)
-      } catch {
-        setOrcamentos([])
-      }
-    }
+    const listaOrc = lerOrcamentosPainelSync(userIdOsRef.current) as OrcamentoSalvo[]
+    setOrcamentos(listaOrc)
 
     return () => {
       authListener.subscription.unsubscribe()
@@ -1426,13 +1420,8 @@ export default function OrdemServicoPage() {
         setClientes(lista.map((item, index) => normalizarCliente(item, index)))
       })
 
-      try {
-        const orcSalvos = localStorage.getItem(ORCAMENTOS_KEY)
-        if (orcSalvos) {
-          const listaOrc = JSON.parse(orcSalvos)
-          if (Array.isArray(listaOrc)) setOrcamentos(listaOrc)
-        }
-      } catch {}
+      const listaOrc = lerOrcamentosPainelSync(userIdOsRef.current) as OrcamentoSalvo[]
+      setOrcamentos(listaOrc)
     }
 
     window.addEventListener('connect-cloud-hydrated', carregarDadosLocaisV78)
@@ -1643,7 +1632,7 @@ export default function OrdemServicoPage() {
     const orcAtualizados = orcamentos.map((item) => (item.id === orc.id ? { ...item, status: 'Convertido' } : item))
 
     setOrcamentos(orcAtualizados)
-    localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(orcAtualizados))
+    salvarOrcamentosPainel(userIdOsRef.current, orcAtualizados)
 
     alert('Orçamento importado para OS com sucesso.')
     setMostrarImportarOrcamento(false)
@@ -1762,7 +1751,7 @@ export default function OrdemServicoPage() {
       )
 
       setOrcamentos(orcAtualizados)
-      localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(orcAtualizados))
+      salvarOrcamentosPainel(userIdOsRef.current, orcAtualizados)
     }
 
     const { data: { session: sessOsDel } } = await supabase.auth.getSession()

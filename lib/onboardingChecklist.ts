@@ -1,3 +1,6 @@
+import { lerOrdensPainelSync, lerOrcamentosPainelSync } from '@/lib/orcamentos-local'
+import { obterUserIdPainelSync } from '@/lib/connect-user-storage'
+
 export type ChecklistItemId =
   | 'cliente'
   | 'proposta'
@@ -111,6 +114,7 @@ export function marcarTourVisto() {
 export function detectarMarcosChecklist(): ChecklistProgress {
   if (typeof window === 'undefined') return {}
   const detectado: ChecklistProgress = {}
+  const userId = obterUserIdPainelSync()
 
   try {
     const clientes = JSON.parse(localStorage.getItem('connect_clientes') || '[]')
@@ -120,26 +124,24 @@ export function detectarMarcosChecklist(): ChecklistProgress {
   } catch {}
 
   try {
-    const orcamentos = JSON.parse(localStorage.getItem('connect_orcamentos_salvos') || '[]')
-    if (Array.isArray(orcamentos)) {
-      if (orcamentos.some((o: { tipoDocumento?: string }) => String(o?.tipoDocumento || '') === 'proposta_comercial')) {
-        detectado.proposta = true
-      }
-      if (
-        orcamentos.some(
-          (o: { tipoDocumento?: string; status?: string }) =>
-            String(o?.tipoDocumento || '') === 'proposta_comercial' &&
-            ['aprovado', 'convertido'].includes(String(o?.status || '').toLowerCase()),
-        )
-      ) {
-        detectado.aprovacao = true
-      }
+    const orcamentos = lerOrcamentosPainelSync(userId)
+    if (orcamentos.some((o) => String(o.tipoDocumento || '') === 'proposta_comercial')) {
+      detectado.proposta = true
+    }
+    if (
+      orcamentos.some(
+        (o) =>
+          String(o.tipoDocumento || '') === 'proposta_comercial' &&
+          ['aprovado', 'convertido'].includes(String(o.status || '').toLowerCase()),
+      )
+    ) {
+      detectado.aprovacao = true
     }
   } catch {}
 
   try {
-    const os = JSON.parse(localStorage.getItem('connect_ordens_servico_salvas') || '[]')
-    if (Array.isArray(os) && os.length > 0) detectado.os = true
+    const os = lerOrdensPainelSync(userId)
+    if (os.length > 0) detectado.os = true
   } catch {}
 
   return detectado

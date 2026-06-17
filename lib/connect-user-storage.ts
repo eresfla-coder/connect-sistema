@@ -1,6 +1,8 @@
 import { supabase } from '@/lib/supabase-browser'
 import { isDemoMode } from '@/lib/connect-demo'
 
+const PAINEL_USER_ID_KEY = 'connect_painel_user_id'
+
 export function storageKeyUsuario(baseKey: string, userId?: string | null) {
   if (!userId) return baseKey
   return `${baseKey}_${userId}`
@@ -26,9 +28,31 @@ function listaPareceDemo(lista: unknown): boolean {
 export async function obterUserIdPainel(): Promise<string | null> {
   try {
     const { data: { session } } = await supabase.auth.getSession()
-    if (session?.user?.id) return session.user.id
+    if (session?.user?.id) {
+      cachearUserIdPainel(session.user.id)
+      return session.user.id
+    }
     const { data: { user } } = await supabase.auth.getUser()
+    if (user?.id) cachearUserIdPainel(user.id)
     return user?.id || null
+  } catch {
+    return obterUserIdPainelSync()
+  }
+}
+
+export function cachearUserIdPainel(userId: string) {
+  if (typeof window === 'undefined') return
+  try {
+    sessionStorage.setItem(PAINEL_USER_ID_KEY, userId)
+  } catch {
+    /* private mode */
+  }
+}
+
+export function obterUserIdPainelSync(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return sessionStorage.getItem(PAINEL_USER_ID_KEY) || null
   } catch {
     return null
   }

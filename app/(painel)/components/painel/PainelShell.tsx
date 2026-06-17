@@ -12,6 +12,12 @@ import dynamic from "next/dynamic";
 import ConnectToastProvider from "@/components/ui/ConnectToast";
 import WhatsAppFallbackBar from "@/components/WhatsAppFallbackBar";
 import { abrirWhatsappUrl, montarUrlWhatsapp, WHATSAPP_FALLBACK_EVENT } from "@/lib/abrirExterno";
+import {
+  contarOrcamentosPainelSync,
+  contarOrdensPainelSync,
+  lerOrcamentosPainelSync,
+} from "@/lib/orcamentos-local";
+import { obterUserIdPainel } from "@/lib/connect-user-storage";
 
 const TrialBanner = dynamic(() => import("@/components/assinatura/TrialBanner"), { ssr: false });
 
@@ -28,33 +34,9 @@ type MenuItem = {
   badge?: string;
 };
 
-const ORCAMENTOS_KEY = "connect_orcamentos_salvos";
-const OS_KEY = "connect_ordens_servico_salvas";
 const FINANCEIRO_KEY = "connect_financeiro_titulos";
-const ORCAMENTOS_DELETED_PREFIX = "connect_orcamentos_deleted_";
 const WHATSAPP_SUPORTE = "5584992181399";
 const THEME_KEY = "connect_theme";
-
-function lerDeletedOrcamentosIds(userId?: string | null) {
-  try {
-    const raw = localStorage.getItem(`${ORCAMENTOS_DELETED_PREFIX}${userId || "anon"}`);
-    const lista = raw ? (JSON.parse(raw) as string[]) : [];
-    return new Set(lista.map((item) => String(item)));
-  } catch {
-    return new Set<string>();
-  }
-}
-
-function contarItensUnicos(lista: unknown[], deletedIds?: Set<string>) {
-  if (!Array.isArray(lista)) return 0;
-  const ids = new Set<string>();
-  for (const item of lista) {
-    const id = String((item as { id?: unknown })?.id ?? "");
-    if (!id || deletedIds?.has(id)) continue;
-    ids.add(id);
-  }
-  return ids.size;
-}
 
 async function obterEmailLogadoPainel(): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -223,38 +205,20 @@ export default function PainelLayout({
     let ativo = true;
 
     async function atualizarBadges() {
-      const { obterUserIdPainel, lerLocalStorageUsuario } = await import("@/lib/connect-user-storage");
       const userId = await obterUserIdPainel();
       if (!ativo) return;
 
-      const deletedIds = lerDeletedOrcamentosIds(userId);
+      setOrcamentosBadge(String(contarOrcamentosPainelSync(userId)));
+      setOsBadge(String(contarOrdensPainelSync(userId)));
 
       try {
-        const lista = lerLocalStorageUsuario<unknown[]>(ORCAMENTOS_KEY, userId, []);
-        setOrcamentosBadge(String(contarItensUnicos(lista, deletedIds)));
-      } catch {
-        setOrcamentosBadge("0");
-      }
-
-      try {
-        const lista = lerLocalStorageUsuario<unknown[]>(OS_KEY, userId, []);
-        setOsBadge(String(contarItensUnicos(lista)));
-      } catch {
-        setOsBadge("0");
-      }
-
-      try {
-        const orcs = lerLocalStorageUsuario<unknown[]>(ORCAMENTOS_KEY, userId, []);
+        const orcs = lerOrcamentosPainelSync(userId);
         const rawFin = localStorage.getItem(FINANCEIRO_KEY);
         const fins = rawFin ? JSON.parse(rawFin) : [];
-        const pendentes = Array.isArray(orcs)
-          ? orcs.filter((o: any) => {
-              const id = String(o?.id ?? "");
-              if (!id || deletedIds.has(id)) return false;
-              const status = String(o?.status || "").toLowerCase();
-              return !status.includes("aprov") && !status.includes("cancel");
-            }).length
-          : 0;
+        const pendentes = orcs.filter((o) => {
+          const status = String(o?.status || "").toLowerCase();
+          return !status.includes("aprov") && !status.includes("cancel");
+        }).length;
         const abertos = Array.isArray(fins)
           ? fins.filter(
               (f: any) =>

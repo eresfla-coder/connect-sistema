@@ -26,7 +26,7 @@ export function useAssinatura() {
         return
       }
 
-      const docs = contarDocumentosLocal()
+      const docs = contarDocumentosLocal(session?.session?.user?.id)
       const response = await fetch('/api/assinatura/status', {
         headers: {
           Authorization: `Bearer ${token}`,

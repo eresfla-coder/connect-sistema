@@ -7,6 +7,8 @@ import PainelShell from './components/painel/PainelShell'
 import ConnectLoading from '@/components/ui/ConnectLoading'
 import { acessoBloqueado, avisoTrial, dataMaisDias, emailDoUsuarioAuth, isUsuarioAdmin, normalizarStatus } from '@/lib/access'
 import { installDemoGuard, isDemoMode, logContextoAcessoSeguro, marcarSessaoReal, sairDemoMode, seedDemoData } from '@/lib/connect-demo'
+import { cachearUserIdPainel } from '@/lib/connect-user-storage'
+import { limparChavesGlobaisAposMigracao } from '@/lib/orcamentos-local'
 
 type PerfilPainel = {
   id: string
@@ -78,6 +80,8 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
         if (session?.user) {
           marcarSessaoReal()
           sairDemoMode()
+          cachearUserIdPainel(session.user.id)
+          limparChavesGlobaisAposMigracao(session.user.id)
 
           const user = session.user
           const emailNormalizado = emailDoUsuarioAuth(user)

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { contarOrcamentosPainelSync, contarOrdensPainelSync } from '@/lib/orcamentos-local'
+import { obterUserIdPainel, obterUserIdPainelSync } from '@/lib/connect-user-storage'
 
 type MenuItem = {
   nome: string
@@ -61,27 +63,20 @@ export default function PainelShell({
   }, [isMobile, menuAberto])
 
   useEffect(() => {
-    function atualizarBadges() {
-      try {
-        const salvosOrc = localStorage.getItem('connect_orcamentos_salvos')
-        const listaOrc = salvosOrc ? JSON.parse(salvosOrc) : []
-        setOrcamentosBadge(String(Array.isArray(listaOrc) ? listaOrc.length : 0))
-      } catch {
-        setOrcamentosBadge('0')
-      }
-
-      try {
-        const salvosOs = localStorage.getItem('connect_ordens_servico_salvas')
-        const listaOs = salvosOs ? JSON.parse(salvosOs) : []
-        setOsBadge(String(Array.isArray(listaOs) ? listaOs.length : 0))
-      } catch {
-        setOsBadge('0')
-      }
+    async function atualizarBadges() {
+      const userId = (await obterUserIdPainel()) ?? obterUserIdPainelSync()
+      setOrcamentosBadge(String(contarOrcamentosPainelSync(userId)))
+      setOsBadge(String(contarOrdensPainelSync(userId)))
     }
 
-    atualizarBadges()
-    window.addEventListener('storage', atualizarBadges)
-    return () => window.removeEventListener('storage', atualizarBadges)
+    void atualizarBadges()
+    const onBadges = () => void atualizarBadges()
+    window.addEventListener('storage', onBadges)
+    window.addEventListener('connect-data-change', onBadges)
+    return () => {
+      window.removeEventListener('storage', onBadges)
+      window.removeEventListener('connect-data-change', onBadges)
+    }
   }, [])
 
   useEffect(() => {

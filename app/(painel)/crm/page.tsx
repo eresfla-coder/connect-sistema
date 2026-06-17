@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
+import { lerOrdensPainelSync, lerOrcamentosPainelSync } from '@/lib/orcamentos-local'
+import { lerLocalStorageUsuario, obterUserIdPainel, obterUserIdPainelSync } from '@/lib/connect-user-storage'
 
 type LeadStatus = 'quente' | 'acompanhar' | 'aguardando' | 'cobrar' | 'concluido'
 
@@ -30,8 +32,6 @@ type AcaoCRM = {
 }
 
 const CLIENTES_KEY = 'connect_clientes'
-const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
-const OS_KEY = 'connect_ordens_servico_salvas'
 const FINANCEIRO_KEY = 'connect_financeiro_titulos'
 
 function moeda(valor?: number | null) {
@@ -121,19 +121,22 @@ export default function CRMWhatsappPage() {
   const [busca, setBusca] = useState('')
 
   function carregar() {
-    setClientes(lerLista(CLIENTES_KEY))
-    setOrcamentos(lerLista(ORCAMENTOS_KEY))
-    setOrdens(lerLista(OS_KEY))
+    const userId = obterUserIdPainelSync()
+    setClientes(lerLocalStorageUsuario<ClienteCRM[]>(CLIENTES_KEY, userId, []))
+    setOrcamentos(lerOrcamentosPainelSync(userId))
+    setOrdens(lerOrdensPainelSync(userId))
     setFinanceiro(lerLista(FINANCEIRO_KEY))
   }
 
   useEffect(() => {
-    carregar()
+    void obterUserIdPainel().then(() => carregar())
     window.addEventListener('focus', carregar)
     window.addEventListener('storage', carregar)
+    window.addEventListener('connect-data-change', carregar)
     return () => {
       window.removeEventListener('focus', carregar)
       window.removeEventListener('storage', carregar)
+      window.removeEventListener('connect-data-change', carregar)
     }
   }, [])
 

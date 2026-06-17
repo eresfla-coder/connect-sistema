@@ -1,4 +1,6 @@
 import { isUsuarioAdmin, normalizarStatus, type PerfilAdminCheck } from '@/lib/access'
+import { contarDocumentosPainelSync } from '@/lib/orcamentos-local'
+import { obterUserIdPainelSync } from '@/lib/connect-user-storage'
 import {
   TRIAL_DIAS,
   normalizarRecorrencia,
@@ -81,18 +83,9 @@ const MODULO_RECURSO: Record<ModuloPremium, keyof RecursosPlano> = {
   pdf_premium: 'pdfPremium',
 }
 
-export function contarDocumentosLocal(): number {
+export function contarDocumentosLocal(userId?: string | null): number {
   if (typeof window === 'undefined') return 0
-  let total = 0
-  try {
-    const orc = JSON.parse(localStorage.getItem('connect_orcamentos_salvos') || '[]')
-    if (Array.isArray(orc)) total += orc.length
-  } catch {}
-  try {
-    const os = JSON.parse(localStorage.getItem('connect_ordens_servico_salvas') || '[]')
-    if (Array.isArray(os)) total += os.length
-  } catch {}
-  return total
+  return contarDocumentosPainelSync(userId ?? obterUserIdPainelSync())
 }
 
 export function diasRestantesDeData(dataIso?: string | null): number | null {

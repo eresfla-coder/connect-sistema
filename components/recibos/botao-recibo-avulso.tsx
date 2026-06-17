@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { lerOrdensPainelSync, lerOrcamentosPainelSync } from '@/lib/orcamentos-local'
+import { obterUserIdPainelSync } from '@/lib/connect-user-storage'
 
 type DadosRecibo = {
   nomeCliente?: string
@@ -86,8 +88,6 @@ type OrcamentoSalvo = {
 
 const CONFIG_KEY = 'connect_configuracoes'
 const RECIBO_VIEW_KEY = 'connect_recibo_visualizacao'
-const OS_KEY = 'connect_ordens_servico_salvas'
-const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
 const FORMAS_KEY = 'connect_formas_pagamento'
 const CLIENTES_KEY = 'connect_clientes'
 
@@ -145,10 +145,10 @@ function lerConfig(): ConfigType {
 
 function lerUltimaOS(): OrdemServico | null {
   try {
-    const raw = localStorage.getItem(OS_KEY)
-    const lista = raw ? JSON.parse(raw) : []
-    if (!Array.isArray(lista) || lista.length === 0) return null
-    return lista[0] || null
+    const lista = lerOrdensPainelSync(obterUserIdPainelSync())
+    if (!lista.length) return null
+    const ordenada = [...lista].sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    return (ordenada[0] || null) as OrdemServico
   } catch {
     return null
   }
@@ -156,10 +156,10 @@ function lerUltimaOS(): OrdemServico | null {
 
 function lerUltimoOrcamento(): OrcamentoSalvo | null {
   try {
-    const raw = localStorage.getItem(ORCAMENTOS_KEY)
-    const lista = raw ? JSON.parse(raw) : []
-    if (!Array.isArray(lista) || lista.length === 0) return null
-    return lista[0] || null
+    const lista = lerOrcamentosPainelSync(obterUserIdPainelSync())
+    if (!lista.length) return null
+    const ordenada = [...lista].sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    return (ordenada[0] || null) as OrcamentoSalvo
   } catch {
     return null
   }

@@ -26,6 +26,8 @@ import {
   telefoneCliente,
   type ClienteConnect,
 } from '@/lib/connect-supabase-direct'
+import { lerOrdensPainelSync, lerOrcamentosPainelSync } from '@/lib/orcamentos-local'
+import { obterUserIdPainel } from '@/lib/connect-user-storage'
 
 type Props = {
   clientId?: string
@@ -147,11 +149,12 @@ export default function FinanceiroModule({ embedded = false }: Props) {
 
   async function sincronizarAutomatico() {
     try {
-      const orcamentos = JSON.parse(localStorage.getItem('connect_orcamentos_salvos') || '[]')
-      const ordensServico = JSON.parse(localStorage.getItem('connect_ordens_servico_salvas') || '[]')
+      const userId = await obterUserIdPainel()
+      const orcamentos = lerOrcamentosPainelSync(userId)
+      const ordensServico = lerOrdensPainelSync(userId)
       const lista = sincronizarFinanceiroLocalCompleto({
-        orcamentos: Array.isArray(orcamentos) ? orcamentos : [],
-        ordensServico: Array.isArray(ordensServico) ? ordensServico : [],
+        orcamentos,
+        ordensServico,
       })
       setTitulos(lista)
       await salvarFinanceiroNoBanco(lista)
@@ -170,10 +173,12 @@ export default function FinanceiroModule({ embedded = false }: Props) {
 
     window.addEventListener('storage', onChange)
     window.addEventListener('connect-financeiro-change', onChange as EventListener)
+    window.addEventListener('connect-data-change', onChange as EventListener)
 
     return () => {
       window.removeEventListener('storage', onChange)
       window.removeEventListener('connect-financeiro-change', onChange as EventListener)
+      window.removeEventListener('connect-data-change', onChange as EventListener)
     }
   }, [])
 
