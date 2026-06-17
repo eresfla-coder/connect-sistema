@@ -1115,6 +1115,7 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
   const emailCliente = clienteEmail(orc.cliente, '')
   const enderecoCliente = clienteEndereco(orc.cliente, '')
   const enderecoEntregaDoc = String(orc.enderecoEntrega || '').trim()
+  const enderecoEntregaExibir = enderecoEntregaDoc || enderecoCliente
   const data = parseDataBR(orc.data)
   const validadeBruta = texto(orc.validadeProposta || orc.validade, '')
   const validade = validadeOrcamentoAtiva(validadeBruta) ? validadeBruta.trim() : ''
@@ -1208,7 +1209,6 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
             <span>Cliente</span>
             <strong>{cliente}</strong>
             {telCliente ? <em>{telCliente}</em> : null}
-            {enderecoCliente ? <p className="orc-info-detail">Endereço: {enderecoCliente}</p> : null}
             {emailCliente ? <p className="orc-info-detail">E-mail: {emailCliente}</p> : null}
           </article>
           <article>
@@ -1228,9 +1228,21 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           <article>
             <span>Prazo</span>
             <strong>{prazoEntregaDoc}</strong>
-            {enderecoEntregaDoc ? <p className="orc-info-detail">Entrega em: {enderecoEntregaDoc}</p> : null}
           </article>
         </section>
+
+        {(enderecoCliente || enderecoEntregaExibir) ? (
+          <section className="orc-address-row">
+            <article>
+              <span>Endereço do cliente</span>
+              <strong>{enderecoCliente || '—'}</strong>
+            </article>
+            <article>
+              <span>Endereço de entrega</span>
+              <strong>{enderecoEntregaExibir || '—'}</strong>
+            </article>
+          </section>
+        ) : null}
 
         {isProposta && descricaoProposta ? (
           <section className="orc-prose-block">
@@ -1427,6 +1439,37 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
         .orc-info em { display: inline-block; margin-left: 8px; padding: 4px 12px; border-radius: 999px; background: var(--pdf-soft); color: var(--pdf-primary); font-size: 13px; font-style: normal; font-weight: 950; }
         .orc-info-detail { margin: 6px 0 0; font-size: 12px; line-height: 1.35; color: #475569; font-weight: 700; }
         .orc-info-cliente { min-width: 0; }
+        .orc-address-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 0;
+          margin-top: 8px;
+          border: 1px solid #dbe5ef;
+          border-radius: 14px;
+          overflow: hidden;
+        }
+        .orc-address-row article {
+          min-height: 64px;
+          padding: 10px 14px;
+          border-right: 1px solid #dbe5ef;
+        }
+        .orc-address-row article:last-child { border-right: 0; }
+        .orc-address-row span {
+          display: block;
+          font-size: 11px;
+          color: #64748b;
+          text-transform: uppercase;
+          font-weight: 950;
+          margin-bottom: 5px;
+        }
+        .orc-address-row strong {
+          display: block;
+          font-size: 13px;
+          line-height: 1.35;
+          color: #0f172a;
+          font-weight: 800;
+          word-break: break-word;
+        }
         .orc-table { margin-top: 14px; border: 1px solid #dbe5ef; border-radius: 14px; overflow: hidden; }
 
         .orc-table-print { display: none; }
@@ -1520,6 +1563,9 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           .orc-signatures { grid-template-columns: 1fr; gap: 16px; }
           .orc-info, .orc-footer { grid-template-columns: 1fr; }
           .orc-info article { border-right: 0; border-bottom: 1px solid #dbe5ef; }
+          .orc-address-row { grid-template-columns: 1fr; }
+          .orc-address-row article { border-right: 0; border-bottom: 1px solid #dbe5ef; }
+          .orc-address-row article:last-child { border-bottom: 0; }
           .orc-thead { display: none; }
           .orc-row:not(.orc-row-m2-cliente) { grid-template-columns: 42px 1fr; gap: 8px; }
           .orc-row-m2-cliente { grid-template-columns: 1fr !important; gap: 6px !important; }
@@ -1569,6 +1615,11 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           .orc-info em { font-size: 9px !important; padding: 2px 6px !important; margin-left: 4px !important; }
           .orc-info-detail { font-size: 8.5px !important; margin-top: 3px !important; line-height: 1.25 !important; }
           .orc-info article:last-child { border-right: 0 !important; }
+
+          .orc-address-row { margin-top: 4px !important; border-radius: 10px !important; }
+          .orc-address-row article { min-height: 42px !important; padding: 5px 7px !important; }
+          .orc-address-row span { font-size: 8px !important; margin-bottom: 2px !important; }
+          .orc-address-row strong { font-size: 9px !important; line-height: 1.25 !important; }
 
           .orc-table-screen { margin-top: 4px !important; }
           .orc-thead { padding: 4px 6px !important; font-size: 9px !important; }

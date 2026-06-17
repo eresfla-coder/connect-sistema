@@ -17,7 +17,7 @@ import {
   validadeOrcamentoAtiva,
   resolverValidadePadraoOrcamento,
 } from '@/lib/orcamentoTextos'
-import { lerLocalStorageUsuario, obterUserIdPainel, salvarLocalStorageUsuario } from '@/lib/connect-user-storage'
+import { lerLocalStorageUsuario, obterUserIdPainel, salvarLocalStorageUsuario, storageKeyUsuario } from '@/lib/connect-user-storage'
 import { carregarClientesPainelDetalhado, clientePainelParaOrcamento } from '@/lib/clientes-painel'
 import { garantirPublicacaoOrcamento, type PublicacaoOrcamentoResult } from '@/lib/garantir-publicacao-orcamento'
 import { registrarLogSistema } from '@/lib/logs-sistema'
@@ -1162,10 +1162,30 @@ export default function OrcamentoPage() {
     } catch {}
   }
 
+  function parseOrcamentosStorageRaw(raw: string | null): OrcamentoSalvo[] {
+    if (!raw) return []
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? (parsed as OrcamentoSalvo[]) : []
+    } catch {
+      return []
+    }
+  }
+
   function lerOrcamentosLocalStorage() {
     try {
       const userId = userIdOrcamentosRef.current
-      const lista = lerLocalStorageUsuario<OrcamentoSalvo[]>(ORCAMENTOS_KEY, userId, [])
+      let lista = lerLocalStorageUsuario<OrcamentoSalvo[]>(ORCAMENTOS_KEY, userId, [])
+
+      if (!lista.length && typeof window !== 'undefined') {
+        const scopedKey = userId ? storageKeyUsuario(ORCAMENTOS_KEY, userId) : ORCAMENTOS_KEY
+        const scopedRaw = localStorage.getItem(scopedKey)
+        if (scopedRaw) lista = parseOrcamentosStorageRaw(scopedRaw)
+        if (!lista.length && scopedKey !== ORCAMENTOS_KEY) {
+          lista = parseOrcamentosStorageRaw(localStorage.getItem(ORCAMENTOS_KEY))
+        }
+      }
+
       if (!Array.isArray(lista)) return [] as OrcamentoSalvo[]
       const deletedIds = lerDeletedOrcamentos(userId)
       const normalizados = lista
@@ -1235,27 +1255,41 @@ export default function OrcamentoPage() {
         idsLocais: locais.map((item) => item.id).slice(0, 8),
       })
       setOrcamentosSalvos(locais)
-    try {
-      persistirListaOrcamentosLocal(locais)
-    } catch (error) {
-      console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
+      try {
+        persistirListaOrcamentosLocal(locais)
+      } catch (error) {
+        console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
+      }
+      return false
     }
-    return false
-  }
 
-  const listaNormalizada = mesclarOrcamentos(
+    const listaNormalizada = mesclarOrcamentos(
       lista.filter((item) => !deletedIds.has(String(item?.id || ''))),
       locais,
       userId,
     )
-  setOrcamentosSalvos(listaNormalizada)
-  try {
-    persistirListaOrcamentosLocal(listaNormalizada)
-  } catch (error) {
-    console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
+
+    if (
+      listaNormalizada.length === 0 &&
+      orcamentosCountRef.current > 0 &&
+      locais.length === 0 &&
+      lista.length === 0
+    ) {
+      console.warn('[orcamentos] ignorando limpeza suspeita da lista', {
+        contexto,
+        emTela: orcamentosCountRef.current,
+      })
+      return false
+    }
+
+    setOrcamentosSalvos(listaNormalizada)
+    try {
+      persistirListaOrcamentosLocal(listaNormalizada)
+    } catch (error) {
+      console.error('[orcamentos] erro ao salvar cache local:', { contexto, error })
+    }
+    return true
   }
-  return true
-}
 
   function isMobileOrcamentos() {
     if (typeof window === 'undefined') return false
@@ -1352,6 +1386,16 @@ export default function OrcamentoPage() {
       }
 
       const listaFinal = mesclarOrcamentos(normalizados, locais, userId)
+      const faltandoOuMaisRecenteNaNuvem = locais.filter((local) => {
+        const remoto = normalizados.find((item) => String(item.id) === String(local.id))
+        if (!remoto) return true
+        return Number(local.atualizadoEm || 0) > Number(remoto.atualizadoEm || 0)
+      })
+      if (faltandoOuMaisRecenteNaNuvem.length > 0) {
+        for (const orcamento of faltandoOuMaisRecenteNaNuvem) {
+          await persistirOrcamentoComRetry(orcamento, userId)
+        }
+      }
       aplicarOrcamentos(listaFinal, 'carregarOrcamentosSupabase')
       ultimaCargaOrcamentosRef.current = Date.now()
     } catch (error) {
@@ -1437,6 +1481,21 @@ export default function OrcamentoPage() {
       })
       return false
     }
+  }
+
+  async function persistirOrcamentoComRetry(orcamento: OrcamentoSalvo, userIdParam?: string | null) {
+    let ok = await persistirOrcamentoSupabase(orcamento, userIdParam)
+    if (!ok) {
+      await aguardarOrcamentos(450)
+      ok = await persistirOrcamentoSupabase(orcamento, userIdParam || userIdOrcamentosRef.current)
+    }
+    if (!ok) {
+      console.error('[Orcamentos] falha ao gravar na nuvem após retry', {
+        local_id: String(orcamento.id),
+        numero: orcamento.numero,
+      })
+    }
+    return ok
   }
 
   async function obterUserIdPainel() {
@@ -2858,7 +2917,7 @@ export default function OrcamentoPage() {
         }
 
         upsertOrcamentoNaLista(atualizadoBase, 'salvar-orcamento-update')
-        const okNuvem = await persistirOrcamentoSupabase(atualizadoBase)
+        const okNuvem = await persistirOrcamentoComRetry(atualizadoBase)
         try {
           await publicarOrcamentoSeguro(atualizadoBase, 'salvar-orcamento-update-publicar')
         } catch {
@@ -2874,9 +2933,12 @@ export default function OrcamentoPage() {
         notificar(
           okNuvem
             ? 'Orçamento atualizado com sucesso! Parcelas financeiras atualizadas.'
-            : 'Orçamento salvo no aparelho. A sincronização com a nuvem será tentada novamente.',
-          okNuvem ? 'success' : 'info'
+            : 'Orçamento salvo neste aparelho, mas NÃO sincronizou na nuvem. Abra de novo com internet ou outro navegador não verá. Tente salvar novamente.',
+          okNuvem ? 'success' : 'error'
         )
+        if (!okNuvem) {
+          window.setTimeout(() => void persistirOrcamentoComRetry(atualizadoBase), 5000)
+        }
         const { data: { session: sessEdit } } = await supabase.auth.getSession()
         void registrarLogSistema(sessEdit?.access_token || '', 'editou_orcamento', {
           modulo: 'orcamentos',
@@ -2914,7 +2976,7 @@ export default function OrcamentoPage() {
       }
 
       upsertOrcamentoNaLista(novoBase, 'salvar-orcamento-novo')
-      const okNuvem = await persistirOrcamentoSupabase(novoBase)
+      const okNuvem = await persistirOrcamentoComRetry(novoBase)
       try {
         await publicarOrcamentoSeguro(novoBase, 'salvar-orcamento-novo-publicar')
       } catch {
@@ -2930,9 +2992,12 @@ export default function OrcamentoPage() {
       notificar(
         okNuvem
           ? 'Orçamento salvo com sucesso! Parcelas financeiras geradas.'
-          : 'Orçamento salvo no aparelho. A sincronização com a nuvem será tentada novamente.',
-        okNuvem ? 'success' : 'info'
+          : 'Orçamento salvo neste aparelho, mas NÃO sincronizou na nuvem. Abra de novo com internet ou outro navegador não verá. Tente salvar novamente.',
+        okNuvem ? 'success' : 'error'
       )
+      if (!okNuvem) {
+        window.setTimeout(() => void persistirOrcamentoComRetry(novoBase), 5000)
+      }
       const { data: { session: sessNovo } } = await supabase.auth.getSession()
       void registrarLogSistema(sessNovo?.access_token || '', 'criou_orcamento', {
         modulo: 'orcamentos',
