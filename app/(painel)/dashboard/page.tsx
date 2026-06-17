@@ -133,6 +133,7 @@ type ItemPainel = {
 
 const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
 const OS_KEY = 'connect_ordens_servico_salvas'
+const ORCAMENTOS_DELETED_PREFIX = 'connect_orcamentos_deleted_'
 const CONFIG_KEY = 'connect_configuracoes'
 const PRODUTOS_KEY = 'connect_produtos'
 const SERVICOS_KEY = 'connect_servicos'
@@ -146,6 +147,36 @@ function formatarMoeda(valor?: number) {
 
 function moeda(valor?: number) {
   return formatarMoeda(valor)
+}
+
+function lerDeletedOrcamentosDashboard(userId?: string | null) {
+  try {
+    const raw = localStorage.getItem(`${ORCAMENTOS_DELETED_PREFIX}${userId || 'anon'}`)
+    const lista = raw ? (JSON.parse(raw) as string[]) : []
+    return new Set(lista.map((item) => String(item)))
+  } catch {
+    return new Set<string>()
+  }
+}
+
+function deduplicarOrcamentosDashboard(lista: OrcamentoSalvo[]) {
+  const mapa = new Map<string, OrcamentoSalvo>()
+  for (const item of lista) {
+    const id = String(item.id || '')
+    if (!id) continue
+    mapa.set(id, item)
+  }
+  return Array.from(mapa.values())
+}
+
+function deduplicarOrdensDashboard(lista: OrdemServicoResumo[]) {
+  const mapa = new Map<string, OrdemServicoResumo>()
+  for (const item of lista) {
+    const id = String(item.id || '')
+    if (!id) continue
+    mapa.set(id, item)
+  }
+  return Array.from(mapa.values())
 }
 
 function lerLocalJson<T>(key: string, fallback: T): T {
@@ -354,10 +385,19 @@ function detectarRiscos(
 }
 
 async function carregarDadosDashboard(opts?: { pularSupabase?: boolean }): Promise<DadosDashboard> {
-  let orcamentos = (lerLocalJson<Record<string, unknown>[]>(ORCAMENTOS_KEY, []) || []).map(normalizarOrcamentoDashboard)
-  let ordens = (lerLocalJson<Record<string, unknown>[]>(OS_KEY, []) || []).map(normalizarOsDashboard)
   const { lerLocalStorageUsuario, obterUserIdPainel } = await import('@/lib/connect-user-storage')
   const userId = await obterUserIdPainel()
+  const deletedIds = lerDeletedOrcamentosDashboard(userId)
+
+  let orcamentos = deduplicarOrcamentosDashboard(
+    (lerLocalStorageUsuario<Record<string, unknown>[]>(ORCAMENTOS_KEY, userId, []) || [])
+      .map(normalizarOrcamentoDashboard)
+      .filter((item) => !deletedIds.has(String(item.id)))
+  )
+  let ordens = deduplicarOrdensDashboard(
+    (lerLocalStorageUsuario<Record<string, unknown>[]>(OS_KEY, userId, []) || []).map(normalizarOsDashboard)
+  )
+
   const produtos = lerLocalStorageUsuario<ProdutoResumo[]>(PRODUTOS_KEY, userId, [])
   const servicos = lerLocalJson<ServicoResumo[]>(SERVICOS_KEY, [])
   const financeiroTitulos = lerLocalJson<FinanceiroTituloResumo[]>(FINANCEIRO_KEY, [])
@@ -389,31 +429,38 @@ async function carregarDadosDashboard(opts?: { pularSupabase?: boolean }): Promi
     if (!jaExiste) recibos.push(reciboAtual)
   }
 
-  try {
-    if (!opts?.pularSupabase) {
-    let queryOrc = supabase.from('orcamentos').select('*').order('created_at', { ascending: false })
-    if (userId) queryOrc = queryOrc.eq('user_id', userId)
-    const { data, error } = await queryOrc
-    if (!error && Array.isArray(data) && data.length) {
-      orcamentos = data.map((row) => mapearOrcamentoSupabase(row as Record<string, unknown>))
-      try {
-        localStorage.setItem(ORCAMENTOS_KEY, JSON.stringify(orcamentos))
-      } catch {}
-    }
-    }
-  } catch {}
+  const localOrcamentosVazio = orcamentos.length === 0
+  const localOrdensVazio = ordens.length === 0
 
   try {
-    if (!opts?.pularSupabase) {
-    let queryOs = supabase.from('ordens_servico').select('*').order('created_at', { ascending: false })
-    if (userId) queryOs = queryOs.eq('user_id', userId)
-    const { data, error } = await queryOs
-    if (!error && Array.isArray(data) && data.length) {
-      ordens = data.map((row) => mapearOsSupabase(row as Record<string, unknown>))
-      try {
-        localStorage.setItem(OS_KEY, JSON.stringify(ordens))
-      } catch {}
-    }
+    if (!opts?.pularSupabase && (localOrcamentosVazio || localOrdensVazio) && userId) {
+      if (localOrcamentosVazio) {
+        const { data, error } = await supabase
+          .from('orcamentos')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+        if (!error && Array.isArray(data) && data.length) {
+          orcamentos = deduplicarOrcamentosDashboard(
+            data
+              .map((row) => mapearOrcamentoSupabase(row as Record<string, unknown>))
+              .filter((item) => !deletedIds.has(String(item.id)))
+          )
+        }
+      }
+
+      if (localOrdensVazio) {
+        const { data, error } = await supabase
+          .from('ordens_servico')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+        if (!error && Array.isArray(data) && data.length) {
+          ordens = deduplicarOrdensDashboard(
+            data.map((row) => mapearOsSupabase(row as Record<string, unknown>))
+          )
+        }
+      }
     }
   } catch {}
 
@@ -566,9 +613,15 @@ export default function DashboardPage() {
       if (ativo) setDashboardDados(dados)
     }
 
+    const carregarLocalRapido = async () => {
+      const dados = await carregarDadosDashboard({ pularSupabase: true })
+      if (ativo) setDashboardDados(dados)
+    }
+
     void carregar(true)
 
     const onChange = () => {
+      void carregarLocalRapido()
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => void carregar(false), 3000)
     }
