@@ -5,7 +5,7 @@
  * onAuthStateChange: redirecionar /login SOMENTE em SIGNED_OUT (evita loop no TOKEN_REFRESHED).
  * @see docs/AUTENTICACAO-V1.md
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'
 import PainelShell from './components/painel/PainelShell'
@@ -16,8 +16,10 @@ import { cachearUserIdPainel } from '@/lib/connect-user-storage'
 import { limparChavesGlobaisAposMigracao } from '@/lib/orcamentos-local'
 
 const AVISO_KEY = 'connect_trial_notice'
-const SESSAO_TIMEOUT_MS = 1500
-const SAFETY_TIMEOUT_MS = 10000
+const SESSAO_TIMEOUT_MS = 2500
+const ACESSO_RETRY_MS = 900
+const ACESSO_MAX_TENTATIVAS = 3
+const SAFETY_TIMEOUT_MS = 20000
 
 type AcessoApiResponse = {
   ok: boolean
@@ -39,6 +41,24 @@ type SessaoRapida = {
   error: { message: string } | null
 }
 
+async function consultarAcessoComRetry(token: string): Promise<AcessoApiResponse> {
+  let ultimo: AcessoApiResponse = { ok: false, reason: 'erro_rede' }
+
+  for (let tentativa = 0; tentativa < ACESSO_MAX_TENTATIVAS; tentativa += 1) {
+    ultimo = (await consultarAcessoPainel(token, { forcar: tentativa > 0 })) as AcessoApiResponse
+    if (ultimo.ok) return ultimo
+
+    const fatal = ultimo.reason === 'sem_sessao' || ultimo.reason === 'sessao_invalida'
+    if (fatal) return ultimo
+
+    if (tentativa < ACESSO_MAX_TENTATIVAS - 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, ACESSO_RETRY_MS * (tentativa + 1)))
+    }
+  }
+
+  return ultimo
+}
+
 async function getSessionComTimeout(ms: number): Promise<SessaoRapida> {
   return Promise.race([
     supabase.auth.getSession() as Promise<SessaoRapida>,
@@ -52,8 +72,8 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
   const router = useRouter()
   const pathname = usePathname()
   const [verificando, setVerificando] = useState(true)
-  const [avisoLento, setAvisoLento] = useState(false)
   const [erroValidacao, setErroValidacao] = useState('')
+  const validacaoConcluidaRef = useRef(false)
 
   const rotaPublicaImpressao =
     pathname?.startsWith('/impressao-orcamento') ||
@@ -75,17 +95,13 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
     }
 
     let ativo = true
+    validacaoConcluidaRef.current = false
 
     const safetyTimer = window.setTimeout(() => {
-      if (!ativo) return
-      console.warn('[painel] timeout de segurança — liberando painel em modo degradado')
-      setAvisoLento(true)
+      if (!ativo || validacaoConcluidaRef.current) return
+      console.warn('[painel] timeout de segurança — liberando painel sem bloquear')
       setVerificando(false)
     }, SAFETY_TIMEOUT_MS)
-
-    async function consultarAcessoApi(token: string) {
-      return consultarAcessoPainel(token)
-    }
 
     async function verificarSessao() {
       setErroValidacao('')
@@ -106,16 +122,8 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
           limparChavesGlobaisAposMigracao(session.user.id)
 
           let acesso: AcessoApiResponse | null = null
-          try {
-            if (session.access_token) {
-              acesso = await consultarAcessoApi(session.access_token)
-            }
-          } catch (apiError) {
-            console.warn('[painel] API de acesso indisponível — modo degradado', apiError)
-            setAvisoLento(true)
-            setVerificando(false)
-            console.log('[PAINEL_READY]', { modo: 'degradado_api' })
-            return
+          if (session.access_token) {
+            acesso = await consultarAcessoComRetry(session.access_token)
           }
 
           if (!ativo) return
@@ -131,11 +139,13 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
               router.replace('/login')
               return
             }
-            setAvisoLento(true)
+            console.warn('[painel] validação parcial — sessão ok, API indisponível', acesso?.reason)
+            validacaoConcluidaRef.current = true
             setVerificando(false)
-            console.log('[PAINEL_READY]', { modo: 'degradado_acesso', reason: acesso?.reason })
             return
           }
+
+          validacaoConcluidaRef.current = true
 
           if (acesso.avisoTrial) {
             try {
@@ -182,10 +192,12 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
             isAdmin: false,
             perfilStatus: 'demo',
           })
+          validacaoConcluidaRef.current = true
           setVerificando(false)
           return
         }
 
+        validacaoConcluidaRef.current = true
         setVerificando(false)
         console.log('[PAINEL_REDIRECT]', { destino: '/login', motivo: 'sem_sessao' })
         router.replace('/login')
@@ -193,7 +205,7 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
         console.error('ERRO_VERIFICAR_SESSAO_PAINEL:', error)
         if (!ativo) return
         setErroValidacao('Não foi possível validar o acesso. Tente novamente.')
-        setAvisoLento(true)
+        validacaoConcluidaRef.current = true
         setVerificando(false)
       }
     }
@@ -212,14 +224,6 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
         }
         console.log('[PAINEL_REDIRECT]', { destino: '/login', event })
         router.replace('/login')
-        return
-      }
-
-      if (session?.user) {
-        marcarSessaoReal()
-        sairDemoMode()
-        cachearUserIdPainel(session.user.id)
-        setVerificando(false)
       }
     })
 
@@ -271,24 +275,5 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
     )
   }
 
-  return (
-    <>
-      {avisoLento ? (
-        <div
-          style={{
-            background: '#fff7ed',
-            borderBottom: '1px solid #fed7aa',
-            color: '#9a3412',
-            padding: '10px 14px',
-            fontSize: 13,
-            fontWeight: 700,
-            textAlign: 'center',
-          }}
-        >
-          Modo degradado: validação completa indisponível. Seus dados locais continuam acessíveis.
-        </div>
-      ) : null}
-      <PainelShell>{children}</PainelShell>
-    </>
-  )
+  return <PainelShell>{children}</PainelShell>
 }
