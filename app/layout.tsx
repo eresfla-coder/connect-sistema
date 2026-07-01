@@ -39,12 +39,12 @@ export const metadata = {
   manifest: '/manifest.json',
   icons: {
     icon: [
-      { url: '/favicon.ico?v=89' },
-      { url: '/icons/icon-192x192.png?v=89', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512x512.png?v=89', sizes: '512x512', type: 'image/png' },
+      { url: '/favicon.ico?v=90' },
+      { url: '/icons/icon-192x192.png?v=90', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512x512.png?v=90', sizes: '512x512', type: 'image/png' },
     ],
     apple: [
-      { url: '/icons/apple-touch-icon.png?v=89', sizes: '180x180', type: 'image/png' },
+      { url: '/icons/apple-touch-icon.png?v=90', sizes: '180x180', type: 'image/png' },
     ],
   },
   appleWebApp: {

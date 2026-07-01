@@ -1,5 +1,9 @@
 'use client'
 
+/**
+ * Login Connect — signIn grava cookie SSR; 1× consultarAcessoPainel; respeita ?redirect=.
+ * Não chamar /api/assinatura/status aqui. @see docs/AUTENTICACAO-V1.md
+ */
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -484,47 +488,24 @@ export default function LoginPage() {
             backdropFilter: 'blur(14px)',
           }}
         >
-          <div style={{ textAlign: 'center', marginBottom: 28 }}>
-            <div
+          <div style={{ textAlign: 'center', marginBottom: 24 }}>
+            <img
+              src="/logo-connect.png?v=90"
+              alt="Connect — Gerador de Orçamentos e OS"
               style={{
-                width: 68,
-                height: 68,
+                width: 'min(100%, 320px)',
+                height: 'auto',
+                objectFit: 'contain',
+                borderRadius: 20,
+                display: 'block',
                 margin: '0 auto 14px',
-                borderRadius: 22,
-                background: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 14px 24px rgba(0,0,0,0.22)',
-                overflow: 'hidden',
+                boxShadow: '0 16px 40px rgba(0,0,0,0.38)',
               }}
-            >
-              <img
-                src="/logo-connect.png"
-                alt="Logo"
-                style={{ width: 54, height: 54, objectFit: 'contain' }}
-                onError={(e) => {
-                  ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                }}
-              />
-            </div>
-
-            <h1
-              style={{
-                margin: 0,
-                color: '#ffffff',
-                fontSize: 38,
-                fontWeight: 900,
-                letterSpacing: -1,
-                lineHeight: 1,
-              }}
-            >
-              CONNECT <span style={{ color: '#10b981' }}>SISTEMA</span>
-            </h1>
+            />
 
             <div
               style={{
-                marginTop: 8,
+                marginTop: 4,
                 color: '#94a3b8',
                 fontSize: 11,
                 fontWeight: 800,

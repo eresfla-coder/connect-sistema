@@ -1,3 +1,11 @@
+/**
+ * Helpers de auth no client — ponto único para /api/painel/acesso.
+ *
+ * - consultarAcessoPainel: deduplica chamadas simultâneas (evita loop no login)
+ * - resolverDestinoPosLogin: redirect param > admin > /dashboard
+ *
+ * NÃO chamar /api/assinatura/status aqui. Ver docs/AUTENTICACAO-V1.md
+ */
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout'
 
 const ACESSO_TIMEOUT_MS = 8000

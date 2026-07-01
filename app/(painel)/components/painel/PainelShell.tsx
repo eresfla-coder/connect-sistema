@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Shell do painel — menu, badges, logout.
+ * Admin: 1× consultarAcessoPainel no mount (sem retry em loop / sem assinatura/status).
+ * @see docs/AUTENTICACAO-V1.md
+ */
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -113,6 +118,9 @@ export default function PainelLayout({
     };
   }, []);
 
+  /**
+   * Admin no menu — usa painel/acesso (dedup). Sem retry, sem pathname, sem assinatura/status.
+   */
   useEffect(() => {
     let ativo = true;
 
@@ -322,6 +330,7 @@ export default function PainelLayout({
     }
   }
 
+  /** Logout: signOut limpa cookies SSR; layout reage só a SIGNED_OUT. */
   async function handleLogout() {
     if (saindo) return;
     setSaindo(true);
@@ -601,17 +610,17 @@ export default function PainelLayout({
               }}
             >
               <img
-                src="/logo-connect.png"
+                src="/logo-connect.png?v=90"
                 alt="Connect Sistema"
                 style={{
-                  width: isMobile ? 50 : 42,
-                  maxWidth: "28%",
+                  width: isMobile ? 56 : 48,
+                  maxWidth: "72%",
                   height: "auto",
                   objectFit: "contain",
-                  borderRadius: 8,
+                  borderRadius: 12,
                   background: "transparent",
                   padding: 0,
-                  boxShadow: "none",
+                  boxShadow: "0 8px 20px rgba(0,0,0,0.22)",
                   display: "block",
                   margin: "0 auto",
                 }}
@@ -870,15 +879,17 @@ export default function PainelLayout({
               }}
             >
               <img
-                src="/logo-connect.png"
+                src="/logo-connect.png?v=90"
                 alt="Connect Sistemas"
                 style={{
-                  width: 28,
-                  height: 28,
+                  width: 40,
+                  height: 40,
                   objectFit: "contain",
-                  borderRadius: 8,
+                  borderRadius: 10,
                   background: "transparent",
                   padding: 0,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+                  flex: "0 0 auto",
                 }}
               />
               <div style={{ minWidth: 0 }}>

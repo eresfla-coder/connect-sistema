@@ -1,6 +1,7 @@
 /**
- * Server-only admin access. Never import from client components.
- * Configure ADMIN_EMAILS (comma-separated) in .env.local / Vercel.
+ * Admin master — server only. Nunca importar em componentes client.
+ * ADMIN_EMAILS / CONNECT_ADMIN_EMAILS (vírgula) + role no perfil (isPerfilRoleAdmin).
+ * @see docs/AUTENTICACAO-V1.md
  */
 import type { PerfilAdminCheck } from '@/lib/access'
 import { isPerfilRoleAdmin } from '@/lib/access'

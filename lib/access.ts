@@ -1,6 +1,7 @@
 /**
- * Client-safe admin hints. Authoritative admin list lives server-side (lib/access-server.ts + ADMIN_EMAILS env).
- * On the client, only perfil role/tier flags are trusted locally; use /api/assinatura/status for isAdminMaster.
+ * Client-safe admin hints. Lista de e-mails admin NÃO fica no bundle — só no server.
+ * No browser: use consultarAcessoPainel() → adminLogado (lib/connect-auth-client).
+ * @see docs/AUTENTICACAO-V1.md
  */
 export function isAdminEmail(_email?: string | null) {
   return false

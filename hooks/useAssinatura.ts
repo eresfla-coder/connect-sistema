@@ -1,5 +1,9 @@
 'use client'
 
+/**
+ * Hook de assinatura/plano — único lugar client que deve chamar /api/assinatura/status.
+ * Não usar no login/layout/admin guard. @see docs/AUTENTICACAO-V1.md
+ */
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase-browser'
 import { emailDoUsuarioAuth, isUsuarioAdmin } from '@/lib/access'

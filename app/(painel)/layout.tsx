@@ -1,5 +1,10 @@
 'use client'
 
+/**
+ * Layout do painel — valida sessão + /api/painel/acesso (1×).
+ * onAuthStateChange: redirecionar /login SOMENTE em SIGNED_OUT (evita loop no TOKEN_REFRESHED).
+ * @see docs/AUTENTICACAO-V1.md
+ */
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'

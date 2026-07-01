@@ -1,3 +1,8 @@
+/**
+ * Snapshot de assinatura/plano e isAdminMaster para UI de planos.
+ * NÃO usar no fluxo de login nem no layout — use /api/painel/acesso.
+ * @see docs/AUTENTICACAO-V1.md
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { isUsuarioAdminServer } from '@/lib/access-server'

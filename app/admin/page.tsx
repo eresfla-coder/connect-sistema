@@ -1,5 +1,10 @@
 'use client'
 
+/**
+ * Painel master SaaS (/admin) — fora do layout (painel).
+ * Guard: consultarAcessoPainel antes de carregar; APIs /api/admin/* via requireAdminFromRequest.
+ * @see docs/AUTENTICACAO-V1.md
+ */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'

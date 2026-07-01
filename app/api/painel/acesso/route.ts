@@ -1,3 +1,10 @@
+/**
+ * Validação de acesso ao painel (perfil, trial, bloqueio, adminLogado).
+ *
+ * Usar no login e layout — NÃO chamar /api/assinatura/status daqui (loop/timeout).
+ * Assinatura/planos: usar /api/assinatura/status apenas em useAssinatura.
+ * @see docs/AUTENTICACAO-V1.md
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import {

@@ -1,3 +1,8 @@
+/**
+ * Gate de rotas protegidas. Exige cookie + refreshSession (1,5s max).
+ * /api/* é público no matcher lógico (isPublicPath) — auth fica nas route handlers.
+ * @see docs/AUTENTICACAO-V1.md
+ */
 import { NextResponse, type NextRequest } from 'next/server'
 import {
   hasSupabaseAuthCookie,

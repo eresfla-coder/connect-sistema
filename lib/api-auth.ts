@@ -1,3 +1,8 @@
+/**
+ * Guards server para APIs autenticadas.
+ * requireAdminFromRequest: ADMIN_EMAILS (env) ou role no perfil — ver access-server.
+ * @see docs/AUTENTICACAO-V1.md
+ */
 import { NextRequest } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { isUsuarioAdminServer } from '@/lib/access-server'

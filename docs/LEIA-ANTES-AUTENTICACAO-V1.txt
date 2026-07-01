@@ -1,0 +1,15 @@
+LEIA ANTES DE ALTERAR AUTENTICAÇÃO / LOGIN
+=========================================
+
+Documentação completa: docs/AUTENTICACAO-V1.md
+
+Regras rápidas (evitar loop de login):
+
+1. Browser: createBrowserClient em lib/supabase.ts (NUNCA createClient puro)
+2. Login: 1× consultarAcessoPainel — NÃO usar /api/assinatura/status
+3. painel/acesso: NÃO chamar assinatura/status internamente
+4. Layout painel: redirect /login só em evento SIGNED_OUT
+5. PainelShell: admin 1× no mount, sem retry em loop
+6. assinatura/status: só useAssinatura / páginas de plano
+
+Teste após mudança: login admin → /admin, F5, logout, login cliente → /dashboard

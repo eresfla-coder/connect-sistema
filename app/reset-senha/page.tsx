@@ -77,45 +77,23 @@ export default function ResetSenhaPage() {
           textAlign: 'center',
         }}
       >
-        <div
+        <img
+          src="/logo-connect.png?v=90"
+          alt="Connect — Gerador de Orçamentos e OS"
           style={{
-            width: 74,
-            height: 74,
-            margin: '0 auto 14px',
-            borderRadius: 22,
-            background: '#ffffff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
+            width: 'min(100%, 280px)',
+            height: 'auto',
+            objectFit: 'contain',
+            borderRadius: 18,
+            display: 'block',
+            margin: '0 auto 12px',
+            boxShadow: '0 14px 36px rgba(0,0,0,0.35)',
           }}
-        >
-          <img
-            src="/logo-connect.png"
-            alt="Logo"
-            style={{ width: 54, height: 54, objectFit: 'contain' }}
-            onError={(e) => {
-              ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-            }}
-          />
-        </div>
-
-        <h1
-          style={{
-            margin: 0,
-            color: '#ffffff',
-            fontSize: 32,
-            fontWeight: 900,
-            letterSpacing: -1,
-            lineHeight: 1,
-          }}
-        >
-          CONNECT <span style={{ color: '#f97316' }}>SISTEMA</span>
-        </h1>
+        />
 
         <p
           style={{
-            marginTop: 12,
+            marginTop: 4,
             marginBottom: 20,
             color: '#cbd5e1',
             fontSize: 14,

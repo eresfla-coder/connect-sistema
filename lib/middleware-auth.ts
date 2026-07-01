@@ -1,3 +1,8 @@
+/**
+ * Auth no edge middleware — cookies SSR + fail-fast 1,5s.
+ * Pareado com lib/supabase.ts (createBrowserClient).
+ * @see docs/AUTENTICACAO-V1.md
+ */
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
@@ -66,7 +71,7 @@ export function isProtectedPainelPath(pathname: string) {
   return painelRoots.some((root) => pathname === root || pathname.startsWith(`${root}/`))
 }
 
-/** Detecta cookie de sessão Supabase sem chamada de rede. */
+/** Detecta cookie Supabase sem rede. Deve existir após login com createBrowserClient. */
 export function hasSupabaseAuthCookie(request: NextRequest) {
   return request.cookies.getAll().some(({ name, value }) => {
     if (!name.includes('-auth-token')) return false
