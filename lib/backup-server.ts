@@ -16,7 +16,7 @@ const ORC_COLS = 'local_id,payload,updated_at,created_at,user_id'
 const OS_COLS = 'local_id,payload,updated_at,created_at,user_id'
 const CLI_COLS = 'id,user_id,nome,telefone,email,documento,ativo,payload,updated_at,created_at'
 const CFG_COLS =
-  'user_id,nome_empresa,telefone,celular_empresa,whatsapp_empresa,email,endereco,cidade_uf,responsavel,logo_url,cor_primaria,cor_secundaria,updated_at'
+  'user_id,nome_empresa,tipo_pessoa,cpf,cnpj,cep,bairro,telefone,celular_empresa,whatsapp_empresa,email,endereco,cidade_uf,responsavel,logo_url,cor_primaria,cor_secundaria,updated_at'
 
 export class BackupTimeoutError extends Error {
   constructor(message = 'Operação de backup demorou demais. Tente novamente em instantes.') {

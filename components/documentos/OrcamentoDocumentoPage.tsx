@@ -11,6 +11,7 @@ import { formatarEnderecoClienteVisual } from '@/lib/clientes-painel'
 import { lerLocalStorageUsuario, obterUserIdPainel } from '@/lib/connect-user-storage'
 import { supabase } from '@/lib/supabase-browser'
 import { urlQrCode } from '@/lib/pdfPremium'
+import { enderecoEmpresaLinha, rotuloDocumentoEmpresa, type TipoPessoaEmpresa } from '@/lib/configuracaoEmpresa'
 import { iconeFormaPagamento, listaFormasPagamentoOrcamento, textoPagamentoOrcamento } from '@/lib/orcamento-pagamento'
 import {
   tabelaOrcamentoSimplificadaCliente,
@@ -96,6 +97,11 @@ type Orcamento = {
 type Config = {
   nomeEmpresa?: string
   nome?: string
+  tipoPessoa?: TipoPessoaEmpresa
+  cpf?: string
+  cnpj?: string
+  cep?: string
+  bairro?: string
   telefone?: string
   telefoneEmpresa?: string
   celularEmpresa?: string
@@ -369,7 +375,12 @@ function decodePayload(value: string | null) {
               compact.em.telefone,
             email: compact.em.e || compact.em.email,
             endereco: compact.em.en || compact.em.endereco,
+            bairro: compact.em.b || compact.em.bairro,
             cidadeUf: compact.em.c || compact.em.cidadeUf,
+            cep: compact.em.cep || compact.em.cepEmpresa,
+            tipoPessoa: compact.em.tp || compact.em.tipoPessoa,
+            cpf: compact.em.cf || compact.em.cpf,
+            cnpj: compact.em.cj || compact.em.cnpj,
             logoUrl: compact.em.l || compact.em.logoUrl,
             corPrimaria: compact.em.cp || compact.em.corPrimaria,
             corSecundaria: compact.em.cs || compact.em.corSecundaria,
@@ -388,7 +399,12 @@ function decodePayload(value: string | null) {
               compact.em.telefone,
             email: compact.em.e || compact.em.email,
             endereco: compact.em.en || compact.em.endereco,
+            bairro: compact.em.b || compact.em.bairro,
             cidadeUf: compact.em.c || compact.em.cidadeUf,
+            cep: compact.em.cep || compact.em.cepEmpresa,
+            tipoPessoa: compact.em.tp || compact.em.tipoPessoa,
+            cpf: compact.em.cf || compact.em.cpf,
+            cnpj: compact.em.cj || compact.em.cnpj,
             logoUrl: compact.em.l || compact.em.logoUrl,
           }
         : undefined,
@@ -482,7 +498,12 @@ function serializarOrcamentoPublico(dados: Orcamento, config: Config) {
       ),
       e: String(config?.email || ''),
       en: String(config?.endereco || ''),
+      b: String(config?.bairro || ''),
       c: String(config?.cidadeUf || ''),
+      cep: String(config?.cep || ''),
+      tp: String(config?.tipoPessoa || ''),
+      cf: String(config?.cpf || ''),
+      cj: String(config?.cnpj || ''),
       l: logo,
       cp: String(config?.corPrimaria || '#068b43'),
       cs: String(config?.corSecundaria || '#dcfce7'),
@@ -493,6 +514,11 @@ function serializarOrcamentoPublico(dados: Orcamento, config: Config) {
 function getConfig(): Config {
   const fallback: Config = {
     nomeEmpresa: 'LOJA CONNECT',
+    tipoPessoa: 'PJ',
+    cpf: '',
+    cnpj: '',
+    cep: '',
+    bairro: '',
     telefone: '',
     email: '',
     endereco: '',
@@ -1110,8 +1136,17 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
     ''
   )
   const email = texto(config.email, 'lojaconnect@hotmail.com')
-  const endereco = texto(config.endereco, 'GILBERTO ROBERTO GOMES, 243')
-  const cidade = texto(config.cidadeUf, 'PARNAMIRIM-RN')
+  const documentoEmpresa = rotuloDocumentoEmpresa({
+    tipoPessoa: config.tipoPessoa,
+    cpf: config.cpf,
+    cnpj: config.cnpj,
+  })
+  const enderecoLinha = enderecoEmpresaLinha({
+    endereco: texto(config.endereco, ''),
+    bairro: texto(config.bairro, ''),
+    cidadeUf: texto(config.cidadeUf, ''),
+    cep: texto(config.cep, ''),
+  })
   const logo = logoUrlAbsolutaPublica(config.logoUrl) || logoPublicaOrcamento(texto(config.logoUrl, ''))
   const cliente = texto(orc.cliente, 'Cliente não informado')
   const telCliente = clienteTelefone(orc.cliente, '')
@@ -1157,9 +1192,10 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
             <img className="orc-hero-logo" src={logo} alt="Logo" onError={(e) => ((e.currentTarget.style.display = 'none'))} />
             <div className="orc-hero-brand">
               <h1>{empresa}</h1>
+              {documentoEmpresa ? <p>{documentoEmpresa}</p> : null}
               {telefone ? <p>{telefone}</p> : null}
               {email ? <p>{email}</p> : null}
-              {(endereco || cidade) ? <p>{[endereco, cidade].filter(Boolean).join(' • ')}</p> : null}
+              {enderecoLinha ? <p>{enderecoLinha}</p> : null}
             </div>
           </div>
           <div className="orc-hero-right">

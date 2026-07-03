@@ -1,12 +1,19 @@
 import { normalizarLogoEmpresaPublica } from '@/lib/documentosPublicos'
 import { supabase } from '@/lib/supabase'
 
+export type TipoPessoaEmpresa = 'PF' | 'PJ'
+
 // ============================
 // TIPO UNIFICADO
 // ============================
 
 export type ConfiguracaoEmpresa = {
   nomeEmpresa: string
+  tipoPessoa: TipoPessoaEmpresa
+  cpf: string
+  cnpj: string
+  cep: string
+  bairro: string
   telefone: string
   celularEmpresa: string
   whatsappEmpresa: string
@@ -27,6 +34,11 @@ export type ConfiguracaoEmpresa = {
 
 export const CONFIG_PADRAO: ConfiguracaoEmpresa = {
   nomeEmpresa: 'LOJA CONNECT',
+  tipoPessoa: 'PJ',
+  cpf: '',
+  cnpj: '',
+  cep: '',
+  bairro: '',
   telefone: '',
   celularEmpresa: '',
   whatsappEmpresa: '',
@@ -43,6 +55,31 @@ export const CONFIG_PADRAO: ConfiguracaoEmpresa = {
   prazoEntregaPadrao: '3 dias',
   formaPagamentoPadrao: 'PIX',
   mostrarQuantidade: true,
+}
+
+export function normalizarTipoPessoaEmpresa(valor: unknown): TipoPessoaEmpresa {
+  return String(valor || '').trim().toUpperCase() === 'PF' ? 'PF' : 'PJ'
+}
+
+export function rotuloDocumentoEmpresa(cfg: Pick<ConfiguracaoEmpresa, 'tipoPessoa' | 'cpf' | 'cnpj'>): string {
+  const cpf = String(cfg.cpf || '').trim()
+  const cnpj = String(cfg.cnpj || '').trim()
+  const tipo = normalizarTipoPessoaEmpresa(cfg.tipoPessoa)
+
+  if (tipo === 'PF' && cpf) return `CPF: ${cpf}`
+  if (tipo === 'PJ' && cnpj) return `CNPJ: ${cnpj}`
+  if (cnpj) return `CNPJ: ${cnpj}`
+  if (cpf) return `CPF: ${cpf}`
+  return ''
+}
+
+export function enderecoEmpresaLinha(cfg: Pick<ConfiguracaoEmpresa, 'endereco' | 'bairro' | 'cidadeUf' | 'cep'>): string {
+  const cep = String(cfg.cep || '').trim()
+  const cepFmt = cep ? (cep.includes('-') ? cep : cep.replace(/\D/g, '').replace(/^(\d{5})(\d{3})$/, '$1-$2')) : ''
+  return [cfg.endereco, cfg.bairro, cfg.cidadeUf, cepFmt ? `CEP ${cepFmt}` : '']
+    .map((parte) => String(parte || '').trim())
+    .filter(Boolean)
+    .join(' • ')
 }
 
 const LOCAL_KEY = 'connect_configuracoes'
@@ -69,10 +106,16 @@ function appToDbCore(cfg: ConfiguracaoEmpresa): Record<string, unknown> {
 
   return {
     nome_empresa: cfg.nomeEmpresa,
+    tipo_pessoa: cfg.tipoPessoa,
+    cpf: cfg.cpf,
+    cnpj: cfg.cnpj,
+    cep: cfg.cep,
+    bairro: cfg.bairro,
     telefone,
     whatsapp_empresa: whatsapp,
     email: cfg.email,
     endereco: cfg.endereco,
+    cidade_uf: cfg.cidadeUf,
     responsavel: cfg.responsavel,
     logo_url: cfg.logoUrl,
   }
@@ -81,6 +124,11 @@ function appToDbCore(cfg: ConfiguracaoEmpresa): Record<string, unknown> {
 /** Campos visuais/PDF — podem não existir na tabela; ficam no localStorage e connect_storage. */
 function camposPreferenciaLocal(cfg: ConfiguracaoEmpresa): Partial<ConfiguracaoEmpresa> {
   return {
+    tipoPessoa: cfg.tipoPessoa,
+    cpf: cfg.cpf,
+    cnpj: cfg.cnpj,
+    cep: cfg.cep,
+    bairro: cfg.bairro,
     cidadeUf: cfg.cidadeUf,
     corPrimaria: cfg.corPrimaria,
     corSecundaria: cfg.corSecundaria,
@@ -98,6 +146,11 @@ function dbToApp(row: Record<string, unknown>, local?: ConfiguracaoEmpresa | nul
   const prefs = local ? camposPreferenciaLocal(local) : {}
   return {
     nomeEmpresa: String(row.nome_empresa || CONFIG_PADRAO.nomeEmpresa),
+    tipoPessoa: normalizarTipoPessoaEmpresa(prefs.tipoPessoa ?? row.tipo_pessoa),
+    cpf: prefs.cpf ?? String(row.cpf || ''),
+    cnpj: prefs.cnpj ?? String(row.cnpj || ''),
+    cep: prefs.cep ?? String(row.cep || ''),
+    bairro: prefs.bairro ?? String(row.bairro || ''),
     telefone: contatos.telefone,
     celularEmpresa: contatos.celular,
     whatsappEmpresa: contatos.whatsapp,

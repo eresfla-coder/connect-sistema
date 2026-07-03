@@ -95,6 +95,11 @@ export async function GET(request: Request) {
 
     const config = {
       nomeEmpresa,
+      tipoPessoa: cfgMerged.tipoPessoa || 'PJ',
+      cpf: String(configAtual.cpf || cfgMerged.cpf || ''),
+      cnpj: String(configAtual.cnpj || cfgMerged.cnpj || ''),
+      cep: String(configAtual.cep || cfgMerged.cep || ''),
+      bairro: String(configAtual.bairro || cfgMerged.bairro || ''),
       telefone: String(telefoneFinal || cfgMerged.telefone || ''),
       celularEmpresa: String(configAtual.celular_empresa || cfgMerged.celularEmpresa || telefoneFinal || ''),
       whatsappEmpresa: String(configAtual.whatsapp_empresa || cfgMerged.whatsapp || telefoneFinal || ''),

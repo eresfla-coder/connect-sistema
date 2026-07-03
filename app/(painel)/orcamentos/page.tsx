@@ -517,7 +517,12 @@ function serializarCompactoOrcamento(dados: any, config: any) {
       ),
       e: String(config?.email || ''),
       en: String(config?.endereco || ''),
+      b: String(config?.bairro || ''),
       c: String(config?.cidadeUf || ''),
+      cep: String(config?.cep || ''),
+      tp: String(config?.tipoPessoa || ''),
+      cf: String(config?.cpf || ''),
+      cj: String(config?.cnpj || ''),
     },
   }))
 }

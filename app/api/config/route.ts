@@ -31,6 +31,11 @@ export async function GET(request: Request) {
 
     const config = {
       nomeEmpresa: data.nome_empresa || 'LOJA CONNECT',
+      tipoPessoa: data.tipo_pessoa || 'PJ',
+      cpf: data.cpf || '',
+      cnpj: data.cnpj || '',
+      cep: data.cep || '',
+      bairro: data.bairro || '',
       telefone: data.telefone || '',
       celularEmpresa: data.celular_empresa || data.whatsapp_empresa || data.telefone || '',
       whatsappEmpresa: data.whatsapp_empresa || data.telefone || '',

@@ -14,7 +14,7 @@ const PUBLIC_DOCS_POST_BUDGET_MS = 8000
 const PUBLIC_DOCS_QUERY_TIMEOUT_MS = 3000
 const PUBLIC_DOCS_CONFIG_TIMEOUT_MS = 2000
 const CFG_EMPRESA_COLS =
-  'user_id,nome_empresa,telefone,celular_empresa,whatsapp_empresa,email,endereco,cidade_uf,responsavel,logo_url,cor_primaria,cor_secundaria,updated_at'
+  'user_id,nome_empresa,tipo_pessoa,cpf,cnpj,cep,bairro,telefone,celular_empresa,whatsapp_empresa,email,endereco,cidade_uf,responsavel,logo_url,cor_primaria,cor_secundaria,updated_at'
 
 class PublicDocsTimeoutError extends Error {
   constructor(message = 'Publicação demorou demais. Tente novamente em instantes.') {

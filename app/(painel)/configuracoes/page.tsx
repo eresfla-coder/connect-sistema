@@ -5,7 +5,12 @@ import {
   salvarConfiguracao as salvarConfigApi,
   ConfiguracaoEmpresa,
   CONFIG_PADRAO as CONFIG_LIB_PADRAO,
+  enderecoEmpresaLinha,
+  normalizarTipoPessoaEmpresa,
+  rotuloDocumentoEmpresa,
+  type TipoPessoaEmpresa,
 } from '@/lib/configuracaoEmpresa'
+import { buscarEnderecoPorCep } from '@/lib/viacep'
 import { ChangeEvent, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase-browser'
 import { Camera, Check, CheckCircle2, ChevronLeft, Lock, Palette, Type, X } from 'lucide-react'
@@ -15,6 +20,11 @@ type AbaConfig = 'empresa' | 'visual' | 'pdf' | 'cadastros' | 'seguranca'
 
 type ConfiguracaoSistema = {
   nomeEmpresa: string
+  tipoPessoa: TipoPessoaEmpresa
+  cpf: string
+  cnpj: string
+  cep: string
+  bairro: string
   telefone: string
   celularEmpresa: string
   email: string
@@ -39,6 +49,11 @@ const FORMAS_KEY = 'connect_formas_pagamento'
 
 const CONFIG_PADRAO: ConfiguracaoSistema = {
   nomeEmpresa: '',
+  tipoPessoa: 'PJ',
+  cpf: '',
+  cnpj: '',
+  cep: '',
+  bairro: '',
   telefone: '',
   celularEmpresa: '',
   email: '',
@@ -177,6 +192,7 @@ export default function ConfiguracoesPage() {
   const [categorias, setCategorias] = useState<string[]>(['GERAL', 'PRODUTOS', 'SERVIÇOS'])
   const [formasPagamento, setFormasPagamento] = useState<string[]>(['PIX', 'DINHEIRO', 'CARTÃO 1X'])
   const [config, setConfig] = useState<ConfiguracaoSistema>(CONFIG_PADRAO)
+  const [buscandoCep, setBuscandoCep] = useState(false)
 
   useEffect(() => {
     const resize = () => setIsMobile(window.innerWidth <= 760)
@@ -196,6 +212,11 @@ export default function ConfiguracoesPage() {
 
         const mapeada: ConfiguracaoSistema = {
           nomeEmpresa: cfgSupabase.nomeEmpresa || '',
+          tipoPessoa: normalizarTipoPessoaEmpresa(cfgSupabase.tipoPessoa),
+          cpf: cfgSupabase.cpf || '',
+          cnpj: cfgSupabase.cnpj || '',
+          cep: cfgSupabase.cep || '',
+          bairro: cfgSupabase.bairro || '',
           telefone: cfgSupabase.telefone || cfgSupabase.whatsappEmpresa || '',
           celularEmpresa: cfgSupabase.celularEmpresa || cfgSupabase.whatsappEmpresa || cfgSupabase.telefone || '',
           email: cfgSupabase.email || '',
@@ -295,6 +316,27 @@ export default function ConfiguracoesPage() {
     return logo
   }, [config.logoUrl])
 
+  const previewDocumento = useMemo(
+    () =>
+      rotuloDocumentoEmpresa({
+        tipoPessoa: config.tipoPessoa,
+        cpf: config.cpf,
+        cnpj: config.cnpj,
+      }),
+    [config.tipoPessoa, config.cpf, config.cnpj],
+  )
+
+  const previewEndereco = useMemo(
+    () =>
+      enderecoEmpresaLinha({
+        endereco: config.endereco,
+        bairro: config.bairro,
+        cidadeUf: config.cidadeUf,
+        cep: config.cep,
+      }),
+    [config.endereco, config.bairro, config.cidadeUf, config.cep],
+  )
+
   function atualizar<K extends keyof ConfiguracaoSistema>(campo: K, valor: ConfiguracaoSistema[K]) {
     setConfig((old) => ({ ...old, [campo]: valor }))
   }
@@ -312,6 +354,11 @@ export default function ConfiguracoesPage() {
     setConfig((old) => ({
       ...old,
       nomeEmpresa: '',
+      tipoPessoa: 'PJ',
+      cpf: '',
+      cnpj: '',
+      cep: '',
+      bairro: '',
       telefone: '',
       email: '',
       endereco: '',
@@ -319,6 +366,37 @@ export default function ConfiguracoesPage() {
       responsavel: '',
     }))
     setMensagem('Campos da empresa limpos. Clique em Salvar configurações para gravar.')
+  }
+
+  async function buscarCepEmpresa() {
+    const cep = String(config.cep || '').replace(/\D/g, '')
+    if (cep.length !== 8) {
+      setMensagem('Digite um CEP com 8 números.')
+      return
+    }
+
+    setBuscandoCep(true)
+    setMensagem('')
+    try {
+      const endereco = await buscarEnderecoPorCep(cep)
+      if (!endereco) {
+        setMensagem('CEP não encontrado.')
+        return
+      }
+
+      setConfig((old) => ({
+        ...old,
+        cep: endereco.cep,
+        endereco: old.endereco || endereco.logradouro,
+        bairro: endereco.bairro || old.bairro,
+        cidadeUf: endereco.localidade && endereco.uf ? `${endereco.localidade}/${endereco.uf}` : old.cidadeUf,
+      }))
+      setMensagem('Endereço preenchido pelo CEP.')
+    } catch {
+      setMensagem('Não foi possível consultar o CEP agora.')
+    } finally {
+      setBuscandoCep(false)
+    }
   }
 
   function salvarListaCategorias(lista: string[]) {
@@ -376,6 +454,11 @@ export default function ConfiguracoesPage() {
       // 1. Salvar no Supabase (fonte de verdade)
       const cfgParaApi: ConfiguracaoEmpresa = {
         nomeEmpresa: config.nomeEmpresa,
+        tipoPessoa: normalizarTipoPessoaEmpresa(config.tipoPessoa),
+        cpf: config.cpf,
+        cnpj: config.cnpj,
+        cep: config.cep,
+        bairro: config.bairro,
         telefone: config.telefone || config.celularEmpresa || '',
         celularEmpresa: config.celularEmpresa || config.telefone || '',
         whatsappEmpresa: config.celularEmpresa || config.telefone || '',
@@ -600,14 +683,87 @@ export default function ConfiguracoesPage() {
                   <p style={{ margin: '6px 0 0', color: '#64748b', fontWeight: 700, fontSize: 12 }}>Campos livres para o cliente personalizar. Sem dados fixos da Connect.</p>
                 </div>
               </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+                <button
+                  type="button"
+                  onClick={() => atualizar('tipoPessoa', 'PF')}
+                  style={{
+                    flex: 1,
+                    minWidth: 140,
+                    minHeight: 44,
+                    borderRadius: 14,
+                    border: config.tipoPessoa === 'PF' ? '2px solid #16a34a' : '1px solid #dbe3ef',
+                    background: config.tipoPessoa === 'PF' ? 'linear-gradient(135deg,#ecfdf5,#dcfce7)' : '#fff',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Pessoa Física
+                </button>
+                <button
+                  type="button"
+                  onClick={() => atualizar('tipoPessoa', 'PJ')}
+                  style={{
+                    flex: 1,
+                    minWidth: 140,
+                    minHeight: 44,
+                    borderRadius: 14,
+                    border: config.tipoPessoa === 'PJ' ? '2px solid #2563eb' : '1px solid #dbe3ef',
+                    background: config.tipoPessoa === 'PJ' ? 'linear-gradient(135deg,#eff6ff,#dbeafe)' : '#fff',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Pessoa Jurídica
+                </button>
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
-                <CampoTexto label="Nome da empresa" campo="nomeEmpresa" placeholder="Nome da empresa do cliente" autoComplete="organization" />
+                <CampoTexto
+                  label={config.tipoPessoa === 'PF' ? 'Nome completo / Nome fantasia' : 'Razão social / Nome da empresa'}
+                  campo="nomeEmpresa"
+                  placeholder={config.tipoPessoa === 'PF' ? 'Seu nome ou nome fantasia' : 'Razão social da empresa'}
+                  autoComplete="organization"
+                />
+                {config.tipoPessoa === 'PF' ? (
+                  <CampoTexto label="CPF" campo="cpf" placeholder="000.000.000-00" autoComplete="off" />
+                ) : (
+                  <CampoTexto label="CNPJ" campo="cnpj" placeholder="00.000.000/0000-00" autoComplete="off" />
+                )}
+                <label style={{ gridColumn: isMobile ? 'auto' : 'span 2' }}>
+                  <span style={labelStyle}>CEP</span>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      style={{ ...inputStyle, flex: 1 }}
+                      value={config.cep}
+                      onChange={(e) => atualizar('cep', e.target.value)}
+                      placeholder="00000-000"
+                      autoComplete="postal-code"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void buscarCepEmpresa()}
+                      disabled={buscandoCep}
+                      style={{
+                        minWidth: 96,
+                        minHeight: 42,
+                        borderRadius: 12,
+                        border: '1px solid #cbd5e1',
+                        background: '#f8fafc',
+                        fontWeight: 900,
+                        cursor: buscandoCep ? 'wait' : 'pointer',
+                      }}
+                    >
+                      {buscandoCep ? 'Buscando' : 'Buscar'}
+                    </button>
+                  </div>
+                </label>
+                <CampoTexto label="Endereço" campo="endereco" placeholder="Rua, número, complemento" autoComplete="street-address" />
+                <CampoTexto label="Bairro" campo="bairro" placeholder="Bairro" autoComplete="address-level3" />
+                <CampoTexto label="Cidade / UF" campo="cidadeUf" placeholder="Cidade / UF" autoComplete="address-level2" />
                 <CampoTexto label="WhatsApp da empresa" campo="celularEmpresa" placeholder="Celular/WhatsApp para notificações" autoComplete="tel" />
                 <CampoTexto label="Telefone fixo" campo="telefone" placeholder="Telefone fixo (opcional)" autoComplete="tel" />
                 <CampoTexto label="E-mail" campo="email" placeholder="email@empresa.com" autoComplete="email" />
                 <CampoTexto label="Responsável" campo="responsavel" placeholder="Responsável" autoComplete="name" />
-                <CampoTexto label="Endereço" campo="endereco" placeholder="Endereço completo" autoComplete="street-address" />
-                <CampoTexto label="Cidade / UF" campo="cidadeUf" placeholder="Cidade / UF" />
               </div>
             </div>
 
@@ -674,8 +830,10 @@ export default function ConfiguracoesPage() {
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     <img src={previewLogo} alt="Logo" style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 12 }} />
                     <div>
-                      <div style={{ fontWeight: 950 }}>{config.nomeEmpresa}</div>
-                      <div style={{ color: '#64748b', fontSize: 12 }}>{config.telefone}</div>
+                      <div style={{ fontWeight: 950 }}>{config.nomeEmpresa || 'Sua empresa'}</div>
+                      {previewDocumento ? <div style={{ color: '#475569', fontSize: 12, fontWeight: 700 }}>{previewDocumento}</div> : null}
+                      <div style={{ color: '#64748b', fontSize: 12 }}>{config.telefone || config.celularEmpresa}</div>
+                      {previewEndereco ? <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>{previewEndereco}</div> : null}
                     </div>
                   </div>
                   <div style={{ marginTop: 14, height: 28, borderRadius: 10, background: config.corTabela, color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 900 }}>Cabeçalho do PDF</div>

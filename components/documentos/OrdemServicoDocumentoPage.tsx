@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { statusOsCor, urlQrCode } from '@/lib/pdfPremium'
+import { enderecoEmpresaLinha, rotuloDocumentoEmpresa } from '@/lib/configuracaoEmpresa'
 
 type OrdemServico = {
   id: number
@@ -173,7 +174,12 @@ function extrairConfigDoPayload(payload: any) {
     telefone,
     email: String(cfg?.email || ''),
     endereco: String(cfg?.endereco || ''),
+    bairro: String(cfg?.bairro || ''),
     cidadeUf: String(cfg?.cidadeUf || ''),
+    cep: String(cfg?.cep || ''),
+    tipoPessoa: String(cfg?.tipoPessoa || cfg?.tipo_pessoa || 'PJ'),
+    cpf: String(cfg?.cpf || ''),
+    cnpj: String(cfg?.cnpj || ''),
     user_id: String(cfg?.user_id || cfg?.owner_user_id || payload?.user_id || payload?.owner_user_id || ''),
     owner_user_id: String(cfg?.owner_user_id || cfg?.user_id || payload?.owner_user_id || payload?.user_id || ''),
   }
@@ -193,7 +199,19 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
   const searchParams = useSearchParams()
   const id = String(params?.id ?? '')
   const [os, setOs] = useState<OrdemServico | null>(null)
-  const [empresa, setEmpresa] = useState({ nome: 'LOJA CONNECT', logo: '/logo-connect.png', telefone: '', email: '', endereco: '', cidadeUf: '' })
+  const [empresa, setEmpresa] = useState({
+    nome: 'LOJA CONNECT',
+    logo: '/logo-connect.png',
+    telefone: '',
+    email: '',
+    endereco: '',
+    bairro: '',
+    cidadeUf: '',
+    cep: '',
+    tipoPessoa: 'PJ',
+    cpf: '',
+    cnpj: '',
+  })
   const [carregado, setCarregado] = useState(false)
   const [isPreview, setIsPreview] = useState(true)
   const [mensagemAprovacao, setMensagemAprovacao] = useState('')
@@ -255,7 +273,12 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
           telefone: cfgFinal.telefone,
           email: cfgFinal.email,
           endereco: cfgFinal.endereco,
+          bairro: cfgFinal.bairro,
           cidadeUf: cfgFinal.cidadeUf,
+          cep: cfgFinal.cep,
+          tipoPessoa: cfgFinal.tipoPessoa,
+          cpf: cfgFinal.cpf,
+          cnpj: cfgFinal.cnpj,
         })
       } else {
         if (cancelado) return
@@ -279,7 +302,22 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
     return () => window.clearTimeout(timer)
   }, [carregado, isPreview, os])
 
-  const contatoEmpresa = useMemo(() => limparPartesRepetidas([empresa.telefone, empresa.email, empresa.endereco, empresa.cidadeUf].filter(Boolean).join(' • ')), [empresa])
+  const contatoEmpresa = useMemo(() => {
+    const documento = rotuloDocumentoEmpresa({
+      tipoPessoa: empresa.tipoPessoa as 'PF' | 'PJ',
+      cpf: empresa.cpf,
+      cnpj: empresa.cnpj,
+    })
+    const enderecoLinha = enderecoEmpresaLinha({
+      endereco: empresa.endereco,
+      bairro: empresa.bairro,
+      cidadeUf: empresa.cidadeUf,
+      cep: empresa.cep,
+    })
+    return limparPartesRepetidas(
+      [documento, empresa.telefone, empresa.email, enderecoLinha].filter(Boolean).join(' • '),
+    )
+  }, [empresa])
 
   const osAprovada = useMemo(() => (os ? osEstaAprovada(os) : false), [os])
   const statusVisual = useMemo(() => statusOsCor(os?.status), [os?.status])

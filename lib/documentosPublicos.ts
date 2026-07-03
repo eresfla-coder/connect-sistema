@@ -2,6 +2,11 @@
 
 export type ConfigEmpresaPublica = {
   nomeEmpresa: string
+  tipoPessoa?: 'PF' | 'PJ'
+  cpf?: string
+  cnpj?: string
+  cep?: string
+  bairro?: string
   telefone: string
   whatsapp: string
   celularEmpresa: string
@@ -63,6 +68,11 @@ export function configEmpresaFromLocalStorage(): ConfigEmpresaPublica {
 
     return {
       nomeEmpresa: String(cfg?.nomeEmpresa || cfg?.nome_empresa || padrao.nomeEmpresa),
+      tipoPessoa: String(cfg?.tipoPessoa || cfg?.tipo_pessoa || 'PJ') === 'PF' ? 'PF' : 'PJ',
+      cpf: String(cfg?.cpf || ''),
+      cnpj: String(cfg?.cnpj || ''),
+      cep: String(cfg?.cep || ''),
+      bairro: String(cfg?.bairro || ''),
       telefone: String(tel),
       whatsapp: String(cfg?.whatsappEmpresa || cfg?.whatsapp || tel),
       celularEmpresa: String(cfg?.celularEmpresa || cfg?.celular || tel),
@@ -106,6 +116,11 @@ export function configRowSupabaseToPublica(row: Record<string, unknown>): Config
   const logoRaw = String(row.logo_url || '')
   return {
     nomeEmpresa: String(row.nome_empresa || row.nome_fantasia || ''),
+    tipoPessoa: String(row.tipo_pessoa || 'PJ') === 'PF' ? 'PF' : 'PJ',
+    cpf: String(row.cpf || ''),
+    cnpj: String(row.cnpj || ''),
+    cep: String(row.cep || ''),
+    bairro: String(row.bairro || ''),
     telefone: tel,
     whatsapp: String(row.whatsapp_empresa || tel),
     celularEmpresa: String(row.celular_empresa || tel),
@@ -144,6 +159,13 @@ export function mergeConfigPublicacao(
     }
     if (f.email != null) merged.email = String(f.email)
     if (f.endereco != null) merged.endereco = String(f.endereco)
+    if (f.bairro != null) merged.bairro = String(f.bairro)
+    if (f.cep != null) merged.cep = String(f.cep)
+    if (f.cpf != null) merged.cpf = String(f.cpf)
+    if (f.cnpj != null) merged.cnpj = String(f.cnpj)
+    if (f.tipoPessoa != null || f.tipo_pessoa != null) {
+      merged.tipoPessoa = String(f.tipoPessoa ?? f.tipo_pessoa) === 'PF' ? 'PF' : 'PJ'
+    }
     if (f.cidadeUf != null || f.cidade_uf != null) {
       merged.cidadeUf = String(f.cidadeUf ?? f.cidade_uf ?? merged.cidadeUf)
     }
