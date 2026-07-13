@@ -4,10 +4,14 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { CalculadoraPrecoM2Modal } from '@/components/produtos/CalculadoraPrecoM2Modal'
 import { ProdutosFabMenu } from '@/components/produtos/ProdutosFabMenu'
 import {
+  carregarProdutosPainelDetalhado,
+  salvarProdutosPainel,
+  type ProdutoPainel,
+} from '@/lib/produtos-painel'
+import {
   lerLocalStorageUsuario,
   obterUserIdPainel,
   obterUserIdPainelSync,
-  salvarLocalStorageUsuario,
 } from '@/lib/connect-user-storage'
 
 type Categoria = { id: number; nome: string; ativa: boolean }
@@ -15,23 +19,7 @@ type TipoCalculoProduto = 'unidade' | 'm2' | 'peso'
 type TipoCadastroProduto = 'produto' | 'servico'
 type StatusMargem = 'saudavel' | 'apertada' | 'risco'
 
-type Produto = {
-  id: number
-  nome: string
-  categoria: string
-  preco: number
-  custo: number
-  estoque: number
-  descricao: string
-  codigoBarras?: string
-  ativo: boolean
-  tipoCalculo?: TipoCalculoProduto
-  tipoCadastro?: TipoCadastroProduto
-  impostoPct?: number
-  taxaCartaoPct?: number
-  despesasPct?: number
-  comissaoPct?: number
-  lucroDesejadoPct?: number
+type Produto = ProdutoPainel & {
   precoSugerido?: number
   lucroEstimado?: number
   margemRealPct?: number
@@ -40,7 +28,6 @@ type Produto = {
 }
 
 const CATEGORIAS_KEY = 'connect_categorias'
-const PRODUTOS_KEY = 'connect_produtos'
 const DEFAULT_IMPOSTO = 6
 const DEFAULT_TAXA = 5
 const DEFAULT_DESPESAS = 0
@@ -189,15 +176,21 @@ export default function ProdutosPage() {
       setCarregando(true)
       setErroCarregamento('')
       try {
-        const id = (await obterUserIdPainel()) || obterUserIdPainelSync()
+        const resultado = await carregarProdutosPainelDetalhado('produtos-page')
         if (!ativo) return
-        setUserIdPainel(id)
-        carregarCategorias(id)
-        carregarProdutos(id)
+        setUserIdPainel(resultado.userId)
+        carregarCategorias(resultado.userId)
+        const normalizados = resultado.produtos
+          .map((item, index) => enriquecerProduto(item, index))
+          .filter((item): item is Produto => Boolean(item))
+        setProdutos(normalizados)
+        if (resultado.detalhe && normalizados.length === 0) {
+          setErroCarregamento('Não foi possível sincronizar os produtos na nuvem. Tente novamente.')
+        }
       } catch (error) {
         console.error('[PRODUTOS_LOAD]', error)
         if (ativo) {
-          setErroCarregamento('Não foi possível carregar os produtos deste aparelho.')
+          setErroCarregamento('Não foi possível carregar os produtos.')
           setProdutos([])
         }
       } finally {
@@ -208,8 +201,7 @@ export default function ProdutosPage() {
     void iniciar()
 
     const recarregar = () => {
-      const id = userIdPainel || obterUserIdPainelSync()
-      carregarProdutos(id)
+      void iniciar()
     }
     window.addEventListener('connect-data-change', recarregar)
     window.addEventListener('storage', recarregar)
@@ -284,24 +276,10 @@ export default function ProdutosPage() {
     }
   }
 
-  function carregarProdutos(userId?: string | null) {
-    const uid = userId ?? userIdPainel ?? obterUserIdPainelSync()
-    const lista = lerLocalStorageUsuario<Produto[]>(PRODUTOS_KEY, uid, [])
-    const normalizados = (Array.isArray(lista) ? lista : [])
-      .map((item, index) => enriquecerProduto(item, index))
-      .filter((item): item is Produto => Boolean(item))
-    setProdutos(normalizados)
-    console.info('[PRODUTOS_LOAD]', { quantidade: normalizados.length, userId: uid })
-  }
-
-  function salvarListaProdutos(lista: Produto[]) {
-    const uid = userIdPainel || obterUserIdPainelSync()
-    const ok = salvarLocalStorageUsuario(PRODUTOS_KEY, uid, lista)
-    if (!ok) {
-      throw new Error('Não foi possível salvar os produtos. O armazenamento do navegador pode estar cheio.')
-    }
+  async function salvarListaProdutos(lista: Produto[]) {
+    const uid = userIdPainel || obterUserIdPainelSync() || (await obterUserIdPainel())
+    await salvarProdutosPainel(uid, lista, 'produtos-page')
     setProdutos(lista)
-    window.dispatchEvent(new Event('connect-data-change'))
   }
 
   function limparFormulario() {
@@ -385,7 +363,7 @@ export default function ProdutosPage() {
 
   const labelPrecoVenda = tipoCalculo === 'm2' ? 'Preço de venda por m²' : 'Preço de venda'
 
-  function salvarProduto() {
+  async function salvarProduto() {
     if (!nome.trim()) return alert('Digite o nome do produto ou serviço.')
     const categoriaFinal = categoria.trim() || (tipoCadastro === 'servico' ? 'Serviços' : 'Produtos')
     const precoNumero = textoDecimalParaNumero(preco)
@@ -423,9 +401,9 @@ export default function ProdutosPage() {
     setSalvando(true)
     try {
       if (editandoId !== null) {
-        salvarListaProdutos(produtos.map((item) => item.id === editandoId ? { ...item, ...produtoBase } : item))
+        await salvarListaProdutos(produtos.map((item) => item.id === editandoId ? { ...item, ...produtoBase } : item))
       } else {
-        salvarListaProdutos([{ id: Date.now(), ...produtoBase }, ...produtos])
+        await salvarListaProdutos([{ id: Date.now(), ...produtoBase }, ...produtos])
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Não foi possível salvar o produto.'
@@ -437,10 +415,10 @@ export default function ProdutosPage() {
     }
   }
 
-  function excluirProduto(id: number) {
+  async function excluirProduto(id: number) {
     if (!window.confirm('Deseja excluir este produto/serviço?')) return
     try {
-      salvarListaProdutos(produtos.filter((item) => item.id !== id))
+      await salvarListaProdutos(produtos.filter((item) => item.id !== id))
       if (editandoId === id) limparFormulario()
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Não foi possível excluir o produto.'

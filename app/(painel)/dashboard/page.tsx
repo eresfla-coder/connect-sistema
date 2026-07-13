@@ -363,7 +363,8 @@ async function carregarDadosDashboard(opts?: { pularSupabase?: boolean }): Promi
   let orcamentos = lerOrcamentosPainelSync(userId).map(normalizarOrcamentoDashboard) as OrcamentoSalvo[]
   let ordens = lerOrdensPainelSync(userId).map(normalizarOsDashboard) as OrdemServicoResumo[]
 
-  const produtos = (await import('@/lib/connect-user-storage')).lerLocalStorageUsuario<ProdutoResumo[]>(PRODUTOS_KEY, userId, [])
+  const produtosLista = await (await import('@/lib/produtos-painel')).carregarProdutosPainel('dashboard').catch(() => [])
+  const produtos = produtosLista as ProdutoResumo[]
   const servicos = lerLocalJson<ServicoResumo[]>(SERVICOS_KEY, [])
   const financeiroTitulos = lerLocalJson<FinanceiroTituloResumo[]>(FINANCEIRO_KEY, [])
 

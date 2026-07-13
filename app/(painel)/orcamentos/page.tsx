@@ -19,6 +19,7 @@ import {
 } from '@/lib/orcamentoTextos'
 import { lerLocalStorageUsuario, obterUserIdPainel, salvarLocalStorageUsuario, storageKeyUsuario } from '@/lib/connect-user-storage'
 import { carregarClientesPainelDetalhado, clientePainelParaOrcamento, formatarEnderecoClienteVisual } from '@/lib/clientes-painel'
+import { carregarProdutosPainelDetalhado } from '@/lib/produtos-painel'
 import { puxarStorageDireto, salvarStorageDireto } from '@/lib/connect-supabase-direct'
 import { garantirPublicacaoOrcamento, type PublicacaoOrcamentoResult } from '@/lib/garantir-publicacao-orcamento'
 import { registrarLogSistema } from '@/lib/logs-sistema'
@@ -1979,24 +1980,20 @@ export default function OrcamentoPage() {
       await carregarOrcamentosSupabase('abertura-painel')
     })()
 
-    void obterUserIdPainel().then((userId) => {
-      try {
-        const lista = lerLocalStorageUsuario<unknown[]>(PRODUTOS_KEY, userId, [])
-        if (Array.isArray(lista) && lista.length > 0) {
-          const normalizados = lista
-            .map((produto: any, index: number): Produto => ({
-              id: Number(produto?.id ?? index + 1),
-              nome: String(produto?.nome ?? produto?.descricao ?? '').trim(),
-              valor: Number(produto?.valor ?? produto?.preco ?? 0),
-              codigoBarras: normalizarCodigoBarras(produto?.codigoBarras || produto?.codigo || produto?.ean || produto?.gtin || ''),
-              tipoCadastro: produto?.tipoCadastro === 'servico' ? 'servico' : 'produto',
-              tipoCalculo: produto?.tipoCalculo === 'm2' ? 'm2' : produto?.tipoCalculo === 'peso' ? 'peso' : 'unidade',
-            }))
-            .filter((produto: Produto) => Boolean(produto.nome))
+    void carregarProdutosPainelDetalhado('orcamentos').then(({ produtos: lista }) => {
+      if (!Array.isArray(lista) || lista.length === 0) return
+      const normalizados = lista
+        .map((produto, index): Produto => ({
+          id: Number(produto?.id ?? index + 1),
+          nome: String(produto?.nome ?? produto?.descricao ?? '').trim(),
+          valor: Number(produto?.preco ?? 0),
+          codigoBarras: normalizarCodigoBarras(produto?.codigoBarras || ''),
+          tipoCadastro: produto?.tipoCadastro === 'servico' ? 'servico' : 'produto',
+          tipoCalculo: produto?.tipoCalculo === 'm2' ? 'm2' : produto?.tipoCalculo === 'peso' ? 'peso' : 'unidade',
+        }))
+        .filter((produto: Produto) => Boolean(produto.nome))
 
-          if (normalizados.length > 0) setProdutos(normalizados)
-        }
-      } catch {}
+      if (normalizados.length > 0) setProdutos(normalizados)
     })
 
     void carregarClientesPainelDetalhado('orcamentos').then(({ clientes: lista }) => {
@@ -2017,21 +2014,17 @@ export default function OrcamentoPage() {
         } catch {}
         await carregarOrcamentosSupabase('connect-cloud-hydrated')
       })()
-      void obterUserIdPainel().then((userId) => {
-        try {
-          const lista = lerLocalStorageUsuario<unknown[]>(PRODUTOS_KEY, userId, [])
-          if (Array.isArray(lista) && lista.length > 0) {
-            const normalizados = lista.map((produto: any, index: number): Produto => ({
-              id: Number(produto?.id ?? index + 1),
-              nome: String(produto?.nome ?? produto?.descricao ?? '').trim(),
-              valor: Number(produto?.valor ?? produto?.preco ?? 0),
-              codigoBarras: normalizarCodigoBarras(produto?.codigoBarras || produto?.codigo || produto?.ean || produto?.gtin || ''),
-              tipoCadastro: produto?.tipoCadastro === 'servico' ? 'servico' : 'produto',
-              tipoCalculo: produto?.tipoCalculo === 'm2' ? 'm2' : produto?.tipoCalculo === 'peso' ? 'peso' : 'unidade',
-            })).filter((produto: Produto) => Boolean(produto.nome))
-            if (normalizados.length > 0) setProdutos(normalizados)
-          }
-        } catch {}
+      void carregarProdutosPainelDetalhado('orcamentos').then(({ produtos: lista }) => {
+        if (!Array.isArray(lista) || lista.length === 0) return
+        const normalizados = lista.map((produto, index): Produto => ({
+          id: Number(produto?.id ?? index + 1),
+          nome: String(produto?.nome ?? produto?.descricao ?? '').trim(),
+          valor: Number(produto?.preco ?? 0),
+          codigoBarras: normalizarCodigoBarras(produto?.codigoBarras || ''),
+          tipoCadastro: produto?.tipoCadastro === 'servico' ? 'servico' : 'produto',
+          tipoCalculo: produto?.tipoCalculo === 'm2' ? 'm2' : produto?.tipoCalculo === 'peso' ? 'peso' : 'unidade',
+        })).filter((produto: Produto) => Boolean(produto.nome))
+        if (normalizados.length > 0) setProdutos(normalizados)
       })
       void carregarClientesPainelDetalhado('orcamentos').then(({ clientes: lista }) => {
         setClientes(lista.map((cliente, index) => clientePainelParaOrcamento(cliente, index)))
