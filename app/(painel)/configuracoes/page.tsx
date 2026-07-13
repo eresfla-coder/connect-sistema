@@ -1,8 +1,10 @@
 'use client'
 
+import { mergeConnectValue } from '@/lib/connect-cloud-storage'
 import {
   buscarConfiguracao,
   salvarConfiguracao as salvarConfigApi,
+  salvarLocal as salvarConfigLocal,
   ConfiguracaoEmpresa,
   CONFIG_PADRAO as CONFIG_LIB_PADRAO,
   enderecoEmpresaLinha,
@@ -10,6 +12,7 @@ import {
   rotuloDocumentoEmpresa,
   type TipoPessoaEmpresa,
 } from '@/lib/configuracaoEmpresa'
+import { obterUserIdPainel, salvarLocalStorageUsuario } from '@/lib/connect-user-storage'
 import { buscarEnderecoPorCep } from '@/lib/viacep'
 import { ChangeEvent, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase-browser'
@@ -178,6 +181,34 @@ async function salvarConfigNaNuvem(config: ConfiguracaoSistema, categorias: stri
   return resposta.ok
 }
 
+function mapearConfigSupabase(cfgSupabase: ConfiguracaoEmpresa, extra?: Partial<ConfiguracaoSistema>): ConfiguracaoSistema {
+  return {
+    nomeEmpresa: cfgSupabase.nomeEmpresa || '',
+    tipoPessoa: normalizarTipoPessoaEmpresa(cfgSupabase.tipoPessoa),
+    cpf: cfgSupabase.cpf || '',
+    cnpj: cfgSupabase.cnpj || '',
+    cep: cfgSupabase.cep || '',
+    bairro: cfgSupabase.bairro || '',
+    telefone: cfgSupabase.telefone || cfgSupabase.whatsappEmpresa || '',
+    celularEmpresa: cfgSupabase.celularEmpresa || cfgSupabase.whatsappEmpresa || cfgSupabase.telefone || '',
+    email: cfgSupabase.email || '',
+    endereco: cfgSupabase.endereco || '',
+    cidadeUf: cfgSupabase.cidadeUf || '',
+    responsavel: cfgSupabase.responsavel || '',
+    logoUrl: cfgSupabase.logoUrl || '/logo-connect.png',
+    corPrimaria: cfgSupabase.corPrimaria || '#16a34a',
+    corSecundaria: cfgSupabase.corSecundaria || '#dcfce7',
+    corTabela: extra?.corTabela || '#f3f4f6',
+    tituloPdf: cfgSupabase.tituloPdf || 'Orçamento Comercial',
+    rodapePdf: cfgSupabase.rodapePdf || 'Obrigado pela preferência.',
+    validadePadrao: cfgSupabase.validadePadrao ?? '7 dias',
+    prazoEntregaPadrao: cfgSupabase.prazoEntregaPadrao ?? '3 dias',
+    formaPagamentoPadrao: cfgSupabase.formaPagamentoPadrao ?? 'PIX',
+    mostrarQuantidade: cfgSupabase.mostrarQuantidade ?? true,
+    ...extra,
+  }
+}
+
 export default function ConfiguracoesPage() {
   const [aba, setAba] = useState<AbaConfig>('empresa')
   const [isMobile, setIsMobile] = useState(false)
@@ -205,102 +236,97 @@ export default function ConfiguracoesPage() {
     let ativo = true
 
     async function carregarConfiguracoes() {
-      // 1. Tentar Supabase primeiro (fonte de verdade)
+      let mapeada: ConfiguracaoSistema = { ...CONFIG_PADRAO }
+
+      // 1. Supabase (dados da empresa)
       try {
         const cfgSupabase = await buscarConfiguracao()
         if (!ativo) return
-
-        const mapeada: ConfiguracaoSistema = {
-          nomeEmpresa: cfgSupabase.nomeEmpresa || '',
-          tipoPessoa: normalizarTipoPessoaEmpresa(cfgSupabase.tipoPessoa),
-          cpf: cfgSupabase.cpf || '',
-          cnpj: cfgSupabase.cnpj || '',
-          cep: cfgSupabase.cep || '',
-          bairro: cfgSupabase.bairro || '',
-          telefone: cfgSupabase.telefone || cfgSupabase.whatsappEmpresa || '',
-          celularEmpresa: cfgSupabase.celularEmpresa || cfgSupabase.whatsappEmpresa || cfgSupabase.telefone || '',
-          email: cfgSupabase.email || '',
-          endereco: cfgSupabase.endereco || '',
-          cidadeUf: cfgSupabase.cidadeUf || '',
-          responsavel: cfgSupabase.responsavel || '',
-          logoUrl: cfgSupabase.logoUrl || '/logo-connect.png',
-          corPrimaria: cfgSupabase.corPrimaria || '#16a34a',
-          corSecundaria: cfgSupabase.corSecundaria || '#dcfce7',
-          corTabela: '#f3f4f6',
-          tituloPdf: cfgSupabase.tituloPdf || 'Orçamento Comercial',
-          rodapePdf: cfgSupabase.rodapePdf || 'Obrigado pela preferência.',
-          validadePadrao: cfgSupabase.validadePadrao ?? '7 dias',
-          prazoEntregaPadrao: cfgSupabase.prazoEntregaPadrao ?? '3 dias',
-          formaPagamentoPadrao: cfgSupabase.formaPagamentoPadrao ?? 'PIX',
-          mostrarQuantidade: cfgSupabase.mostrarQuantidade ?? true,
-        }
-        setConfig(mapeada)
-
-        // Sincronizar localStorage como cache
-        localStorage.setItem(CONFIG_KEY, JSON.stringify(mapeada))
-
-        // Carregar categorias e formas de pagamento do localStorage
-        const cats = localStorage.getItem(CATEGORIAS_KEY)
-        if (cats && ativo) {
-          const lista = JSON.parse(cats)
-          if (Array.isArray(lista)) setCategorias(normalizarLista(lista))
-        }
-
-        const formas = localStorage.getItem(FORMAS_KEY)
-        if (formas && ativo) {
-          const lista = JSON.parse(formas)
-          if (Array.isArray(lista)) setFormasPagamento(normalizarLista(lista))
-        }
-
-        return // Sucesso no Supabase — não precisa fallback
+        mapeada = mapearConfigSupabase(cfgSupabase)
       } catch (e) {
         console.warn('[config] Erro ao carregar do Supabase:', e)
+        try {
+          const raw = localStorage.getItem(CONFIG_KEY)
+          if (raw && ativo) mapeada = { ...CONFIG_PADRAO, ...JSON.parse(raw) }
+        } catch {
+          /* ignore */
+        }
       }
 
-      // 2. Fallback: localStorage + nuvem legada
-      try {
-        const raw = localStorage.getItem(CONFIG_KEY)
-        if (raw && ativo) setConfig({ ...CONFIG_PADRAO, ...JSON.parse(raw) })
-
-        const cats = localStorage.getItem(CATEGORIAS_KEY)
-        if (cats && ativo) {
-          const lista = JSON.parse(cats)
-          if (Array.isArray(lista)) setCategorias(normalizarLista(lista))
-        }
-
-        const formas = localStorage.getItem(FORMAS_KEY)
-        if (formas && ativo) {
-          const lista = JSON.parse(formas)
-          if (Array.isArray(lista)) setFormasPagamento(normalizarLista(lista))
-        }
-      } catch {}
-
+      // 2. connect_storage — sempre mesclar (celular + PC)
       try {
         const nuvem = await carregarConfigDaNuvem()
-        if (!ativo || !nuvem) return
-
-        const configNuvem = nuvem[CONFIG_KEY]
-        const categoriasNuvem = nuvem[CATEGORIAS_KEY]
-        const formasNuvem = nuvem[FORMAS_KEY]
-
-        if (configNuvem && typeof configNuvem === 'object' && !Array.isArray(configNuvem)) {
-          const proxima = { ...CONFIG_PADRAO, ...(configNuvem as Partial<ConfiguracaoSistema>) }
-          setConfig(proxima)
-          localStorage.setItem(CONFIG_KEY, JSON.stringify(proxima))
+        if (!ativo || !nuvem) {
+          setConfig(mapeada)
+          return
         }
 
-        if (Array.isArray(categoriasNuvem)) {
+        const configNuvem = nuvem[CONFIG_KEY]
+        if (configNuvem && typeof configNuvem === 'object' && !Array.isArray(configNuvem)) {
+          const merged = mergeConnectValue(mapeada, configNuvem) as Partial<ConfiguracaoSistema>
+          mapeada = { ...CONFIG_PADRAO, ...mapeada, ...merged }
+        }
+
+        const categoriasNuvem = nuvem[CATEGORIAS_KEY]
+        if (Array.isArray(categoriasNuvem) && ativo) {
           const lista = normalizarLista(categoriasNuvem)
           setCategorias(lista)
           localStorage.setItem(CATEGORIAS_KEY, JSON.stringify(lista))
+        } else {
+          const cats = localStorage.getItem(CATEGORIAS_KEY)
+          if (cats && ativo) {
+            const lista = JSON.parse(cats)
+            if (Array.isArray(lista)) setCategorias(normalizarLista(lista))
+          }
         }
 
-        if (Array.isArray(formasNuvem)) {
+        const formasNuvem = nuvem[FORMAS_KEY]
+        if (Array.isArray(formasNuvem) && ativo) {
           const lista = normalizarLista(formasNuvem)
           setFormasPagamento(lista)
           localStorage.setItem(FORMAS_KEY, JSON.stringify(lista))
+        } else {
+          const formas = localStorage.getItem(FORMAS_KEY)
+          if (formas && ativo) {
+            const lista = JSON.parse(formas)
+            if (Array.isArray(lista)) setFormasPagamento(normalizarLista(lista))
+          }
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[config] Erro ao carregar connect_storage:', e)
+      }
+
+      if (!ativo) return
+      setConfig(mapeada)
+      const userId = await obterUserIdPainel()
+      salvarConfigLocal(
+        {
+          nomeEmpresa: mapeada.nomeEmpresa,
+          tipoPessoa: mapeada.tipoPessoa,
+          cpf: mapeada.cpf,
+          cnpj: mapeada.cnpj,
+          cep: mapeada.cep,
+          bairro: mapeada.bairro,
+          telefone: mapeada.telefone,
+          celularEmpresa: mapeada.celularEmpresa,
+          whatsappEmpresa: mapeada.celularEmpresa || mapeada.telefone,
+          email: mapeada.email,
+          endereco: mapeada.endereco,
+          cidadeUf: mapeada.cidadeUf,
+          responsavel: mapeada.responsavel,
+          logoUrl: mapeada.logoUrl,
+          corPrimaria: mapeada.corPrimaria,
+          corSecundaria: mapeada.corSecundaria,
+          tituloPdf: mapeada.tituloPdf,
+          rodapePdf: mapeada.rodapePdf,
+          validadePadrao: mapeada.validadePadrao,
+          prazoEntregaPadrao: mapeada.prazoEntregaPadrao,
+          formaPagamentoPadrao: mapeada.formaPagamentoPadrao,
+          mostrarQuantidade: mapeada.mostrarQuantidade,
+        },
+        userId,
+      )
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(mapeada))
     }
 
     carregarConfiguracoes()
@@ -478,19 +504,20 @@ export default function ConfiguracoesPage() {
       }
       await salvarConfigApi(cfgParaApi)
 
-      // 2. Salvar localStorage (cache + cores/PDF/validade)
+      const userId = await obterUserIdPainel()
+      salvarConfigLocal(cfgParaApi, userId)
+      salvarLocalStorageUsuario(CONFIG_KEY, userId, config)
       localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
       localStorage.setItem(CATEGORIAS_KEY, JSON.stringify(categorias))
       localStorage.setItem(FORMAS_KEY, JSON.stringify(formasPagamento))
       window.dispatchEvent(new Event('connect-data-change'))
 
-      // 3. Nuvem legacy (connect_storage) — config completa incluindo visual/PDF
       const okNuvem = await salvarConfigNaNuvem(config, categorias, formasPagamento)
 
       setMensagem(
         okNuvem
-          ? 'Configurações salvas e sincronizadas com sucesso!'
-          : 'Configurações salvas neste aparelho. Dados da empresa sincronizados.'
+          ? 'Configurações salvas e sincronizadas na nuvem!'
+          : 'Configurações salvas neste aparelho. Verifique sua conexão para sincronizar.',
       )
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Não foi possível salvar as configurações.'

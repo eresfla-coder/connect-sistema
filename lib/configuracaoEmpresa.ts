@@ -1,3 +1,9 @@
+import {
+  lerLocalStorageUsuario,
+  obterUserIdPainel,
+  obterUserIdPainelSync,
+  salvarLocalStorageUsuario,
+} from '@/lib/connect-user-storage'
 import { normalizarLogoEmpresaPublica } from '@/lib/documentosPublicos'
 import { supabase } from '@/lib/supabase'
 
@@ -124,12 +130,6 @@ function appToDbCore(cfg: ConfiguracaoEmpresa): Record<string, unknown> {
 /** Campos visuais/PDF — podem não existir na tabela; ficam no localStorage e connect_storage. */
 function camposPreferenciaLocal(cfg: ConfiguracaoEmpresa): Partial<ConfiguracaoEmpresa> {
   return {
-    tipoPessoa: cfg.tipoPessoa,
-    cpf: cfg.cpf,
-    cnpj: cfg.cnpj,
-    cep: cfg.cep,
-    bairro: cfg.bairro,
-    cidadeUf: cfg.cidadeUf,
     corPrimaria: cfg.corPrimaria,
     corSecundaria: cfg.corSecundaria,
     tituloPdf: cfg.tituloPdf,
@@ -146,17 +146,17 @@ function dbToApp(row: Record<string, unknown>, local?: ConfiguracaoEmpresa | nul
   const prefs = local ? camposPreferenciaLocal(local) : {}
   return {
     nomeEmpresa: String(row.nome_empresa || CONFIG_PADRAO.nomeEmpresa),
-    tipoPessoa: normalizarTipoPessoaEmpresa(prefs.tipoPessoa ?? row.tipo_pessoa),
-    cpf: prefs.cpf ?? String(row.cpf || ''),
-    cnpj: prefs.cnpj ?? String(row.cnpj || ''),
-    cep: prefs.cep ?? String(row.cep || ''),
-    bairro: prefs.bairro ?? String(row.bairro || ''),
+    tipoPessoa: normalizarTipoPessoaEmpresa(row.tipo_pessoa),
+    cpf: String(row.cpf || ''),
+    cnpj: String(row.cnpj || ''),
+    cep: String(row.cep || ''),
+    bairro: String(row.bairro || ''),
     telefone: contatos.telefone,
     celularEmpresa: contatos.celular,
     whatsappEmpresa: contatos.whatsapp,
     email: String(row.email || ''),
     endereco: String(row.endereco || ''),
-    cidadeUf: prefs.cidadeUf ?? String(row.cidade_uf || ''),
+    cidadeUf: String(row.cidade_uf || ''),
     responsavel: String(row.responsavel || ''),
     logoUrl: normalizarLogoEmpresaPublica(String(row.logo_url || '')) || CONFIG_PADRAO.logoUrl,
     corPrimaria: prefs.corPrimaria ?? (row.cor_primaria != null ? String(row.cor_primaria) : CONFIG_PADRAO.corPrimaria),
@@ -186,20 +186,28 @@ function dbToApp(row: Record<string, unknown>, local?: ConfiguracaoEmpresa | nul
 // BUSCAR (Com fallbacks)
 // ============================
 
-async function obterUserIdLogado(): Promise<string | null> {
+async function resolverUserIdComRetry(): Promise<string | null> {
   try {
-    const { data } = await supabase.auth.getSession()
-    return data.session?.user?.id || null
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user?.id) return user.id
   } catch {
-    return null
+    /* ignore */
   }
+
+  for (const delay of [0, 250, 700, 1500]) {
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
+    const uid = await obterUserIdPainel()
+    if (uid) return uid
+  }
+
+  return obterUserIdPainelSync()
 }
 
 /**
  * Buscador principal: Supabase (por user_id) → cache local → padrão
  */
 export async function buscarConfiguracao(): Promise<ConfiguracaoEmpresa> {
-  const userId = await obterUserIdLogado()
+  const userId = await resolverUserIdComRetry()
 
   if (userId) {
     try {
@@ -212,9 +220,9 @@ export async function buscarConfiguracao(): Promise<ConfiguracaoEmpresa> {
       if (error) {
         console.warn('[config] Supabase error:', error.message)
       } else if (data) {
-        const local = carregarLocal()
+        const local = carregarLocal(userId)
         const cfg = dbToApp(data as Record<string, unknown>, local)
-        salvarLocal(cfg)
+        salvarLocal(cfg, userId)
         return cfg
       }
     } catch (e) {
@@ -222,7 +230,7 @@ export async function buscarConfiguracao(): Promise<ConfiguracaoEmpresa> {
     }
   }
 
-  const local = carregarLocal()
+  const local = carregarLocal(userId)
   if (local) return local
 
   return { ...CONFIG_PADRAO }
@@ -233,7 +241,7 @@ export async function buscarConfiguracao(): Promise<ConfiguracaoEmpresa> {
  */
 export function buscarConfiguracaoSync(): ConfiguracaoEmpresa {
   // Sem await: usa localStorage (já sincronizado pelo app)
-  return carregarLocal() || { ...CONFIG_PADRAO }
+  return carregarLocal(obterUserIdPainelSync()) || { ...CONFIG_PADRAO }
 }
 
 // Público para uso direto em documentos que precisam buscar depois
@@ -250,17 +258,10 @@ interface SupabaseError {
 }
 
 export async function salvarConfiguracao(cfg: ConfiguracaoEmpresa): Promise<void> {
-  let userId: string | undefined
-
-  try {
-    const { data: session } = await supabase.auth.getSession()
-    userId = session?.session?.user?.id
-  } catch {
-    userId = undefined
-  }
+  const userId = await resolverUserIdComRetry()
 
   // Sempre salvar localStorage (fallback e cache)
-  salvarLocal(cfg)
+  salvarLocal(cfg, userId)
 
   if (!userId) {
     throw new Error('Faça login para salvar as configurações na nuvem.')
@@ -293,22 +294,24 @@ export async function salvarConfiguracao(cfg: ConfiguracaoEmpresa): Promise<void
 // LOCALSTORAGE (fallback/cache)
 // ============================
 
-export function salvarLocal(cfg: ConfiguracaoEmpresa): void {
+export function salvarLocal(cfg: ConfiguracaoEmpresa, userId?: string | null): void {
   if (typeof window === 'undefined') return
   try {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(cfg))
+    salvarLocalStorageUsuario(LOCAL_KEY, userId ?? obterUserIdPainelSync(), cfg)
   } catch {
     console.warn('[config] Falha ao salvar localStorage')
   }
 }
 
-export function carregarLocal(): ConfiguracaoEmpresa | null {
+export function carregarLocal(userId?: string | null): ConfiguracaoEmpresa | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = localStorage.getItem(LOCAL_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    // Merge com padrão para garantir campos novos
+    const parsed = lerLocalStorageUsuario<Partial<ConfiguracaoEmpresa> | null>(
+      LOCAL_KEY,
+      userId ?? obterUserIdPainelSync(),
+      null,
+    )
+    if (!parsed || typeof parsed !== 'object') return null
     return { ...CONFIG_PADRAO, ...parsed }
   } catch {
     return null

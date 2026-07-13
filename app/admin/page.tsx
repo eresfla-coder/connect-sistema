@@ -887,8 +887,11 @@ export default function AdminSaasMasterPage() {
       setMetaLocal(meta)
 
       const statusEdicao = editForm.status
-      const planoTier =
-        statusEdicao === 'ativo'
+      const valorPlano = parseMoney(editForm.valor_plano)
+      const definitivo = valorPlano === 0 || editForm.vencimento === '2099-12-31'
+      const planoTier = definitivo
+        ? 'empresa'
+        : statusEdicao === 'ativo'
           ? (editForm.plano_tier && editForm.plano_tier !== 'trial' ? editForm.plano_tier : 'starter')
           : editForm.plano_tier
 
@@ -896,13 +899,13 @@ export default function AdminSaasMasterPage() {
         email: editForm.email.trim().toLowerCase(),
         nome_empresa: editForm.nome_empresa.trim() || null,
         telefone: normalizePhone(editForm.telefone) || null,
-        valor_plano: parseMoney(editForm.valor_plano),
-        status: statusEdicao,
+        valor_plano: valorPlano,
+        status: definitivo ? 'ativo' : statusEdicao,
         plano_tier: planoTier,
         ativo: statusEdicao !== 'bloqueado',
-        vencimento: editForm.vencimento || null,
-        status_pagamento: statusEdicao === 'ativo' ? 'em_dia' : statusEdicao === 'trial' ? 'trial' : undefined,
-        ultimo_pagamento: statusEdicao === 'ativo' ? hojeISO() : undefined,
+        vencimento: definitivo ? '2099-12-31' : editForm.vencimento || null,
+        status_pagamento: definitivo || statusEdicao === 'ativo' ? 'em_dia' : statusEdicao === 'trial' ? 'trial' : undefined,
+        ultimo_pagamento: definitivo || statusEdicao === 'ativo' ? hojeISO() : undefined,
         sistema_cliente: editForm.sistema_cliente || 'Connect Sistema',
         observacoes: editForm.observacoes || null,
       })

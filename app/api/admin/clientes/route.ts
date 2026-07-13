@@ -33,6 +33,11 @@ function parseValorPlano(value?: string | number) {
   return Number.isFinite(numero) ? numero : 0
 }
 
+function isPerfilPermanenteAdmin(perfil: Record<string, unknown>) {
+  const vencimento = String(perfil.vencimento || '').slice(0, 10)
+  return vencimento === '2099-12-31' || Number(perfil.valor_plano || 0) === 0
+}
+
 function senhaTemporaria() {
   const aleatorio = Math.random().toString(36).slice(2, 6)
   const final = Date.now().toString().slice(-4)
@@ -173,6 +178,15 @@ export async function PATCH(req: Request) {
       }
     }
 
+    const { data: perfilAntes } = await supabaseAdmin
+      .from('perfis')
+      .select('vencimento,valor_plano,status,plano_tier')
+      .eq('id', id)
+      .maybeSingle()
+
+    const perfilPrevisto = { ...(perfilAntes || {}), ...safeUpdates }
+    const precisaSyncAssinatura = virouPagante || isPerfilPermanenteAdmin(perfilPrevisto)
+
     const updateCompleto = await supabaseAdmin
       .from('perfis')
       .update(safeUpdates)
@@ -208,7 +222,7 @@ export async function PATCH(req: Request) {
         }
 
         const clienteRetry = retry.data
-        if (clienteRetry && virouPagante) {
+        if (clienteRetry && precisaSyncAssinatura) {
           await sincronizarAssinaturaPagante(id, safeUpdates, clienteRetry)
         }
         return NextResponse.json({ ok: true, cliente: clienteRetry })
@@ -221,7 +235,7 @@ export async function PATCH(req: Request) {
     }
 
     const clienteAtualizado = updateCompleto.data
-    if (clienteAtualizado && virouPagante) {
+    if (clienteAtualizado && precisaSyncAssinatura) {
       await sincronizarAssinaturaPagante(id, safeUpdates, clienteAtualizado)
     }
 
@@ -242,8 +256,13 @@ async function sincronizarAssinaturaPagante(
   updates: Record<string, unknown>,
   perfil: Record<string, unknown>
 ) {
-  const tier = String(updates.plano_tier || perfil.plano_tier || 'starter')
-  const vencimento = String(updates.vencimento || perfil.vencimento || dataMaisDias(30)).slice(0, 10)
+  const permanente = isPerfilPermanenteAdmin(perfil)
+  let tier = String(updates.plano_tier || perfil.plano_tier || (permanente ? 'empresa' : 'starter'))
+  if (tier === 'trial') tier = permanente ? 'empresa' : 'starter'
+
+  const vencimento = permanente
+    ? '2099-12-31'
+    : String(updates.vencimento || perfil.vencimento || dataMaisDias(30)).slice(0, 10)
   const valorMensal = Number(updates.valor_plano ?? perfil.valor_plano ?? 0)
 
   try {

@@ -95,6 +95,11 @@ export function diasRestantesDeData(dataIso?: string | null): number | null {
   return Math.ceil((fim.getTime() - Date.now()) / 86400000)
 }
 
+export function isPerfilPermanente(perfil?: EntradaPerfilAssinatura | null): boolean {
+  const vencimento = String(perfil?.vencimento || '').slice(0, 10)
+  return vencimento === '2099-12-31' || Number(perfil?.valor_plano || 0) === 0
+}
+
 export function resolverSnapshotAssinatura(
   perfil?: EntradaPerfilAssinatura | null,
   assinatura?: EntradaAssinaturaDb | null,
@@ -107,10 +112,14 @@ export function resolverSnapshotAssinatura(
 
   const statusPerfil = normalizarStatus(perfil?.status)
   const statusAssinatura = String(assinatura?.status || '').toLowerCase()
+  const statusPagamento = String((perfil as { status_pagamento?: string | null })?.status_pagamento || '').toLowerCase()
   const ativoPerfil = perfil?.ativo !== false
+  const permanente = isPerfilPermanente(perfil)
 
   let tier = normalizarTier(assinatura?.plano_tier || assinatura?.plano || perfil?.plano_tier)
-  if (tier === 'trial' && Number(perfil?.valor_plano || 0) > 0) {
+  if (permanente && statusPerfil === 'ativo') {
+    tier = tier === 'trial' ? 'empresa' : tier
+  } else if (tier === 'trial' && Number(perfil?.valor_plano || 0) > 0) {
     tier = tierPorValor(Number(perfil?.valor_plano))
   }
 
@@ -121,10 +130,17 @@ export function resolverSnapshotAssinatura(
 
   const vencimento = perfil?.vencimento || assinatura?.data_fim || assinatura?.data_trial_fim || null
   const diasTrial = diasRestantesDeData(assinatura?.data_trial_fim || vencimento)
+  const paganteAtivo =
+    statusPerfil === 'ativo' &&
+    (permanente || statusAssinatura === 'ativa' || statusPagamento === 'pago' || statusPagamento === 'em_dia')
+
   const emTrial =
-    statusPerfil === 'teste' ||
-    statusAssinatura === 'trial' ||
-    (diasTrial !== null && diasTrial >= 0 && tier === 'trial')
+    !paganteAtivo &&
+    !permanente &&
+    (statusPerfil === 'teste' ||
+      statusPerfil === 'trial' ||
+      statusAssinatura === 'trial' ||
+      (diasTrial !== null && diasTrial >= 0 && tier === 'trial'))
 
   const expirado = diasRestantesDeData(vencimento) !== null && (diasRestantesDeData(vencimento) as number) < 0
   const bloqueado = !ativoPerfil || statusPerfil === 'bloqueado' || statusAssinatura === 'cancelada' || expirado
