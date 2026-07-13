@@ -79,7 +79,11 @@ export function lerLocalStorageUsuario<T>(baseKey: string, userId: string | null
 
   const scopedKey = storageKeyUsuario(baseKey, userId)
   const scopedRaw = localStorage.getItem(scopedKey)
-  if (scopedRaw) return parseJsonSafe(scopedRaw, fallback)
+  if (scopedRaw) {
+    const scopedValue = parseJsonSafe<T>(scopedRaw, fallback)
+    const scopedVazio = Array.isArray(scopedValue) && scopedValue.length === 0
+    if (!scopedVazio) return scopedValue
+  }
 
   const globalRaw = localStorage.getItem(baseKey)
   if (!globalRaw) return fallback
@@ -97,14 +101,22 @@ export function lerLocalStorageUsuario<T>(baseKey: string, userId: string | null
 }
 
 /** Grava localStorage isolado por usuário; em demo usa chave global. */
-export function salvarLocalStorageUsuario(baseKey: string, userId: string | null | undefined, value: unknown) {
-  if (typeof window === 'undefined') return
+export function salvarLocalStorageUsuario(baseKey: string, userId: string | null | undefined, value: unknown): boolean {
+  if (typeof window === 'undefined') return true
 
   const raw = JSON.stringify(value)
-  if (isDemoMode() || !userId) {
-    localStorage.setItem(baseKey, raw)
-    return
-  }
+  const uid = userId || obterUserIdPainelSync()
 
-  localStorage.setItem(storageKeyUsuario(baseKey, userId), raw)
+  try {
+    if (isDemoMode() || !uid) {
+      localStorage.setItem(baseKey, raw)
+      return true
+    }
+
+    localStorage.setItem(storageKeyUsuario(baseKey, uid), raw)
+    return true
+  } catch (error) {
+    console.error('[storage] Falha ao salvar', baseKey, error)
+    return false
+  }
 }

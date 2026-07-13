@@ -6,6 +6,7 @@ import { ProdutosFabMenu } from '@/components/produtos/ProdutosFabMenu'
 import {
   lerLocalStorageUsuario,
   obterUserIdPainel,
+  obterUserIdPainelSync,
   salvarLocalStorageUsuario,
 } from '@/lib/connect-user-storage'
 
@@ -151,6 +152,8 @@ export default function ProdutosPage() {
   const [userIdPainel, setUserIdPainel] = useState<string | null>(null)
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [produtos, setProdutos] = useState<Produto[]>([])
+  const [carregando, setCarregando] = useState(true)
+  const [erroCarregamento, setErroCarregamento] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [editandoId, setEditandoId] = useState<number | null>(null)
   const [busca, setBusca] = useState('')
@@ -181,14 +184,42 @@ export default function ProdutosPage() {
 
   useEffect(() => {
     let ativo = true
-    obterUserIdPainel().then((id) => {
-      if (!ativo) return
-      setUserIdPainel(id)
-      carregarCategorias(id)
+
+    async function iniciar() {
+      setCarregando(true)
+      setErroCarregamento('')
+      try {
+        const id = (await obterUserIdPainel()) || obterUserIdPainelSync()
+        if (!ativo) return
+        setUserIdPainel(id)
+        carregarCategorias(id)
+        carregarProdutos(id)
+      } catch (error) {
+        console.error('[PRODUTOS_LOAD]', error)
+        if (ativo) {
+          setErroCarregamento('Não foi possível carregar os produtos deste aparelho.')
+          setProdutos([])
+        }
+      } finally {
+        if (ativo) setCarregando(false)
+      }
+    }
+
+    void iniciar()
+
+    const recarregar = () => {
+      const id = userIdPainel || obterUserIdPainelSync()
       carregarProdutos(id)
-    })
+    }
+    window.addEventListener('connect-data-change', recarregar)
+    window.addEventListener('storage', recarregar)
+
     return () => {
       ativo = false
+      window.removeEventListener('connect-data-change', recarregar)
+      window.removeEventListener('storage', recarregar)
+      setDrawerAberto(false)
+      setCalculadoraM2Aberta(false)
     }
   }, [])
 
@@ -213,7 +244,9 @@ export default function ProdutosPage() {
     }
   }
 
-  function enriquecerProduto(item: any, index: number): Produto {
+  function enriquecerProduto(item: any, index: number): Produto | null {
+    if (!item || typeof item !== 'object') return null
+    try {
     const custoNumero = Number(item.custo || 0)
     const precoNumero = Number(item.preco ?? item.valor ?? 0)
     const imposto = Number(item.impostoPct ?? DEFAULT_IMPOSTO)
@@ -245,16 +278,30 @@ export default function ProdutosPage() {
       markup: calculo.markup,
       statusMargem: calculo.statusMargem,
     }
+    } catch (error) {
+      console.warn('[PRODUTOS_PARSE]', error, item)
+      return null
+    }
   }
 
   function carregarProdutos(userId?: string | null) {
-    const lista = lerLocalStorageUsuario<Produto[]>(PRODUTOS_KEY, userId ?? userIdPainel, [])
-    setProdutos(Array.isArray(lista) ? lista.map(enriquecerProduto) : [])
+    const uid = userId ?? userIdPainel ?? obterUserIdPainelSync()
+    const lista = lerLocalStorageUsuario<Produto[]>(PRODUTOS_KEY, uid, [])
+    const normalizados = (Array.isArray(lista) ? lista : [])
+      .map((item, index) => enriquecerProduto(item, index))
+      .filter((item): item is Produto => Boolean(item))
+    setProdutos(normalizados)
+    console.info('[PRODUTOS_LOAD]', { quantidade: normalizados.length, userId: uid })
   }
 
   function salvarListaProdutos(lista: Produto[]) {
+    const uid = userIdPainel || obterUserIdPainelSync()
+    const ok = salvarLocalStorageUsuario(PRODUTOS_KEY, uid, lista)
+    if (!ok) {
+      throw new Error('Não foi possível salvar os produtos. O armazenamento do navegador pode estar cheio.')
+    }
     setProdutos(lista)
-    salvarLocalStorageUsuario(PRODUTOS_KEY, userIdPainel, lista)
+    window.dispatchEvent(new Event('connect-data-change'))
   }
 
   function limparFormulario() {
@@ -374,19 +421,31 @@ export default function ProdutosPage() {
     }
 
     setSalvando(true)
-    if (editandoId !== null) {
-      salvarListaProdutos(produtos.map((item) => item.id === editandoId ? { ...item, ...produtoBase } : item))
-    } else {
-      salvarListaProdutos([{ id: Date.now(), ...produtoBase }, ...produtos])
+    try {
+      if (editandoId !== null) {
+        salvarListaProdutos(produtos.map((item) => item.id === editandoId ? { ...item, ...produtoBase } : item))
+      } else {
+        salvarListaProdutos([{ id: Date.now(), ...produtoBase }, ...produtos])
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Não foi possível salvar o produto.'
+      alert(msg)
+      return
+    } finally {
+      setSalvando(false)
+      fecharDrawer()
     }
-    setSalvando(false)
-    fecharDrawer()
   }
 
   function excluirProduto(id: number) {
     if (!window.confirm('Deseja excluir este produto/serviço?')) return
-    salvarListaProdutos(produtos.filter((item) => item.id !== id))
-    if (editandoId === id) limparFormulario()
+    try {
+      salvarListaProdutos(produtos.filter((item) => item.id !== id))
+      if (editandoId === id) limparFormulario()
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Não foi possível excluir o produto.'
+      alert(msg)
+    }
   }
 
   const categoriasAtivas = useMemo(() => categorias.filter((item) => item.ativa), [categorias])
@@ -416,6 +475,14 @@ export default function ProdutosPage() {
 
   return (
     <div style={{ maxWidth: 1360, margin: '0 auto', padding: isMobile ? 12 : 24, color: '#0f172a' }}>
+      {carregando ? (
+        <div style={{ padding: 40, textAlign: 'center', color: '#64748b', fontWeight: 800 }}>Carregando produtos...</div>
+      ) : null}
+      {erroCarregamento ? (
+        <div style={{ marginBottom: 16, padding: 14, borderRadius: 14, background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontWeight: 800 }}>
+          {erroCarregamento}
+        </div>
+      ) : null}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 18 }}>
         <div>
           <div style={{ color: '#64748b', fontSize: 12, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.4 }}>Cadastro Connect</div>
