@@ -61,6 +61,7 @@ export type EntradaPerfilAssinatura = {
   vencimento?: string | null
   valor_plano?: number | null
   plano_tier?: string | null
+  status_pagamento?: string | null
 }
 
 export type EntradaAssinaturaDb = {
@@ -112,8 +113,13 @@ export function resolverSnapshotAssinatura(
 
   const statusPerfil = normalizarStatus(perfil?.status)
   const statusAssinatura = String(assinatura?.status || '').toLowerCase()
+  const statusPagamento = String(perfil?.status_pagamento || '').toLowerCase()
   const ativoPerfil = perfil?.ativo !== false
   const permanente = isPerfilPermanente(perfil)
+  const paganteConfirmado =
+    statusPagamento === 'pago' ||
+    statusPagamento === 'em_dia' ||
+    statusAssinatura === 'ativa'
 
   let tier = normalizarTier(assinatura?.plano_tier || assinatura?.plano || perfil?.plano_tier)
   if (permanente && statusPerfil === 'ativo') {
@@ -143,7 +149,7 @@ export function resolverSnapshotAssinatura(
   const expirado = diasRestantesDeData(vencimento) !== null && (diasRestantesDeData(vencimento) as number) < 0
   const bloqueado = !ativoPerfil || statusPerfil === 'bloqueado' || statusAssinatura === 'cancelada' || expirado
 
-  if (permanente || statusPerfil === 'ativo') {
+  if (permanente || statusPerfil === 'ativo' || paganteConfirmado) {
     emTrial = false
   }
 

@@ -3,6 +3,7 @@ import { dataMaisDias } from '@/lib/access'
 import { isUsuarioAdminServer } from '@/lib/access-server'
 import { PLANOS_CATALOGO, TRIAL_DIAS, type PlanoTier, type RecorrenciaPlano } from '@/lib/planosSaaS'
 import { isPerfilPermanente, resolverSnapshotAssinatura } from '@/lib/assinaturaAcesso'
+import { normalizarStatus } from '@/lib/access'
 
 type PerfilAssinaturaSync = {
   id?: string
@@ -128,6 +129,16 @@ export async function obterAssinaturaUsuario(userId: string) {
       .eq('user_id', userId)
       .maybeSingle(),
   ])
+
+  if (
+    perfil &&
+    (normalizarStatus(perfil.status) === 'teste' || String(perfil.status || '').toLowerCase() === 'trial') &&
+    ['pago', 'em_dia'].includes(String(perfil.status_pagamento || '').toLowerCase())
+  ) {
+    await supabase.from('perfis').update({ status: 'ativo', ativo: true }).eq('id', userId)
+    perfil.status = 'ativo'
+    perfil.ativo = true
+  }
 
   const snapshot = resolverSnapshotAssinatura(perfil, assinatura, 0, {
     email: perfil?.email || null,
