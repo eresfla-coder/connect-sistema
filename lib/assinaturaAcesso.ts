@@ -112,7 +112,6 @@ export function resolverSnapshotAssinatura(
 
   const statusPerfil = normalizarStatus(perfil?.status)
   const statusAssinatura = String(assinatura?.status || '').toLowerCase()
-  const statusPagamento = String((perfil as { status_pagamento?: string | null })?.status_pagamento || '').toLowerCase()
   const ativoPerfil = perfil?.ativo !== false
   const permanente = isPerfilPermanente(perfil)
 
@@ -129,14 +128,13 @@ export function resolverSnapshotAssinatura(
   const limiteUsuarios = cfg?.limites.usuarios ?? 1
 
   const vencimento = perfil?.vencimento || assinatura?.data_fim || assinatura?.data_trial_fim || null
-  const diasTrial = diasRestantesDeData(assinatura?.data_trial_fim || vencimento)
-  const paganteAtivo =
-    statusPerfil === 'ativo' &&
-    (permanente || statusAssinatura === 'ativa' || statusPagamento === 'pago' || statusPagamento === 'em_dia')
+  const diasTrial = diasRestantesDeData(
+    assinatura?.data_trial_fim || (statusPerfil === 'trial' || statusPerfil === 'teste' ? vencimento : null),
+  )
 
-  const emTrial =
-    !paganteAtivo &&
+  let emTrial =
     !permanente &&
+    statusPerfil !== 'ativo' &&
     (statusPerfil === 'teste' ||
       statusPerfil === 'trial' ||
       statusAssinatura === 'trial' ||
@@ -144,6 +142,10 @@ export function resolverSnapshotAssinatura(
 
   const expirado = diasRestantesDeData(vencimento) !== null && (diasRestantesDeData(vencimento) as number) < 0
   const bloqueado = !ativoPerfil || statusPerfil === 'bloqueado' || statusAssinatura === 'cancelada' || expirado
+
+  if (permanente || statusPerfil === 'ativo') {
+    emTrial = false
+  }
 
   return {
     tier: emTrial && tier !== 'empresa' && tier !== 'pro' ? 'trial' : tier,

@@ -2,7 +2,64 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { dataMaisDias } from '@/lib/access'
 import { isUsuarioAdminServer } from '@/lib/access-server'
 import { PLANOS_CATALOGO, TRIAL_DIAS, type PlanoTier, type RecorrenciaPlano } from '@/lib/planosSaaS'
-import { resolverSnapshotAssinatura } from '@/lib/assinaturaAcesso'
+import { isPerfilPermanente, resolverSnapshotAssinatura } from '@/lib/assinaturaAcesso'
+
+type PerfilAssinaturaSync = {
+  id?: string
+  status?: string | null
+  ativo?: boolean | null
+  vencimento?: string | null
+  valor_plano?: number | null
+  plano_tier?: string | null
+  status_pagamento?: string | null
+}
+
+export async function sincronizarAssinaturaComPerfil(userId: string, perfil?: PerfilAssinaturaSync | null) {
+  if (!perfil?.id && !userId) return false
+
+  const statusNorm = String(perfil?.status || '').toLowerCase()
+  const permanente = isPerfilPermanente(perfil)
+  const pagante =
+    permanente ||
+    statusNorm === 'ativo' ||
+    ['pago', 'em_dia'].includes(String(perfil?.status_pagamento || '').toLowerCase())
+
+  if (!pagante) return false
+
+  const supabase = getSupabaseAdmin()
+  let tier = String(perfil?.plano_tier || (permanente ? 'empresa' : 'starter'))
+  if (tier === 'trial') tier = permanente ? 'empresa' : 'starter'
+
+  const vencimento = permanente
+    ? '2099-12-31'
+    : String(perfil?.vencimento || dataMaisDias(30)).slice(0, 10)
+  const valorMensal = Number(perfil?.valor_plano ?? 0)
+
+  const { error } = await supabase.from('assinaturas').upsert(
+    {
+      user_id: userId,
+      plano: `${tier}_mensal`,
+      plano_tier: tier,
+      status: 'ativa',
+      data_fim: `${vencimento}T23:59:59.999Z`,
+      data_trial_fim: null,
+      proxima_cobranca: vencimento,
+      trial_dias: 0,
+      renovacao_automatica: false,
+      valor_mensal: valorMensal > 0 ? valorMensal : null,
+      gateway: 'manual',
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' },
+  )
+
+  if (error) {
+    console.warn('[ASSINATURA_SYNC_PERFIL]', error.message)
+    return false
+  }
+
+  return true
+}
 
 export async function garantirTrialAssinatura(userId: string, email?: string | null) {
   if (isUsuarioAdminServer({ email })) {
@@ -10,7 +67,17 @@ export async function garantirTrialAssinatura(userId: string, email?: string | n
   }
 
   const supabase = getSupabaseAdmin()
-  const agora = new Date()
+  const { data: perfil } = await supabase
+    .from('perfis')
+    .select('id,status,ativo,vencimento,plano_tier,valor_plano,status_pagamento')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (perfil && (isPerfilPermanente(perfil) || String(perfil.status || '').toLowerCase() === 'ativo')) {
+    await sincronizarAssinaturaComPerfil(userId, perfil)
+    return { trialFim: null, email, skip: true as const }
+  }
+
   const trialFim = dataMaisDias(TRIAL_DIAS)
 
   const { data: assinatura } = await supabase
@@ -35,8 +102,6 @@ export async function garantirTrialAssinatura(userId: string, email?: string | n
       { onConflict: 'user_id' },
     )
   }
-
-  const { data: perfil } = await supabase.from('perfis').select('id,status,vencimento,plano_tier').eq('id', userId).maybeSingle()
 
   if (perfil && String(perfil.status || '').toLowerCase() === 'trial' && !perfil.vencimento) {
     await supabase
