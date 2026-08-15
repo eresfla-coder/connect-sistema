@@ -365,21 +365,37 @@ export default function PainelLayout({
         badge: orcamentosBadge,
       },
       {
-        nome: "OS / Recibos",
+        nome: "Ordem de Serviço",
         href: "/ordens-servico",
         icone: "🔧",
         badge: osBadge,
       },
+      { nome: "Recibos", href: "/recibo-avulso", icone: "🧾" },
       { nome: "Clientes", href: "/clientes", icone: "👥" },
       { nome: "Manutenções", href: "/manutencoes", icone: "🛠️", destaque: true },
       { nome: "Contratos", href: "/contratos", icone: "📄" },
-      { nome: "CRM", href: "/crm", icone: "🤖", badge: resumoCRMBadge },
       { nome: "Produtos", href: "/produtos", icone: "📦" },
       { nome: "Assinatura", href: "/assinatura", icone: "💳" },
       { nome: "Config", href: "/configuracoes", icone: "⚙️" },
     ],
-    [orcamentosBadge, osBadge, resumoCRMBadge, adminLogado],
+    [orcamentosBadge, osBadge, adminLogado],
   );
+
+  function menuItemAtivo(item: MenuItem) {
+    const path = pathname || "";
+    if (item.nome === "Recibos") {
+      return (
+        path === "/recibo-avulso" ||
+        path.startsWith("/recibo-avulso/") ||
+        path === "/recibos" ||
+        path.startsWith("/recibos/")
+      );
+    }
+    if (item.nome === "Ordem de Serviço") {
+      return path === "/ordens-servico" || path.startsWith("/ordens-servico/");
+    }
+    return path === item.href || path.startsWith(`${item.href}/`);
+  }
 
   function estiloMenuItem(item: MenuItem, ativo: boolean) {
     const base: Record<string, { bg: string; shadow: string; border: string }> =
@@ -394,20 +410,20 @@ export default function PainelLayout({
           shadow: "0 14px 30px rgba(34,197,94,.26)",
           border: "1px solid rgba(134,239,172,.42)",
         },
-        "OS / Recibos": {
+        "Ordem de Serviço": {
           bg: "linear-gradient(135deg,#0ea5e9 0%,#2563eb 52%,#1e3a8a 100%)",
           shadow: "0 14px 30px rgba(14,165,233,.23)",
           border: "1px solid rgba(125,211,252,.38)",
+        },
+        Recibos: {
+          bg: "linear-gradient(135deg,#14b8a6 0%,#0d9488 52%,#115e59 100%)",
+          shadow: "0 14px 30px rgba(13,148,136,.22)",
+          border: "1px solid rgba(94,234,212,.38)",
         },
         Clientes: {
           bg: "linear-gradient(135deg,#8b5cf6 0%,#7c3aed 50%,#4c1d95 100%)",
           shadow: "0 14px 30px rgba(139,92,246,.22)",
           border: "1px solid rgba(196,181,253,.35)",
-        },
-        CRM: {
-          bg: "linear-gradient(135deg,#ec4899 0%,#8b5cf6 48%,#3730a3 100%)",
-          shadow: "0 14px 30px rgba(236,72,153,.20)",
-          border: "1px solid rgba(244,114,182,.34)",
         },
         Manutenções: {
           bg: "linear-gradient(135deg,#0891b2 0%,#0f766e 54%,#14532d 100%)",
@@ -684,7 +700,7 @@ export default function PainelLayout({
 
             <nav style={{ display: "grid", gap: 9 }}>
               {menu.map((item) => {
-                const ativo = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                const ativo = menuItemAtivo(item);
 
                 return (
                   <Link
