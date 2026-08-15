@@ -371,11 +371,10 @@ export default function PainelLayout({
         badge: osBadge,
       },
       { nome: "Clientes", href: "/clientes", icone: "👥" },
+      { nome: "Manutenções", href: "/manutencoes", icone: "🛠️", destaque: true },
       { nome: "Contratos", href: "/contratos", icone: "📄" },
       { nome: "CRM", href: "/crm", icone: "🤖", badge: resumoCRMBadge },
-      { nome: "Connect AI", href: "/connect-ai", icone: "✨", destaque: true },
       { nome: "Produtos", href: "/produtos", icone: "📦" },
-      { nome: "Financeiro", href: "/financeiro", icone: "💸" },
       { nome: "Assinatura", href: "/assinatura", icone: "💳" },
       { nome: "Config", href: "/configuracoes", icone: "⚙️" },
     ],
@@ -410,20 +409,15 @@ export default function PainelLayout({
           shadow: "0 14px 30px rgba(236,72,153,.20)",
           border: "1px solid rgba(244,114,182,.34)",
         },
-        "Connect AI": {
-          bg: "linear-gradient(135deg,#10b981 0%,#06b6d4 54%,#2563eb 100%)",
-          shadow: "0 14px 30px rgba(6,182,212,.22)",
-          border: "1px solid rgba(103,232,249,.38)",
+        Manutenções: {
+          bg: "linear-gradient(135deg,#0891b2 0%,#0f766e 54%,#14532d 100%)",
+          shadow: "0 14px 30px rgba(13,148,136,.22)",
+          border: "1px solid rgba(94,234,212,.38)",
         },
         Produtos: {
           bg: "linear-gradient(135deg,#f97316 0%,#ea580c 52%,#9a3412 100%)",
           shadow: "0 14px 30px rgba(249,115,22,.22)",
           border: "1px solid rgba(253,186,116,.38)",
-        },
-        Financeiro: {
-          bg: "linear-gradient(135deg,#84cc16 0%,#16a34a 52%,#065f46 100%)",
-          shadow: "0 14px 30px rgba(34,197,94,.22)",
-          border: "1px solid rgba(190,242,100,.35)",
         },
         Assinatura: {
           bg: "linear-gradient(135deg,#f59e0b 0%,#2563eb 52%,#1e1b4b 100%)",

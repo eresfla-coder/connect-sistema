@@ -6,6 +6,7 @@ import {
   salvarLocalStorageUsuario,
 } from '@/lib/connect-user-storage'
 import { supabase } from '@/lib/supabase-browser'
+import { parseNumeroMonetario } from '@/lib/numero-monetario'
 
 export const PRODUTOS_KEY = 'connect_produtos'
 
@@ -94,7 +95,15 @@ export function normalizarProdutoPainel(item: unknown, index = 0): ProdutoPainel
     id: Number(row.id ?? Date.now() + index),
     nome,
     categoria: String(row.categoria || ''),
-    preco: Number(row.preco ?? row.valor ?? 0),
+    preco: parseNumeroMonetario(
+      row.preco ??
+      row.valor ??
+      row.precoVenda ??
+      row.preco_venda ??
+      row.valorServico ??
+      row.valor_servico ??
+      0,
+    ),
     custo: Number(row.custo || 0),
     estoque: Number(row.estoque || 0),
     descricao: String(row.descricao || ''),

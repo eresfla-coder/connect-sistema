@@ -21,6 +21,7 @@ import {
   lerOrdensPainelSync,
   lerOrcamentosPainelSync,
 } from '@/lib/orcamentos-local'
+import ManutencoesDashboardCard from '@/components/manutencoes/ManutencoesDashboardCard'
 
 type ClienteResumo = { nome?: string; telefone?: string }
 
@@ -835,6 +836,8 @@ export default function DashboardPage() {
           <MiniKpi title="Margem média" value={`${precificacao.margemMedia.toFixed(1)}%`} icon="◔" tone={precificacao.margemMedia < 20 ? 'yellow' : 'green'} />
           <MiniKpi title="Risco" value={numero(precificacao.risco)} icon="⚠" tone={precificacao.risco > 0 ? 'red' : 'green'} />
         </section>
+
+        <ManutencoesDashboardCard />
 
         <section style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.1fr .9fr', gap: 18, minWidth: 0 }}>
           <div style={{ ...glass, padding: isMobile ? 16 : 20 }}>
