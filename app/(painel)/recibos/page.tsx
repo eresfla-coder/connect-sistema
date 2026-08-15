@@ -82,7 +82,7 @@ export default function RecibosPage() {
     <ReciboEmitidoView
       dados={dados}
       isMobile={isMobile}
-      onFechar={() => router.push('/ordens-servico')}
+      onFechar={() => router.push('/recibo-avulso')}
       onVoltar={() => router.push('/recibo-avulso')}
       onNovo={() => router.push('/recibo-avulso')}
       onEnviarLink={enviarWhatsApp}

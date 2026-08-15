@@ -24,6 +24,7 @@ import { puxarStorageDireto, salvarStorageDireto } from '@/lib/connect-supabase-
 import { garantirPublicacaoOrcamento, type PublicacaoOrcamentoResult } from '@/lib/garantir-publicacao-orcamento'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOrcamentosExcel } from '@/lib/export-modulos'
+import { criarGuardaAcaoUnica } from '@/lib/acao-unica'
 type TipoPessoaCliente = 'PF' | 'PJ'
 
 type Cliente = {
@@ -206,6 +207,7 @@ const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
 const ORCAMENTOS_EXCLUIDOS_CLOUD_KEY = 'connect_orcamentos_excluidos'
 const ORCAMENTOS_DELETED_PREFIX = 'connect_orcamentos_deleted_'
 const ORCAMENTO_LOCAL_PENDENTE_MS = 3 * 60 * 1000
+const CACHE_CONFIG_PUBLICACAO_MS = 60 * 1000
 
 const exclusoesRecentesOrcamentos = new Map<string, number>()
 let bloquearSyncOrcamentosAte = 0
@@ -1161,6 +1163,17 @@ export default function OrcamentoPage() {
 
   const [isMobile, setIsMobile] = useState(false)
   const [zapOrcCarregando, setZapOrcCarregando] = useState<number | null>(null)
+  const [orcamentoAbrindoId, setOrcamentoAbrindoId] = useState<number | null>(null)
+  const guardaAbrirOrcamento = useMemo(
+    () => criarGuardaAcaoUnica<number>({ aoMudar: setOrcamentoAbrindoId, liberarNoSucesso: false }),
+    [],
+  )
+  /** Evita refazer getUser + select de configuração em cada abertura de orçamento. */
+  const cfgPublicacaoCacheRef = useRef<{
+    atualizadoEm: number
+    base: ConfiguracaoSistema
+    valor: ReturnType<typeof mergeConfigPublicacao>
+  } | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [darkMode, setDarkMode] = useState(false)
 
@@ -2541,9 +2554,16 @@ export default function OrcamentoPage() {
   }
 
   async function configParaPublicar() {
+    const cache = cfgPublicacaoCacheRef.current
+    if (cache && cache.base === config && Date.now() - cache.atualizadoEm < CACHE_CONFIG_PUBLICACAO_MS) {
+      return cache.valor
+    }
+
     try {
       const nuvem = await buscarConfiguracao()
-      return mergeConfigPublicacao(config, nuvem)
+      const valor = mergeConfigPublicacao(config, nuvem)
+      cfgPublicacaoCacheRef.current = { atualizadoEm: Date.now(), base: config, valor }
+      return valor
     } catch {
       return mergeConfigPublicacao(config)
     }
@@ -2571,6 +2591,8 @@ export default function OrcamentoPage() {
   }
 
   async function visualizarOrcamentoInterno(id: number) {
+    if (guardaAbrirOrcamento.ocupado()) return
+
     const orc = orcamentosSalvos.find((item) => item.id === id)
     if (!orc) {
       notificar('Orçamento não encontrado.', 'error')
@@ -2578,10 +2600,12 @@ export default function OrcamentoPage() {
     }
 
     try {
-      const { publicacao } = await publicarOrcamentoSeguro(orc, 'visualizar-orcamento')
-      window.location.href = publicacao.urlView
+      await guardaAbrirOrcamento.executar(id, async () => {
+        const { publicacao } = await publicarOrcamentoSeguro(orc, 'visualizar-orcamento')
+        window.location.href = publicacao.urlView
+      })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Não foi possível abrir o orçamento.'
+      const msg = err instanceof Error ? err.message : 'Não foi possível abrir o orçamento. Tente novamente.'
       notificar(msg, 'error')
     }
   }
@@ -3902,6 +3926,13 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
   return (
     <div style={{ minHeight: '100vh', background: colors.bg, paddingBottom: 32 }}>
+      {orcamentoAbrindoId != null && (
+        <div className="connect-loading-overlay" role="status" aria-live="polite">
+          <div>
+            <span className="connect-spinner" /> Carregando orçamento...
+          </div>
+        </div>
+      )}
       <div style={pageStyle}>
         {toast && (
           <div
@@ -4138,12 +4169,21 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
                     <div style={{ display: 'grid', gap: 6 }}>
                       <button
-                        onClick={() => visualizarOrcamentoInterno(orc.id)}
-                        style={listaAcaoBtn('linear-gradient(135deg,#2563eb,#1d4ed8)')}
+                        type="button"
+                        className={`connect-zap-btn${orcamentoAbrindoId === orc.id ? ' connect-zap-btn--loading' : ''}`}
+                        disabled={orcamentoAbrindoId != null}
+                        onClick={() => void visualizarOrcamentoInterno(orc.id)}
+                        style={{ ...listaAcaoBtn('linear-gradient(135deg,#2563eb,#1d4ed8)'), touchAction: 'manipulation', opacity: orcamentoAbrindoId != null && orcamentoAbrindoId !== orc.id ? 0.6 : 1 }}
                         onMouseEnter={(e) => bindHoverListaBtn(e.currentTarget, true)}
                         onMouseLeave={(e) => bindHoverListaBtn(e.currentTarget, false)}
                       >
-                        👁️ Visualizar
+                        {orcamentoAbrindoId === orc.id ? (
+                          <>
+                            <span className="connect-spinner" /> Abrindo orçamento...
+                          </>
+                        ) : (
+                          '👁️ Visualizar'
+                        )}
                       </button>
                       <button
                         type="button"
@@ -5472,14 +5512,16 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(118px,1fr))', gap: 8 }}>
                 <button onClick={() => { editarOrcamento(orcamentoMenuAberto); fecharMenuOrcamento() }} style={actionButtonStyle('editar')}>Editar</button>
                 <button
+                  type="button"
+                  disabled={orcamentoAbrindoId != null}
                   onClick={() => {
                     const id = orcamentoMenuAberto.id
                     fecharMenuOrcamento()
-                    visualizarOrcamentoInterno(id)
+                    void visualizarOrcamentoInterno(id)
                   }}
-                  style={actionButtonStyle('visualizar')}
+                  style={{ ...actionButtonStyle('visualizar'), touchAction: 'manipulation', opacity: orcamentoAbrindoId != null ? 0.6 : 1 }}
                 >
-                  Visualizar
+                  {orcamentoAbrindoId != null ? 'Abrindo...' : 'Visualizar'}
                 </button>
                 <button onClick={() => { excluirOrcamento(orcamentoMenuAberto.id); fecharMenuOrcamento() }} style={actionButtonStyle('deletar')}>Deletar</button>
                 <button type="button" onClick={() => void copiarLinkOrcamento(orcamentoMenuAberto)} style={actionButtonStyle('copiar')}>Copiar</button>

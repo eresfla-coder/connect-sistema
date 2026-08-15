@@ -2102,10 +2102,6 @@ export default function OrdemServicoPage() {
             >
               ✚ Nova OS
             </button>
-
-            <button onClick={() => router.push('/recibo-avulso')} style={premiumGreenButton}>
-              🧾 Recibo avulso
-            </button>
           </div>
         </div>
 

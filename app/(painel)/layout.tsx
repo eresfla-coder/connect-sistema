@@ -77,8 +77,7 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
 
   const rotaPublicaImpressao =
     pathname?.startsWith('/impressao-orcamento') ||
-    pathname?.startsWith('/impressao-ordem-servico') ||
-    pathname?.startsWith('/recibo-avulso')
+    pathname?.startsWith('/impressao-ordem-servico')
   const rotaLivreAssinatura =
     pathname?.startsWith('/planos') ||
     pathname?.startsWith('/boas-vindas') ||

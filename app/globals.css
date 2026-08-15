@@ -652,3 +652,51 @@ body {
   transform: scale(0.97);
   pointer-events: none;
 }
+
+@keyframes connectSpin {
+  to { transform: rotate(360deg); }
+}
+
+.connect-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  animation: connectSpin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+
+.connect-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.connect-loading-overlay > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 22px;
+  border-radius: 18px;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+  color: #f8fafc;
+  font-weight: 900;
+  font-size: 14px;
+}
+
+.connect-loading-overlay .connect-spinner {
+  width: 20px;
+  height: 20px;
+  border-width: 3px;
+  border-color: rgba(148, 163, 184, 0.35);
+  border-top-color: #60a5fa;
+}

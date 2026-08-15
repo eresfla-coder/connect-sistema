@@ -296,11 +296,17 @@ export default function ReciboAvulsoPage() {
     }
   }
 
+  function voltarTelaAnterior() {
+    if (window.history.length > 1) {
+      router.back()
+      return
+    }
+    router.push('/dashboard')
+  }
+
   function fecharRecibo() {
-    try {
-      window.close()
-    } catch {}
-    router.push('/ordens-servico')
+    setDados(null)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function abrirVisualizacaoPDF() {
@@ -333,10 +339,10 @@ export default function ReciboAvulsoPage() {
               </button>
 
               <button
-                onClick={() => router.push('/ordens-servico')}
+                onClick={voltarTelaAnterior}
                 style={{ minHeight: 44, borderRadius: 16, border: '1px solid rgba(148,163,184,.35)', background: '#ffffff', color: '#0f172a', fontWeight: 900, padding: '0 18px', cursor: 'pointer', boxShadow: '0 8px 18px rgba(15,23,42,.06)' }}
               >
-                Voltar para OS
+                ← Voltar
               </button>
             </div>
           </div>
@@ -419,7 +425,7 @@ export default function ReciboAvulsoPage() {
       dados={dados}
       isMobile={isMobile}
       onFechar={fecharRecibo}
-      onVoltar={() => router.back()}
+      onVoltar={voltarTelaAnterior}
       onNovo={novoRecibo}
       onEnviarLink={enviarWhatsApp}
       onPdf={abrirVisualizacaoPDF}
