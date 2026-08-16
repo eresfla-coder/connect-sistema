@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 
 import { ReciboEmitidoView, type DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
 import { abrirReciboPdfEmNovaJanela } from '@/lib/recibo-print-html'
-import { abrirWhatsappAposPrepararLink } from '@/lib/abrirExterno'
+import { abrirJanelaEmBrancoNoGesto, enviarLinkDocumento } from '@/lib/abrirExterno'
 import {
   gerarLinkPublicoRecibo,
   montarMensagemWhatsappRecibo,
@@ -41,14 +41,15 @@ export default function RecibosPage() {
     const telefone = normalizarTelefoneWhatsapp(dados?.clienteTelefone)
     setLoadingWhatsapp(true)
     try {
-      await abrirWhatsappAposPrepararLink({
+      await enviarLinkDocumento({
         telefone,
+        titulo: `Recibo — ${dados.nomeCliente || 'cliente'}`,
         linkRapido: '',
         prepararLinkCompleto: async () => gerarLinkPublicoRecibo(dados),
         montarMensagem: (link) => montarMensagemWhatsappRecibo(dados, link),
       })
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : 'Não foi possível enviar pelo WhatsApp.')
+      alert(e instanceof Error ? e.message : 'Não foi possível enviar o link do recibo.')
     } finally {
       setLoadingWhatsapp(false)
     }
@@ -56,12 +57,19 @@ export default function RecibosPage() {
 
   function abrirPdf() {
     if (!dados || loadingPdf) return
+    const janela = abrirJanelaEmBrancoNoGesto()
     setLoadingPdf(true)
-    window.setTimeout(() => {
-      const ok = abrirReciboPdfEmNovaJanela(dados)
+    try {
+      const ok = abrirReciboPdfEmNovaJanela(dados, { janela })
+      if (!ok) {
+        try {
+          janela?.close()
+        } catch {}
+        alert('Não foi possível abrir o PDF. Verifique se pop-ups estão liberados.')
+      }
+    } finally {
       setLoadingPdf(false)
-      if (!ok) alert('Não foi possível abrir o PDF. Verifique se pop-ups estão liberados.')
-    }, 80)
+    }
   }
 
   if (!carregado) return null

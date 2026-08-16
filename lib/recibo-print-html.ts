@@ -2,6 +2,11 @@ import extenso from 'extenso'
 import type { DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
 import { abrirNovaAbaOuMesma } from '@/lib/abrirExterno'
 
+export type AbrirReciboPdfOpcoes = {
+  /** Janela já aberta no gesto do toque (Safari iOS). */
+  janela?: Window | null
+}
+
 function escapeHtml(valor: string) {
   return String(valor || '')
     .replaceAll('&', '&amp;')
@@ -42,7 +47,7 @@ function emojiPagamento(forma?: string) {
   return '💵'
 }
 
-export function abrirReciboPdfEmNovaJanela(dados: DadosReciboEmitido): boolean {
+function montarHtmlReciboPdf(dados: DadosReciboEmitido) {
   const valorNumerico = (() => {
     const valor = parseFloat(String(dados?.valorNumero || 0).replace(',', '.'))
     return Number.isNaN(valor) ? 0 : valor
@@ -65,7 +70,7 @@ export function abrirReciboPdfEmNovaJanela(dados: DadosReciboEmitido): boolean {
       ? `${typeof window !== 'undefined' ? window.location.origin : ''}${String(logoUrl).startsWith('/') ? String(logoUrl) : `/${String(logoUrl)}`}`
       : ''
 
-  const html = `
+  return `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
@@ -190,6 +195,38 @@ export function abrirReciboPdfEmNovaJanela(dados: DadosReciboEmitido): boolean {
       </body>
       </html>
     `
+}
+
+function escreverHtmlNaJanela(janela: Window, html: string) {
+  janela.document.open()
+  janela.document.write(html)
+  janela.document.close()
+  try {
+    janela.focus()
+  } catch {}
+}
+
+/**
+ * Abre o recibo para impressão/PDF do navegador (HTML + window.print).
+ * Não gera arquivo application/pdf — no iOS o usuário usa Imprimir → “Salvar em PDF” / compartilhar da folha do sistema.
+ */
+export function abrirReciboPdfEmNovaJanela(
+  dados: DadosReciboEmitido,
+  opcoes: AbrirReciboPdfOpcoes = {},
+): boolean {
+  const html = montarHtmlReciboPdf(dados)
+
+  const janelaPrevia = opcoes.janela && !opcoes.janela.closed ? opcoes.janela : null
+  if (janelaPrevia) {
+    try {
+      escreverHtmlNaJanela(janelaPrevia, html)
+      return true
+    } catch {
+      try {
+        janelaPrevia.close()
+      } catch {}
+    }
+  }
 
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   const blobUrl = URL.createObjectURL(blob)
@@ -200,20 +237,21 @@ export function abrirReciboPdfEmNovaJanela(dados: DadosReciboEmitido): boolean {
     return true
   }
 
-  const janela = window.open('', '_blank', 'noopener,noreferrer')
+  const janela = window.open('', '_blank')
   if (!janela) {
     URL.revokeObjectURL(blobUrl)
     return false
   }
 
   try {
-    janela.document.open()
-    janela.document.write(html)
-    janela.document.close()
+    escreverHtmlNaJanela(janela, html)
     URL.revokeObjectURL(blobUrl)
     return true
   } catch {
     URL.revokeObjectURL(blobUrl)
+    try {
+      janela.close()
+    } catch {}
     return false
   }
 }

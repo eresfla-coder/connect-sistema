@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 
 import { ReciboEmitidoView, type DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
+import { abrirJanelaEmBrancoNoGesto } from '@/lib/abrirExterno'
 import { abrirReciboPdfEmNovaJanela } from '@/lib/recibo-print-html'
 
 function ReciboPublicoInner() {
@@ -132,8 +133,14 @@ function ReciboPublicoInner() {
       onNovo={() => {}}
       onEnviarLink={() => {}}
       onPdf={() => {
-        const ok = abrirReciboPdfEmNovaJanela(dados)
-        if (!ok) alert('Não foi possível abrir o PDF. Verifique se pop-ups estão liberados.')
+        const janela = abrirJanelaEmBrancoNoGesto()
+        const ok = abrirReciboPdfEmNovaJanela(dados, { janela })
+        if (!ok) {
+          try {
+            janela?.close()
+          } catch {}
+          alert('Não foi possível abrir o PDF. Verifique se pop-ups estão liberados.')
+        }
       }}
     />
   )

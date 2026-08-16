@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { abrirNovaAbaOuMesma, abrirWhatsappAposPrepararLink, abrirWhatsappUrl, comTimeout, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { buscarConfiguracao } from '@/lib/configuracaoEmpresa'
@@ -24,7 +24,7 @@ import { puxarStorageDireto, salvarStorageDireto } from '@/lib/connect-supabase-
 import { garantirPublicacaoOrcamento, type PublicacaoOrcamentoResult } from '@/lib/garantir-publicacao-orcamento'
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOrcamentosExcel } from '@/lib/export-modulos'
-import { criarGuardaAcaoUnica } from '@/lib/acao-unica'
+import { criarGuardaAcaoUnica, deveLiberarNoRetorno } from '@/lib/acao-unica'
 type TipoPessoaCliente = 'PF' | 'PJ'
 
 type Cliente = {
@@ -1168,6 +1168,72 @@ export default function OrcamentoPage() {
     () => criarGuardaAcaoUnica<number>({ aoMudar: setOrcamentoAbrindoId, liberarNoSucesso: false }),
     [],
   )
+  const saiuParaDocumentoRef = useRef(false)
+  const timerLiberacaoAberturaRef = useRef<number | null>(null)
+
+  /** Único ponto que devolve a lista ao estado normal (overlay, botão e trava). */
+  const resetVisualizacaoPendente = useCallback(() => {
+    if (timerLiberacaoAberturaRef.current != null) {
+      window.clearTimeout(timerLiberacaoAberturaRef.current)
+      timerLiberacaoAberturaRef.current = null
+    }
+    saiuParaDocumentoRef.current = false
+    guardaAbrirOrcamento.liberar()
+  }, [guardaAbrirOrcamento])
+
+  /**
+   * Safari/iOS restaura a lista pelo BFCache sem remontar o React: sem isso o
+   * overlay "Carregando orçamento..." voltaria ativo e travaria a tela.
+   */
+  useEffect(() => {
+    function liberarSeNecessario(evento: Parameters<typeof deveLiberarNoRetorno>[0]) {
+      if (deveLiberarNoRetorno(evento)) resetVisualizacaoPendente()
+    }
+
+    function aoPageShow(event: PageTransitionEvent) {
+      liberarSeNecessario({
+        tipo: 'pageshow',
+        persisted: event.persisted,
+        saiuDaPagina: saiuParaDocumentoRef.current,
+      })
+    }
+
+    function aoPageHide() {
+      saiuParaDocumentoRef.current = true
+      if (timerLiberacaoAberturaRef.current != null) {
+        window.clearTimeout(timerLiberacaoAberturaRef.current)
+        timerLiberacaoAberturaRef.current = null
+      }
+    }
+
+    function aoVisibilidade() {
+      liberarSeNecessario({
+        tipo: 'visibilitychange',
+        visivel: document.visibilityState === 'visible',
+        saiuDaPagina: saiuParaDocumentoRef.current,
+      })
+    }
+
+    function aoPopState() {
+      liberarSeNecessario({ tipo: 'popstate' })
+    }
+
+    window.addEventListener('pageshow', aoPageShow)
+    window.addEventListener('pagehide', aoPageHide)
+    window.addEventListener('popstate', aoPopState)
+    document.addEventListener('visibilitychange', aoVisibilidade)
+
+    return () => {
+      window.removeEventListener('pageshow', aoPageShow)
+      window.removeEventListener('pagehide', aoPageHide)
+      window.removeEventListener('popstate', aoPopState)
+      document.removeEventListener('visibilitychange', aoVisibilidade)
+      if (timerLiberacaoAberturaRef.current != null) {
+        window.clearTimeout(timerLiberacaoAberturaRef.current)
+        timerLiberacaoAberturaRef.current = null
+      }
+    }
+  }, [resetVisualizacaoPendente])
   /** Evita refazer getUser + select de configuração em cada abertura de orçamento. */
   const cfgPublicacaoCacheRef = useRef<{
     atualizadoEm: number
@@ -2602,9 +2668,12 @@ export default function OrcamentoPage() {
     try {
       await guardaAbrirOrcamento.executar(id, async () => {
         const { publicacao } = await publicarOrcamentoSeguro(orc, 'visualizar-orcamento')
+        // Defensivo: se a navegação não acontecer, a tela não pode ficar travada.
+        timerLiberacaoAberturaRef.current = window.setTimeout(resetVisualizacaoPendente, 20000)
         window.location.href = publicacao.urlView
       })
     } catch (err) {
+      resetVisualizacaoPendente()
       const msg = err instanceof Error ? err.message : 'Não foi possível abrir o orçamento. Tente novamente.'
       notificar(msg, 'error')
     }

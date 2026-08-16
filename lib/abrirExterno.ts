@@ -1,5 +1,11 @@
 /** Abrir links externos (WhatsApp, etc.) sem sair da tela do sistema. */
 
+import {
+  resolverLinkParaEnvio,
+  suporteWebShareUrl,
+  tentarCompartilharUrlNativa,
+} from '@/lib/compartilhar-documento'
+
 export const WHATSAPP_FALLBACK_EVENT = 'connect-whatsapp-fallback'
 
 export function isDispositivoMobile() {
@@ -9,6 +15,14 @@ export function isDispositivoMobile() {
     window.innerWidth <= 768 ||
     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)
   )
+}
+
+/** iPhone / iPad / iPod (inclui iPadOS desktop UA). */
+export function isIosWebkit() {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent || ''
+  if (/iP(hone|od|ad)/i.test(ua)) return true
+  return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1
 }
 
 /** PWA / atalho na tela inicial (iOS standalone ou display-mode standalone). */
@@ -61,19 +75,29 @@ export type ResultadoAbrirWhatsapp = {
   url: string
   abriu: boolean
   mostrarLink: boolean
+  modo?: 'whatsapp' | 'web-share' | 'fallback'
 }
 
 /**
  * Abre WhatsApp em nova aba — a página do Connect permanece aberta.
- * PWA: link visível (evento). PC: window.open. Mobile: anchor se popup falhar.
+ * Após await (comum no iOS), preferir <a> em WebKit móvel: window.open costuma ser bloqueado.
  */
 export function abrirWhatsappUrl(url: string): ResultadoAbrirWhatsapp {
   const destino = normalizarUrlWhatsapp(String(url || '').trim())
-  if (!destino) return { url: '', abriu: false, mostrarLink: false }
+  if (!destino) return { url: '', abriu: false, mostrarLink: false, modo: 'whatsapp' }
 
   if (isModoPwa()) {
     dispararWhatsappFallback(destino)
-    return { url: destino, abriu: false, mostrarLink: true }
+    return { url: destino, abriu: false, mostrarLink: true, modo: 'fallback' }
+  }
+
+  const preferirAnchor = isIosWebkit() || (isDispositivoMobile() && !isModoPwa())
+
+  if (preferirAnchor) {
+    try {
+      abrirComAnchor(destino)
+      return { url: destino, abriu: true, mostrarLink: false, modo: 'whatsapp' }
+    } catch {}
   }
 
   const nova = window.open(destino, '_blank', 'noopener,noreferrer')
@@ -81,22 +105,23 @@ export function abrirWhatsappUrl(url: string): ResultadoAbrirWhatsapp {
     try {
       nova.opener = null
     } catch {}
-    return { url: destino, abriu: true, mostrarLink: false }
+    return { url: destino, abriu: true, mostrarLink: false, modo: 'whatsapp' }
   }
 
-  if (isDispositivoMobile()) {
+  if (!preferirAnchor && isDispositivoMobile()) {
     try {
       abrirComAnchor(destino)
-      return { url: destino, abriu: true, mostrarLink: false }
+      return { url: destino, abriu: true, mostrarLink: false, modo: 'whatsapp' }
     } catch {}
   }
 
   dispararWhatsappFallback(destino)
-  return { url: destino, abriu: false, mostrarLink: true }
+  return { url: destino, abriu: false, mostrarLink: true, modo: 'fallback' }
 }
 
 /**
- * Prepara link público, monta mensagem e abre WhatsApp.
+ * Prepara link público completo e abre WhatsApp.
+ * Nunca abre com link vazio (bug histórico no Recibo mobile).
  */
 export async function abrirWhatsappAposPrepararLink(opts: {
   telefone: string
@@ -104,29 +129,79 @@ export async function abrirWhatsappAposPrepararLink(opts: {
   prepararLinkCompleto: () => Promise<string>
   montarMensagem: (link: string) => string
 }): Promise<ResultadoAbrirWhatsapp> {
-  let link = opts.linkRapido
-  if (isDispositivoMobile() && !isModoPwa()) {
-    void opts.prepararLinkCompleto().catch(() => {})
-  } else if (!isModoPwa()) {
-    link = await opts.prepararLinkCompleto()
-  } else {
-    try {
-      link = await opts.prepararLinkCompleto()
-    } catch (e) {
-      throw e
-    }
-  }
+  const link = await resolverLinkParaEnvio({
+    linkRapido: opts.linkRapido,
+    prepararLinkCompleto: opts.prepararLinkCompleto,
+  })
 
   const url = montarUrlWhatsapp(opts.telefone, opts.montarMensagem(link))
   const resultado = abrirWhatsappUrl(url)
   if (!resultado.abriu && !resultado.mostrarLink) {
     throw new Error('Não foi possível abrir o WhatsApp.')
   }
-  return resultado
+  return { ...resultado, url }
+}
+
+/**
+ * Fluxo robusto de envio de link:
+ * 1) resolve URL pública;
+ * 2) no mobile com Web Share, tenta sheet nativo (URL + texto);
+ * 3) se cancelar/falhar/indisponível, cai para WhatsApp com o mesmo link.
+ */
+export async function enviarLinkDocumento(opts: {
+  telefone: string
+  titulo: string
+  linkRapido?: string
+  prepararLinkCompleto: () => Promise<string>
+  montarMensagem: (link: string) => string
+  /** Se true (padrão no iPhone), tenta navigator.share antes do WhatsApp. */
+  tentarShareNativo?: boolean
+}): Promise<ResultadoAbrirWhatsapp> {
+  const link = await resolverLinkParaEnvio({
+    linkRapido: opts.linkRapido,
+    prepararLinkCompleto: opts.prepararLinkCompleto,
+  })
+  const mensagem = opts.montarMensagem(link)
+  const tentarShare =
+    opts.tentarShareNativo !== false &&
+    isDispositivoMobile() &&
+    suporteWebShareUrl()
+
+  if (tentarShare) {
+    const share = await tentarCompartilharUrlNativa({
+      titulo: opts.titulo,
+      texto: mensagem,
+      url: link,
+    })
+    if (share.modo === 'web-share') {
+      if (share.ok === true) {
+        return { url: link, abriu: true, mostrarLink: false, modo: 'web-share' }
+      }
+      const motivo = share.ok === false ? share.motivo : ''
+      if (motivo === 'cancelado') {
+        return { url: link, abriu: false, mostrarLink: false, modo: 'web-share' }
+      }
+    }
+  }
+
+  const url = montarUrlWhatsapp(opts.telefone, mensagem)
+  const resultado = abrirWhatsappUrl(url)
+  if (!resultado.abriu && !resultado.mostrarLink) {
+    throw new Error('Não foi possível abrir o compartilhamento do link.')
+  }
+  return { ...resultado, url }
 }
 
 export function abrirNovaAbaOuMesma(url: string) {
   if (!url) return false
+
+  if (isIosWebkit()) {
+    try {
+      abrirComAnchor(url)
+      return true
+    } catch {}
+  }
+
   const nova = window.open(url, '_blank', 'noopener,noreferrer')
   if (nova) return true
   try {
@@ -134,6 +209,24 @@ export function abrirNovaAbaOuMesma(url: string) {
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Abre janela em branco no mesmo gesto do toque (crítico no Safari iOS).
+ * Sem noopener: precisamos da referência para document.write.
+ */
+export function abrirJanelaEmBrancoNoGesto(): Window | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const janela = window.open('', '_blank')
+    if (!janela) return null
+    try {
+      janela.opener = null
+    } catch {}
+    return janela
+  } catch {
+    return null
   }
 }
 

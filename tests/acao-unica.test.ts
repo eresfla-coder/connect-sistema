@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { criarGuardaAcaoUnica } from '../lib/acao-unica.ts'
+import { criarGuardaAcaoUnica, deveLiberarNoRetorno } from '../lib/acao-unica.ts'
 
 function acaoPendente() {
   let resolver: () => void = () => {}
@@ -36,6 +36,46 @@ test('mantém o bloqueio após sucesso quando a ação navega para outra tela', 
   assert.equal(await guarda.executar(1, async () => {}), 'executado')
   assert.equal(guarda.ocupado(), true)
   assert.equal(await guarda.executar(1, async () => {}), 'ignorado')
+})
+
+test('reset ao voltar para a página limpa overlay/botão e permite abrir outro documento', async () => {
+  const estados: (number | null)[] = []
+  const guarda = criarGuardaAcaoUnica<number>({
+    aoMudar: (pendente) => estados.push(pendente),
+    liberarNoSucesso: false,
+  })
+
+  assert.equal(await guarda.executar(10, async () => {}), 'executado')
+  assert.equal(guarda.ocupado(), true)
+
+  guarda.liberar()
+
+  assert.equal(guarda.ocupado(), false)
+  assert.equal(guarda.pendente(), null)
+  assert.deepEqual(estados, [10, null])
+  assert.equal(await guarda.executar(11, async () => {}), 'executado')
+})
+
+test('deveLiberarNoRetorno libera quando a página volta do BFCache ou do histórico', () => {
+  assert.equal(deveLiberarNoRetorno({ tipo: 'pageshow', persisted: true }), true)
+  assert.equal(deveLiberarNoRetorno({ tipo: 'pageshow', persisted: false, saiuDaPagina: true }), true)
+  assert.equal(deveLiberarNoRetorno({ tipo: 'popstate' }), true)
+  assert.equal(
+    deveLiberarNoRetorno({ tipo: 'visibilitychange', visivel: true, saiuDaPagina: true }),
+    true,
+  )
+})
+
+test('deveLiberarNoRetorno não libera enquanto o usuário aguarda na própria página', () => {
+  assert.equal(deveLiberarNoRetorno({ tipo: 'pageshow', persisted: false, saiuDaPagina: false }), false)
+  assert.equal(
+    deveLiberarNoRetorno({ tipo: 'visibilitychange', visivel: true, saiuDaPagina: false }),
+    false,
+  )
+  assert.equal(
+    deveLiberarNoRetorno({ tipo: 'visibilitychange', visivel: false, saiuDaPagina: true }),
+    false,
+  )
 })
 
 test('libera o botão e propaga o erro quando a abertura falha', async () => {

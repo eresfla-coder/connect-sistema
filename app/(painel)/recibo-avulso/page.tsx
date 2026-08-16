@@ -6,7 +6,7 @@ import extenso from 'extenso'
 
 import { ReciboEmitidoView, type DadosReciboEmitido } from '@/components/recibos/ReciboEmitidoView'
 import { abrirReciboPdfEmNovaJanela } from '@/lib/recibo-print-html'
-import { abrirWhatsappAposPrepararLink } from '@/lib/abrirExterno'
+import { abrirJanelaEmBrancoNoGesto, enviarLinkDocumento } from '@/lib/abrirExterno'
 import { SeletorClienteCadastrado } from '@/components/clientes/SeletorClienteCadastrado'
 import type { ClienteCadastro } from '@/lib/clientesCadastro'
 import {
@@ -282,14 +282,15 @@ export default function ReciboAvulsoPage() {
     const telefone = normalizarTelefoneWhatsapp(dados?.clienteTelefone)
     setLoadingWhatsapp(true)
     try {
-      await abrirWhatsappAposPrepararLink({
+      await enviarLinkDocumento({
         telefone,
+        titulo: `Recibo — ${dados.nomeCliente || 'cliente'}`,
         linkRapido: '',
         prepararLinkCompleto: async () => gerarLinkPublicoRecibo(dados),
         montarMensagem: (link) => montarMensagemWhatsappRecibo(dados, link),
       })
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Não foi possível enviar pelo WhatsApp.'
+      const msg = e instanceof Error ? e.message : 'Não foi possível enviar o link do recibo.'
       alert(msg)
     } finally {
       setLoadingWhatsapp(false)
@@ -311,12 +312,20 @@ export default function ReciboAvulsoPage() {
 
   function abrirVisualizacaoPDF() {
     if (!dados || loadingPdf) return
+    // Abrir no mesmo gesto do toque — Safari iOS bloqueia window.open após setTimeout/await.
+    const janela = abrirJanelaEmBrancoNoGesto()
     setLoadingPdf(true)
-    window.setTimeout(() => {
-      const ok = abrirReciboPdfEmNovaJanela(dados)
+    try {
+      const ok = abrirReciboPdfEmNovaJanela(dados, { janela })
+      if (!ok) {
+        try {
+          janela?.close()
+        } catch {}
+        alert('Não foi possível abrir o PDF. Verifique se pop-ups estão liberados ou tente novamente.')
+      }
+    } finally {
       setLoadingPdf(false)
-      if (!ok) alert('Não foi possível abrir o PDF. Verifique se pop-ups estão liberados ou tente novamente.')
-    }, 80)
+    }
   }
 
   if (!dados) {
