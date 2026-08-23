@@ -1,23 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAdminMasterServer } from '@/lib/access-server'
 import { getBearerToken } from '@/lib/api-auth'
-import { registrarSessaoUsuario } from '@/lib/sessao-server'
+import { encerrarSessaoUsuario } from '@/lib/sessao-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export const dynamic = 'force-dynamic'
 
 type Payload = {
   deviceId?: string
-  deviceLabel?: string
-}
-
-function getClientIp(req: NextRequest) {
-  return (
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    req.headers.get('x-real-ip') ||
-    req.headers.get('cf-connecting-ip') ||
-    ''
-  )
 }
 
 export async function POST(req: NextRequest) {
@@ -40,27 +30,16 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => ({}))) as Payload
     const deviceId = String(body.deviceId || '').trim()
-    if (!deviceId || deviceId.length < 12) {
-      return NextResponse.json({ ok: false, message: 'Dispositivo inválido.' }, { status: 400 })
-    }
 
-    const result = await registrarSessaoUsuario({
+    const result = await encerrarSessaoUsuario({
       userId: user.id,
-      email,
-      deviceId,
-      deviceLabel: String(body.deviceLabel || 'Dispositivo'),
-      userAgent: req.headers.get('user-agent') || '',
-      ip: getClientIp(req),
+      motivo: 'logout',
+      somenteSeToken: deviceId || undefined,
     })
 
-    if (!result.ok) {
-      return NextResponse.json({ ok: false, message: result.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ ok: true, replaced: result.substituida })
+    return NextResponse.json({ ok: result.ok, ended: result.encerrada })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Erro ao registrar sessão.'
-    console.error('ERRO_API_REGISTRAR_SESSAO:', error)
-    return NextResponse.json({ ok: false, message }, { status: 500 })
+    console.error('ERRO_API_ENCERRAR_SESSAO:', error)
+    return NextResponse.json({ ok: false, message: 'Erro ao encerrar sessão.' }, { status: 500 })
   }
 }

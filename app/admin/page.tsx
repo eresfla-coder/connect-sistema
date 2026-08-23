@@ -17,6 +17,12 @@ import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
+import {
+  classificarFaixaSemUso,
+  formatarQuando,
+  type FaixaSemUso,
+  type StatusUsoSessao,
+} from '@/lib/sessao-uso'
 
 type FiltroStatus = 'todos' | 'trial' | 'ativo' | 'bloqueado' | 'vencidos' | 'risco'
 type TipoNovoCliente = 'trial' | 'ativo'
@@ -38,13 +44,22 @@ type PerfilAdmin = {
   observacoes?: string | null
 }
 
-type SessaoAtiva = {
-  user_id?: string | null
-  email?: string | null
-  device_label?: string | null
-  ip_address?: string | null
-  last_seen_at?: string | null
-  updated_at?: string | null
+type SessaoUsoAdmin = {
+  userId: string
+  email: string
+  cliente: string
+  plano: string
+  deviceLabel?: string | null
+  navegador?: string | null
+  sistemaOperacional?: string | null
+  dispositivo?: string | null
+  ip?: string | null
+  lastSeenAt?: string | null
+  startedAt?: string | null
+  ativo: boolean
+  motivoEncerramento?: string | null
+  status: StatusUsoSessao
+  statusLabel: string
 }
 
 type NovoClienteForm = {
@@ -249,7 +264,12 @@ function riscoCliente(cliente: PerfilAdmin) {
 export default function AdminSaasMasterPage() {
   const router = useRouter()
   const [clientes, setClientes] = useState<PerfilAdmin[]>([])
-  const [sessoes, setSessoes] = useState<SessaoAtiva[]>([])
+  const [sessoes, setSessoes] = useState<SessaoUsoAdmin[]>([])
+  const [sessoesLoading, setSessoesLoading] = useState(false)
+  const [filtroSessao, setFiltroSessao] = useState<'todos' | StatusUsoSessao>('todos')
+  const [buscaSessao, setBuscaSessao] = useState('')
+  const [filtroSemUso, setFiltroSemUso] = useState<'todos' | FaixaSemUso>('todos')
+  const [encerrandoSessaoId, setEncerrandoSessaoId] = useState<string | null>(null)
   const [uso, setUso] = useState<UsoSistema>({ clientes: 0, produtos: 0, orcamentos: 0, ordens: 0, financeiro: 0, crm: 0 })
   const [metaLocal, setMetaLocal] = useState<Record<string, MetaCliente>>({})
   const [loading, setLoading] = useState(true)
@@ -503,12 +523,7 @@ export default function AdminSaasMasterPage() {
     setClientes(listaClientes)
 
     try {
-      const { data: sessaoData } = await supabase
-        .from('sessoes_ativas')
-        .select('user_id,email,device_label,ip_address,last_seen_at,updated_at')
-        .order('last_seen_at', { ascending: false })
-        .limit(40)
-      setSessoes((sessaoData as SessaoAtiva[]) || [])
+      await carregarSessoesAdmin(token)
     } catch {
       setSessoes([])
     }
@@ -533,6 +548,51 @@ export default function AdminSaasMasterPage() {
 
     const lista = await carregarClientesAdmin(accessToken)
     setClientes(lista)
+  }
+
+  async function carregarSessoesAdmin(token?: string) {
+    const { data: { session } } = await supabase.auth.getSession()
+    const accessToken = token || session?.access_token || ''
+    if (!accessToken) {
+      setSessoes([])
+      return
+    }
+    setSessoesLoading(true)
+    try {
+      const res = await fetch('/api/admin/sessoes', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const json = await res.json().catch(() => ({}))
+      setSessoes((json.sessoes as SessaoUsoAdmin[]) || [])
+    } catch {
+      setSessoes([])
+    } finally {
+      setSessoesLoading(false)
+    }
+  }
+
+  async function encerrarSessaoRemota(userId: string) {
+    if (!userId || encerrandoSessaoId) return
+    const ok = window.confirm('Encerrar esta sessão agora? O cliente será desconectado deste dispositivo.')
+    if (!ok) return
+    setEncerrandoSessaoId(userId)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const accessToken = session?.access_token || ''
+      if (!accessToken) throw new Error('Sessão inválida.')
+      const res = await fetch('/api/admin/sessoes', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json.ok) throw new Error(json.message || 'Não foi possível encerrar.')
+      await carregarSessoesAdmin(accessToken)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Não foi possível encerrar a sessão.')
+    } finally {
+      setEncerrandoSessaoId(null)
+    }
   }
 
   async function atualizarCliente(id: string, updates: Partial<PerfilAdmin>) {
@@ -1073,13 +1133,48 @@ export default function AdminSaasMasterPage() {
   }, [clientes])
 
   const sessoesMap = useMemo(() => {
-    const map = new Map<string, SessaoAtiva>()
+    const map = new Map<string, SessaoUsoAdmin>()
     sessoes.forEach((s) => {
-      if (s.user_id) map.set(s.user_id, s)
+      if (s.userId) map.set(s.userId, s)
       if (s.email) map.set(String(s.email).toLowerCase(), s)
     })
     return map
   }, [sessoes])
+
+  const sessoesFiltradas = useMemo(() => {
+    const termo = buscaSessao.trim().toLowerCase()
+    return sessoes.filter((sessao) => {
+      const bateStatus = filtroSessao === 'todos' || sessao.status === filtroSessao
+      const hay = `${sessao.cliente} ${sessao.email} ${sessao.plano}`.toLowerCase()
+      const bateBusca = !termo || hay.includes(termo)
+      return bateStatus && bateBusca
+    })
+  }, [sessoes, filtroSessao, buscaSessao])
+
+  const resumoSessoes = useMemo(() => ({
+    online: sessoes.filter((item) => item.status === 'online').length,
+    inativo: sessoes.filter((item) => item.status === 'inativo').length,
+    offline: sessoes.filter((item) => item.status === 'offline').length,
+    total: sessoes.length,
+  }), [sessoes])
+
+  const clientesSemUso = useMemo(() => {
+    return clientes
+      .map((cliente) => {
+        const sessao = sessoesMap.get(cliente.id) || sessoesMap.get(String(cliente.email || '').toLowerCase())
+        const faixa = classificarFaixaSemUso(sessao?.lastSeenAt)
+        return { cliente, sessao, faixa }
+      })
+      .filter((item) => {
+        if (filtroSemUso === 'todos') return item.faixa !== 'recente'
+        return item.faixa === filtroSemUso
+      })
+      .sort((a, b) => {
+        const ta = a.sessao?.lastSeenAt ? Date.parse(a.sessao.lastSeenAt) : 0
+        const tb = b.sessao?.lastSeenAt ? Date.parse(b.sessao.lastSeenAt) : 0
+        return ta - tb
+      })
+  }, [clientes, sessoesMap, filtroSemUso])
 
   if (loading) {
     return (
@@ -1258,7 +1353,11 @@ export default function AdminSaasMasterPage() {
                     <Info label="Limite" value={plan.limite} color="#dbeafe" />
                     <Info label="Vencimento" value={cliente.vencimento || '-'} color={prazoColor(cliente)} />
                     <Info label="Mensalidade" value={toMoney(cliente.valor_plano || 0)} color="#ffffff" />
-                    <Info label="Sessão" value={sessao ? 'Online' : 'Sem registro'} color={sessao ? '#22c55e' : '#94a3b8'} />
+                    <Info
+                      label="Último acesso"
+                      value={sessao ? `${sessao.statusLabel} • ${formatarQuando(sessao.lastSeenAt)}` : 'Sem registro'}
+                      color={sessao?.status === 'online' ? '#22c55e' : sessao?.status === 'inativo' ? '#facc15' : '#94a3b8'}
+                    />
                     <Badge label={risk.texto} color={risk.cor} />
 
                     <div style={{ ...styles.rowActions, ...(isMobileAdmin ? styles.rowActionsMobile : {}) }}>
@@ -1318,23 +1417,103 @@ export default function AdminSaasMasterPage() {
           <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>
             <div style={styles.panelTop}>
               <div>
-                <h2 style={styles.panelTitle}>Sessões ativas e proteção anti-compartilhamento</h2>
-                <p style={styles.panelSub}>Acompanhe dispositivos conectados. A estrutura já está preparada para 1 usuário por conta e limites por plano.</p>
+                <h2 style={styles.panelTitle}>Sessões e uso real</h2>
+                <p style={styles.panelSub}>Online agora, inativos, offline e clientes sem acesso recente — sem polling agressivo.</p>
               </div>
-              <button style={styles.secondaryHeroButton} onClick={() => void carregarTudo()}>Atualizar sessões</button>
+              <button style={styles.secondaryHeroButton} onClick={() => void carregarSessoesAdmin()}>
+                {sessoesLoading ? 'Atualizando...' : 'Atualizar sessões'}
+              </button>
             </div>
-            <div style={styles.sessionGrid}>
-              {sessoes.length > 0 ? sessoes.map((sessao, index) => (
-                <div style={styles.sessionCard} key={`${sessao.user_id || sessao.email}-${index}`}>
+            <div style={styles.usageGrid}>
+              <UsageCard label="Online agora" value={resumoSessoes.online} icon="🟢" />
+              <UsageCard label="Inativos" value={resumoSessoes.inativo} icon="🟡" />
+              <UsageCard label="Offline" value={resumoSessoes.offline} icon="⚫" />
+              <UsageCard label="Com sessão registrada" value={resumoSessoes.total} icon="📱" />
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+              {(['todos', 'online', 'inativo', 'offline'] as const).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setFiltroSessao(item)}
+                  style={{
+                    ...styles.chip,
+                    ...(filtroSessao === item ? styles.chipActive : {}),
+                  }}
+                >
+                  {item === 'todos' ? 'Todos' : item === 'online' ? 'Online' : item === 'inativo' ? 'Inativos' : 'Offline'}
+                </button>
+              ))}
+              <input
+                value={buscaSessao}
+                onChange={(e) => setBuscaSessao(e.target.value)}
+                placeholder="Buscar por nome ou e-mail"
+                style={{ ...styles.search, maxWidth: 280, height: 38 }}
+              />
+            </div>
+            <div style={{ ...styles.sessionGrid, marginTop: 16 }}>
+              {sessoesFiltradas.length > 0 ? sessoesFiltradas.map((sessao) => (
+                <div style={styles.sessionCard} key={sessao.userId || sessao.email}>
                   <div style={styles.sessionTop}>
-                    <strong>{sessao.email || 'Sessão sem e-mail'}</strong>
-                    <span>Protegido</span>
+                    <strong>{sessao.cliente || sessao.email || 'Cliente'}</strong>
+                    <span>{sessao.statusLabel}</span>
                   </div>
-                  <p>{sessao.device_label || 'Dispositivo'}</p>
-                  <small>IP: {sessao.ip_address || '-'}</small>
-                  <small>Último acesso: {sessao.last_seen_at ? new Date(sessao.last_seen_at).toLocaleString('pt-BR') : '-'}</small>
+                  <p>{sessao.email}</p>
+                  {sessao.plano ? <small>Plano: {sessao.plano}</small> : null}
+                  <small>{sessao.sistemaOperacional || sessao.dispositivo || 'Dispositivo'} • {sessao.navegador || sessao.deviceLabel || 'Navegador'}</small>
+                  <small>Última atividade: {formatarQuando(sessao.lastSeenAt)}</small>
+                  <small>Sessão iniciada: {formatarQuando(sessao.startedAt)}</small>
+                  {sessao.status !== 'offline' ? (
+                    <button
+                      type="button"
+                      style={styles.menuDanger}
+                      disabled={encerrandoSessaoId === sessao.userId}
+                      onClick={() => void encerrarSessaoRemota(sessao.userId)}
+                    >
+                      {encerrandoSessaoId === sessao.userId ? 'Encerrando...' : 'Encerrar sessão'}
+                    </button>
+                  ) : null}
                 </div>
-              )) : <div style={styles.empty}>Nenhuma sessão ativa registrada ainda. Execute o SQL do controle de sessão e faça login com um usuário comum.</div>}
+              )) : (
+                <div style={styles.empty}>
+                  {sessoesLoading
+                    ? 'Carregando sessões...'
+                    : 'Nenhuma sessão neste filtro. Se a tabela ainda não existir, execute docs/supabase-sessoes-ativas.sql no Supabase.'}
+                </div>
+              )}
+            </div>
+            <div style={{ marginTop: 22 }}>
+              <h3 style={styles.paymentsTitle}>Sem uso recente</h3>
+              <p style={styles.panelSub}>Clientes que não acessaram o Connect nos últimos 7, 15 ou 30 dias.</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '10px 0 14px' }}>
+                {([
+                  ['todos', 'Todos sem uso recente'],
+                  ['7d', '7 dias'],
+                  ['15d', '15 dias'],
+                  ['30d', '30 dias'],
+                  ['nunca', 'Nunca acessou'],
+                ] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setFiltroSemUso(id)}
+                    style={{ ...styles.chip, ...(filtroSemUso === id ? styles.chipActive : {}) }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div style={styles.paymentsList}>
+                {clientesSemUso.length > 0 ? clientesSemUso.slice(0, 40).map(({ cliente, sessao, faixa }) => (
+                  <div key={cliente.id} style={styles.paymentRow}>
+                    <div>
+                      <strong>{cliente.nome_empresa || cliente.email || 'Cliente'}</strong>
+                      <span>{sessao ? formatarQuando(sessao.lastSeenAt) : 'Nunca acessou'} • {faixa === 'nunca' ? 'sem sessão' : `há ${faixa.replace('d', ' dias')}`}</span>
+                    </div>
+                    <b>{cliente.plano_tier || cliente.status || '-'}</b>
+                  </div>
+                )) : <div style={styles.emptyPayments}>Nenhum cliente neste recorte de inatividade.</div>}
+              </div>
             </div>
           </section>
         )}
@@ -1800,6 +1979,8 @@ const styles: Record<string, CSSProperties> = {
   sessionGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12 },
   sessionCard: { display: 'grid', gap: 7, borderRadius: 20, padding: 16, background: 'rgba(15,23,42,0.36)', border: '1px solid rgba(255,255,255,0.13)' },
   sessionTop: { display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' },
+  chip: { height: 38, borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', padding: '0 14px', background: 'rgba(255,255,255,0.08)', color: '#e2e8f0', fontWeight: 850, cursor: 'pointer' },
+  chipActive: { background: 'rgba(59,130,246,0.28)', border: '1px solid rgba(147,197,253,0.55)', color: '#fff' },
   usageGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 },
   usageCard: { minHeight: 150, borderRadius: 24, padding: 20, display: 'grid', alignContent: 'center', gap: 8, background: 'linear-gradient(135deg,rgba(59,130,246,0.16),rgba(15,23,42,0.44))', border: '1px solid rgba(147,197,253,0.18)' },
   usageIcon: { fontSize: 28 },

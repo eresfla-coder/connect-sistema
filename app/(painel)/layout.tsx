@@ -10,6 +10,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'
 import PainelShell from './components/painel/PainelShell'
 import ConnectLoading from '@/components/ui/ConnectLoading'
+import SessionControl from '@/app/components/SessionControl'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import { installDemoGuard, isDemoMode, logContextoAcessoSeguro, marcarSessaoReal, sairDemoMode, seedDemoData } from '@/lib/connect-demo'
 import { cachearUserIdPainel } from '@/lib/connect-user-storage'
@@ -274,5 +275,10 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
     )
   }
 
-  return <PainelShell>{children}</PainelShell>
+  return (
+    <>
+      {!isDemoMode() ? <SessionControl /> : null}
+      <PainelShell>{children}</PainelShell>
+    </>
+  )
 }

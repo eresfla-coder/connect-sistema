@@ -24,6 +24,7 @@ import {
 } from "@/lib/orcamentos-local";
 import { consultarAcessoPainel } from "@/lib/connect-auth-client";
 import { obterUserIdPainel } from "@/lib/connect-user-storage";
+import { encerrarSessaoAtual } from "@/app/components/SessionControl";
 
 const TrialBanner = dynamic(() => import("@/components/assinatura/TrialBanner"), { ssr: false });
 
@@ -341,6 +342,7 @@ export default function PainelLayout({
         router.push("/login");
         return;
       }
+      await encerrarSessaoAtual();
       await supabase.auth.signOut();
       limparSessaoReal();
       router.push("/login");

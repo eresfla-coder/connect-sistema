@@ -4,10 +4,14 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout'
+import {
+  DEVICE_LABEL_KEY,
+  DEVICE_STORAGE_KEY,
+  SESSAO_HEARTBEAT_MS,
+  mensagemEncerramentoSessao,
+} from '@/lib/sessao-uso'
 
-const DEVICE_KEY = 'connect_device_id_v1'
-const DEVICE_LABEL_KEY = 'connect_device_label_v1'
-const CHECK_INTERVAL = 300000
+const CHECK_INTERVAL = SESSAO_HEARTBEAT_MS
 
 function criarIdDispositivo() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -18,10 +22,10 @@ function criarIdDispositivo() {
 
 function getDeviceId() {
   if (typeof window === 'undefined') return ''
-  let id = localStorage.getItem(DEVICE_KEY)
+  let id = localStorage.getItem(DEVICE_STORAGE_KEY)
   if (!id) {
     id = criarIdDispositivo()
-    localStorage.setItem(DEVICE_KEY, id)
+    localStorage.setItem(DEVICE_STORAGE_KEY, id)
   }
   return id
 }
@@ -58,6 +62,27 @@ async function getAccessToken() {
   return data.session?.access_token || ''
 }
 
+export async function encerrarSessaoAtual() {
+  try {
+    const token = await getAccessToken()
+    if (!token) return
+    await fetchWithTimeout(
+      '/api/sessao/encerrar',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ deviceId: getDeviceId() }),
+      },
+      4000,
+    )
+  } catch {
+    // Logout local não pode falhar por heartbeat.
+  }
+}
+
 export default function SessionControl() {
   const router = useRouter()
   const [bloqueado, setBloqueado] = useState(false)
@@ -91,7 +116,7 @@ export default function SessionControl() {
       return resposta.json().catch(() => null)
     }
 
-    async function derrubarSessao() {
+    async function derrubarSessao(motivo?: string | null) {
       if (saiuRef.current) return
       saiuRef.current = true
       setBloqueado(true)
@@ -99,7 +124,7 @@ export default function SessionControl() {
         await supabase.auth.signOut()
       } catch {}
       try {
-        sessionStorage.setItem('connect_sessao_motivo', 'Sua conta foi acessada em outro dispositivo. Por segurança, esta sessão foi encerrada.')
+        sessionStorage.setItem('connect_sessao_motivo', mensagemEncerramentoSessao(motivo))
       } catch {}
       router.replace('/sessao-bloqueada')
     }
@@ -111,7 +136,7 @@ export default function SessionControl() {
         const data = await chamarApi('/api/sessao/verificar')
         if (!ativo || !data) return
         if (data.ok && data.active === false) {
-          await derrubarSessao()
+          await derrubarSessao(data.motivo || data.reason)
         }
       } catch (error) {
         // Falha de rede não deve derrubar o cliente.
@@ -189,7 +214,7 @@ export default function SessionControl() {
         <div style={{ fontSize: 44, marginBottom: 12 }}>🔐</div>
         <h2 style={{ margin: 0, fontSize: 25, fontWeight: 900 }}>Sessão encerrada</h2>
         <p style={{ color: '#cbd5e1', lineHeight: 1.5 }}>
-          Esta conta foi acessada em outro dispositivo. Para proteger sua assinatura, apenas uma sessão fica ativa por vez.
+          Esta sessão não é mais válida. Entre novamente para continuar usando o Connect.
         </p>
       </div>
     </div>
