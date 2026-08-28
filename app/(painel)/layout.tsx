@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'
 import PainelShell from './components/painel/PainelShell'
-import ConnectLoading from '@/components/ui/ConnectLoading'
+import ConnectStartupSplash from '@/components/ui/ConnectStartupSplash'
 import SessionControl from '@/app/components/SessionControl'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import { installDemoGuard, isDemoMode, logContextoAcessoSeguro, marcarSessaoReal, sairDemoMode, seedDemoData } from '@/lib/connect-demo'
@@ -240,24 +240,32 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
 
   if (verificando) {
     return (
-      <div
-        style={{
-          minHeight: '100vh',
-          background: 'radial-gradient(circle at top left, rgba(59,130,246,0.10) 0%, #eef4ff 38%, #f8fafc 100%)',
-        }}
-      >
-        <ConnectLoading label="Validando acesso..." />
+      <>
+        <ConnectStartupSplash
+          primaryMessage={erroValidacao ? erroValidacao : 'Preparando seu ambiente...'}
+          secondaryMessage={
+            erroValidacao ? 'Toque em tentar novamente para recarregar.' : 'Carregando seus dados e configurações...'
+          }
+        />
         {erroValidacao ? (
-          <div style={{ textAlign: 'center', padding: 16 }}>
-            <p style={{ color: '#b91c1c', fontWeight: 700 }}>{erroValidacao}</p>
+          <div
+            style={{
+              position: 'fixed',
+              left: '50%',
+              bottom: 'max(24px, env(safe-area-inset-bottom))',
+              transform: 'translateX(-50%)',
+              zIndex: 2,
+              textAlign: 'center',
+            }}
+          >
             <button
               type="button"
               onClick={() => {
+                setErroValidacao('')
                 setVerificando(true)
                 window.location.reload()
               }}
               style={{
-                marginTop: 8,
                 padding: '10px 18px',
                 borderRadius: 10,
                 border: 'none',
@@ -271,7 +279,7 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
             </button>
           </div>
         ) : null}
-      </div>
+      </>
     )
   }
 

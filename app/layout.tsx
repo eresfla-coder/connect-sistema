@@ -59,6 +59,7 @@ export const viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: 'cover',
+  colorScheme: 'light',
 }
 
 export default function RootLayout({
@@ -67,8 +68,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="pt-BR">
-      <body>
+    <html lang="pt-BR" style={{ colorScheme: 'light' }}>
+      <body style={{ backgroundColor: '#f3f6fb' }}>
         <PWAClient />
         {children}
       </body>

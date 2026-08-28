@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+.connect-startup-spinner {
+  animation: connect-spin 0.85s linear infinite;
+}
+
+@keyframes connect-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connect-startup-spinner {
+    animation: none;
+    border-top-color: #2563eb;
+  }
+}
+
 /* Connect Sistema — PWA Premium v29 */
 @media all and (display-mode: standalone) {
   body {
