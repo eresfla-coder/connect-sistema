@@ -40,6 +40,10 @@ async function getUserByIdComTimeout(userId: string) {
   )
 }
 
+/**
+ * Localiza usuário Auth existente. Nunca createUser.
+ * Reset opera somente sobre Auth pré-existente.
+ */
 async function localizarUserId(body: BodyPayload) {
   const idInformado = String(body.user_id || '').trim()
   const email = String(body.email || '').trim().toLowerCase()
@@ -89,13 +93,15 @@ export async function POST(req: Request) {
     const body = (await req.json()) as BodyPayload
 
     const email = String(body.email || '').trim().toLowerCase()
+
     const userId = await localizarUserId(body)
 
     if (!userId) {
       return NextResponse.json(
         {
           error:
-            'Não encontrei o usuário no Authentication do Supabase. Confira se o cliente foi criado em Authentication > Users ou informe o e-mail cadastrado.',
+            'Não encontrei o usuário no Authentication do Supabase. O reset de senha só funciona para clientes que já possuem acesso ao Connect.',
+          code: 'AUTH_USER_NOT_FOUND',
         },
         { status: 404 },
       )

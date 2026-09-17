@@ -1,0 +1,647 @@
+import { NextResponse } from 'next/server'
+import { dataMaisDias } from '@/lib/access'
+import {
+  acessoConnectDoVinculo,
+  deveCriarAuthConnect,
+  deveLimparAdminClienteRecemCriado,
+  montarItemLegadoLista,
+  normalizarEmailAdmin,
+  validarAcessoPorOrigem,
+  validarIdsAcessoConnect,
+  type AdminListaItem,
+  type OrigemSistemaAdmin,
+  type StatusVinculoAdmin,
+} from '@/lib/admin-carteira'
+import {
+  COLS_ADMIN_CLIENTE,
+  COLS_ADMIN_VINCULO,
+  logAdminApiError,
+  respostaErroPostgresAmigavel,
+  statusAuthAdmin,
+} from '@/lib/admin-api-errors'
+import {
+  deveChamarCreateUserAuthParaOrigem,
+  deveGerarSenhaParaOrigem,
+  deveLimparAuthRecemCriado,
+  montarConviteClienteAdmin,
+  resolverCriarAcesso,
+  type ModoCriacaoClienteAdmin,
+} from '@/lib/admin-criar-acesso'
+import { requireAdminFromRequest } from '@/lib/api-auth'
+import {
+  probeAdminTables,
+  respostaAdminTablesNotReady,
+  respostaAdminTablesProbeError,
+} from '@/lib/admin-tables'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+type BodyCadastro = {
+  email?: string
+  nome?: string
+  nome_empresa?: string
+  telefone?: string
+  documento?: string
+  observacoes?: string
+  sistema_id?: string
+  status?: StatusVinculoAdmin
+  valor?: string | number
+  dia_vencimento?: number | string
+  data_vencimento?: string
+  tipo?: 'trial' | 'ativo'
+  criar_acesso?: boolean
+}
+
+function normalizarTelefone(value?: string) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+function parseValor(value?: string | number) {
+  const numero = Number(String(value ?? '0').replace(',', '.'))
+  return Number.isFinite(numero) ? numero : 0
+}
+
+function senhaTemporaria() {
+  const aleatorio = Math.random().toString(36).slice(2, 6)
+  const final = Date.now().toString().slice(-4)
+  return `Connect@${aleatorio}${final}`
+}
+
+function siteUrl() {
+  return (process.env.NEXT_PUBLIC_SITE_URL || 'https://connect-sistema-teste.vercel.app').replace(/\/$/, '')
+}
+
+async function gateTablesForWrite() {
+  const probe = await probeAdminTables()
+  if (probe.status === 'ready') return null
+  if (probe.status === 'missing') {
+    const r = respostaAdminTablesNotReady()
+    return NextResponse.json(r.body, { status: r.status })
+  }
+  const r = respostaAdminTablesProbeError(probe)
+  return NextResponse.json(r.body, { status: r.status })
+}
+
+export async function GET(req: Request) {
+  try {
+    await requireAdminFromRequest(req)
+
+    const url = new URL(req.url)
+    const q = String(url.searchParams.get('q') || '').trim().toLowerCase()
+
+    const probe = await probeAdminTables()
+    if (probe.status === 'error') {
+      const r = respostaAdminTablesProbeError(probe)
+      return NextResponse.json(r.body, { status: r.status })
+    }
+
+    const tablesReady = probe.status === 'ready'
+    const itens: AdminListaItem[] = []
+    const perfilIdsVinculados = new Set<string>()
+
+    if (tablesReady) {
+      const { data: clientesAdmin, error } = await supabaseAdmin
+        .from('admin_clientes')
+        .select(
+          `
+          id,nome,nome_empresa,email,telefone,documento,observacoes,ativo,created_at,updated_at,
+          vinculos:admin_cliente_sistemas(
+            id,status,valor,dia_vencimento,data_vencimento,inicio,fim_trial,observacoes,
+            status_pagamento,ultimo_pagamento,acesso_connect,auth_user_id,perfil_id,
+            sistema:admin_sistemas(id,slug,nome,origem,ativo)
+          )
+        `,
+        )
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        logAdminApiError('carteira GET admin', error)
+        const r = respostaErroPostgresAmigavel(error)
+        return NextResponse.json(r.body, { status: r.status })
+      }
+
+      for (const c of clientesAdmin || []) {
+        const vinculos = Array.isArray((c as { vinculos?: unknown }).vinculos)
+          ? ((c as { vinculos: Array<Record<string, unknown>> }).vinculos)
+          : []
+
+        for (const v of vinculos) {
+          if (v.perfil_id) perfilIdsVinculados.add(String(v.perfil_id))
+          if (v.auth_user_id) perfilIdsVinculados.add(String(v.auth_user_id))
+        }
+
+        const sistemas = vinculos.map((v) => {
+          const sistema = (v.sistema || {}) as Record<string, unknown>
+          const origemRaw = String(sistema.origem || 'terceiro')
+          const origem: OrigemSistemaAdmin = origemRaw === 'connect' ? 'connect' : 'terceiro'
+          return {
+            vinculo_id: String(v.id || ''),
+            sistema_id: sistema.id ? String(sistema.id) : null,
+            nome: String(sistema.nome || 'Sistema'),
+            origem,
+            status: (v.status as string) || null,
+            valor: v.valor != null ? Number(v.valor) : null,
+            data_vencimento: v.data_vencimento ? String(v.data_vencimento) : null,
+            dia_vencimento: v.dia_vencimento != null ? Number(v.dia_vencimento) : null,
+            acesso_connect: Boolean(v.acesso_connect),
+            auth_user_id: v.auth_user_id ? String(v.auth_user_id) : null,
+            perfil_id: v.perfil_id ? String(v.perfil_id) : null,
+            legado_texto: false,
+            sistema_cliente_legado: null as string | null,
+          }
+        })
+
+        const authIds = sistemas.map((s) => s.auth_user_id).filter(Boolean) as string[]
+        itens.push({
+          fonte: 'admin',
+          id: String((c as { id: string }).id),
+          admin_cliente_id: String((c as { id: string }).id),
+          nome: (c as { nome?: string | null }).nome || null,
+          nome_empresa: (c as { nome_empresa?: string | null }).nome_empresa || null,
+          email: (c as { email?: string | null }).email || null,
+          telefone: (c as { telefone?: string | null }).telefone || null,
+          observacoes: (c as { observacoes?: string | null }).observacoes || null,
+          ativo: (c as { ativo?: boolean }).ativo !== false,
+          legado: false,
+          sistemas,
+          auth_user_id: authIds[0] || null,
+          perfil_id: sistemas.find((s) => s.perfil_id)?.perfil_id || null,
+          pode_reset_senha: authIds.length > 0,
+        })
+      }
+    }
+
+    const { data: perfis, error: perfisError } = await supabaseAdmin
+      .from('perfis')
+      .select(
+        'id,email,ativo,vencimento,status,valor_plano,telefone,nome_empresa,observacoes,sistema_cliente,data_criacao',
+      )
+      .order('data_criacao', { ascending: false })
+      .limit(200)
+
+    if (perfisError) {
+      logAdminApiError('carteira GET perfis', perfisError)
+      const r = respostaErroPostgresAmigavel(perfisError)
+      return NextResponse.json(r.body, { status: r.status })
+    }
+
+    for (const p of perfis || []) {
+      if (perfilIdsVinculados.has(String(p.id))) continue
+      itens.push(
+        montarItemLegadoLista({
+          perfilId: String(p.id),
+          email: p.email,
+          nomeEmpresa: p.nome_empresa,
+          telefone: p.telefone,
+          status: p.status,
+          valorPlano: p.valor_plano != null ? Number(p.valor_plano) : null,
+          vencimento: p.vencimento,
+          sistemaCliente: p.sistema_cliente,
+          observacoes: p.observacoes,
+          ativo: p.ativo,
+        }),
+      )
+    }
+
+    const filtrados = q
+      ? itens.filter((item) => {
+          const blob = [
+            item.nome,
+            item.nome_empresa,
+            item.email,
+            item.telefone,
+            ...(item.sistemas || []).map((s) => s.nome),
+          ]
+            .join(' ')
+            .toLowerCase()
+          return blob.includes(q)
+        })
+      : itens
+
+    return NextResponse.json({
+      ok: true,
+      tablesReady,
+      dualRead: true,
+      total: filtrados.length,
+      itens: filtrados,
+    })
+  } catch (error: unknown) {
+    logAdminApiError('carteira GET', error)
+    return NextResponse.json(
+      { ok: false, code: 'ADMIN_AUTH', error: 'Não autorizado.' },
+      { status: statusAuthAdmin(error) },
+    )
+  }
+}
+
+export async function POST(req: Request) {
+  let adminClienteId: string | null = null
+  let adminClienteRecemCriadoNestaRequest = false
+  let authUserId: string | null = null
+  let authRecemCriadoNestaRequest = false
+  let vinculoPersistido = false
+
+  try {
+    await requireAdminFromRequest(req)
+    const blocked = await gateTablesForWrite()
+    if (blocked) return blocked
+
+    const body = (await req.json()) as BodyCadastro
+    const email = normalizarEmailAdmin(body.email)
+    const nomeEmpresa = String(body.nome_empresa || body.nome || '').trim()
+    const nome = String(body.nome || nomeEmpresa || '').trim()
+    const telefone = normalizarTelefone(body.telefone)
+    const documento = String(body.documento || '').trim() || null
+    const observacoes = String(body.observacoes || '').trim() || null
+    const sistemaId = String(body.sistema_id || '').trim()
+    const criarAcesso = resolverCriarAcesso(body.criar_acesso)
+    const tipo = body.tipo === 'ativo' ? 'ativo' : 'trial'
+    const statusVinculo: StatusVinculoAdmin =
+      body.status === 'ativo' || body.status === 'bloqueado' || body.status === 'cancelado' || body.status === 'inadimplente'
+        ? body.status
+        : tipo === 'ativo'
+          ? 'ativo'
+          : 'trial'
+    const valor = parseValor(body.valor)
+    const diaVencimentoRaw = body.dia_vencimento != null ? Number(body.dia_vencimento) : null
+    const diaVencimento =
+      diaVencimentoRaw != null && Number.isFinite(diaVencimentoRaw) && diaVencimentoRaw >= 1 && diaVencimentoRaw <= 28
+        ? Math.floor(diaVencimentoRaw)
+        : null
+
+    if (!email) {
+      return NextResponse.json({ ok: false, code: 'ADMIN_VALIDATION', error: 'Informe o e-mail do cliente.' }, { status: 400 })
+    }
+    if (!sistemaId) {
+      return NextResponse.json({ ok: false, code: 'ADMIN_VALIDATION', error: 'Selecione o sistema contratado.' }, { status: 400 })
+    }
+
+    const { data: sistema, error: sistemaError } = await supabaseAdmin
+      .from('admin_sistemas')
+      .select('id,nome,origem,ativo')
+      .eq('id', sistemaId)
+      .maybeSingle()
+
+    if (sistemaError || !sistema?.id) {
+      return NextResponse.json({ ok: false, code: 'ADMIN_NOT_FOUND', error: 'Sistema não encontrado no catálogo.' }, { status: 404 })
+    }
+
+    const origem = String(sistema.origem) as OrigemSistemaAdmin
+    if (origem !== 'connect' && origem !== 'terceiro') {
+      return NextResponse.json({ ok: false, code: 'ADMIN_VALIDATION', error: 'Origem do sistema inválida.' }, { status: 400 })
+    }
+
+    const acessoConnect = acessoConnectDoVinculo({ origem, criarAcesso })
+    const validacaoOrigem = validarAcessoPorOrigem({ origem, acessoConnect })
+    if (validacaoOrigem.ok === false) {
+      return NextResponse.json(
+        { ok: false, code: validacaoOrigem.code, error: validacaoOrigem.error },
+        { status: 422 },
+      )
+    }
+
+    // IDs ainda null neste ponto; true só após Auth — validamos o estado final abaixo
+    if (!acessoConnect) {
+      const idsOk = validarIdsAcessoConnect({ acessoConnect: false, authUserId: null, perfilId: null })
+      if (idsOk.ok === false) {
+        return NextResponse.json({ ok: false, code: idsOk.code, error: idsOk.error }, { status: 422 })
+      }
+    }
+
+    const dias = tipo === 'trial' ? 7 : 30
+    const dataVencimento =
+      String(body.data_vencimento || '').trim().slice(0, 10) || dataMaisDias(dias).slice(0, 10)
+    const fimTrial = statusVinculo === 'trial' ? dataVencimento : null
+    const ultimoPagamento = statusVinculo === 'ativo' ? dataMaisDias(0).slice(0, 10) : null
+
+    // 1) admin_cliente
+    {
+      const { data: existente } = await supabaseAdmin
+        .from('admin_clientes')
+        .select('id')
+        .eq('email', email)
+        .maybeSingle()
+
+      if (existente?.id) {
+        adminClienteId = String(existente.id)
+        adminClienteRecemCriadoNestaRequest = false
+        await supabaseAdmin
+          .from('admin_clientes')
+          .update({
+            nome: nome || null,
+            nome_empresa: nomeEmpresa || null,
+            telefone: telefone || null,
+            documento,
+            observacoes,
+            ativo: true,
+          })
+          .eq('id', adminClienteId)
+      } else {
+        const { data: criado, error: createCliErr } = await supabaseAdmin
+          .from('admin_clientes')
+          .insert([
+            {
+              nome: nome || null,
+              nome_empresa: nomeEmpresa || null,
+              email,
+              telefone: telefone || null,
+              documento,
+              observacoes,
+              ativo: true,
+            },
+          ])
+          .select('id')
+          .maybeSingle()
+
+        if (createCliErr || !criado?.id) {
+          logAdminApiError('carteira POST cliente', createCliErr)
+          const r = respostaErroPostgresAmigavel(createCliErr)
+          return NextResponse.json(r.body, { status: r.status })
+        }
+        adminClienteId = String(criado.id)
+        adminClienteRecemCriadoNestaRequest = true
+      }
+    }
+
+    // 2) Auth + perfis
+    let perfilId: string | null = null
+    let mode: ModoCriacaoClienteAdmin = 'admin_only'
+    let senhaInicial: string | null = null
+    const precisaAuth = deveChamarCreateUserAuthParaOrigem({ origem, criarAcesso })
+
+    if (precisaAuth && deveCriarAuthConnect({ origem, criarAcesso })) {
+      senhaInicial = deveGerarSenhaParaOrigem({ origem, criarAcesso }) ? senhaTemporaria() : null
+      if (!senhaInicial) {
+        await compensarFalha({
+          adminClienteId,
+          adminClienteRecemCriadoNestaRequest,
+          authUserId,
+          authRecemCriadoNestaRequest,
+          vinculoPersistido,
+        })
+        return NextResponse.json(
+          { ok: false, code: 'ADMIN_VALIDATION', error: 'Senha temporária obrigatória para criar Auth.' },
+          { status: 400 },
+        )
+      }
+
+      const createResult = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: senhaInicial,
+        email_confirm: true,
+      })
+
+      if (createResult.error) {
+        const { data: perfilExistente } = await supabaseAdmin
+          .from('perfis')
+          .select('id')
+          .eq('email', email)
+          .maybeSingle()
+
+        if (!perfilExistente?.id) {
+          logAdminApiError('carteira POST createUser', createResult.error)
+          await compensarFalha({
+            adminClienteId,
+            adminClienteRecemCriadoNestaRequest,
+            authUserId: null,
+            authRecemCriadoNestaRequest: false,
+            vinculoPersistido: false,
+          })
+          return NextResponse.json(
+            { ok: false, code: 'ADMIN_AUTH_CREATE', error: 'Não foi possível criar o acesso Connect para este e-mail.' },
+            { status: 400 },
+          )
+        }
+
+        authUserId = String(perfilExistente.id)
+        perfilId = authUserId
+        mode = 'existing'
+        authRecemCriadoNestaRequest = false
+        senhaInicial = null
+      } else {
+        authUserId = createResult.data.user?.id || null
+        authRecemCriadoNestaRequest = Boolean(authUserId)
+        mode = 'created'
+      }
+
+      if (!authUserId) {
+        await compensarFalha({
+          adminClienteId,
+          adminClienteRecemCriadoNestaRequest,
+          authUserId: null,
+          authRecemCriadoNestaRequest: false,
+          vinculoPersistido: false,
+        })
+        return NextResponse.json(
+          { ok: false, code: 'ADMIN_AUTH_CREATE', error: 'Não foi possível criar o usuário Auth.' },
+          { status: 400 },
+        )
+      }
+
+      perfilId = authUserId
+
+      const idsOk = validarIdsAcessoConnect({
+        acessoConnect: true,
+        authUserId,
+        perfilId,
+      })
+      if (idsOk.ok === false) {
+        await compensarFalha({
+          adminClienteId,
+          adminClienteRecemCriadoNestaRequest,
+          authUserId,
+          authRecemCriadoNestaRequest,
+          vinculoPersistido: false,
+        })
+        return NextResponse.json({ ok: false, code: idsOk.code, error: idsOk.error }, { status: 422 })
+      }
+
+      const perfil = {
+        id: authUserId,
+        email,
+        nome_empresa: nomeEmpresa || null,
+        telefone: telefone || null,
+        valor_plano: valor,
+        status: statusVinculo === 'trial' ? 'trial' : statusVinculo === 'bloqueado' ? 'bloqueado' : 'ativo',
+        ativo: true,
+        vencimento: dataVencimento,
+        status_pagamento: statusVinculo === 'trial' ? 'trial' : 'em_dia',
+        ultimo_pagamento: ultimoPagamento,
+        sistema_cliente: String(sistema.nome || 'Connect Sistema'),
+        observacoes,
+      }
+
+      let upsertError = (await supabaseAdmin.from('perfis').upsert([perfil], { onConflict: 'id' })).error
+      if (upsertError) {
+        const msg = String(upsertError.message || '').toLowerCase()
+        if (msg.includes('sistema_cliente') || msg.includes('observacoes') || msg.includes('column')) {
+          const fallback = { ...perfil } as Record<string, unknown>
+          if (msg.includes('sistema_cliente')) delete fallback.sistema_cliente
+          if (msg.includes('observacoes')) delete fallback.observacoes
+          upsertError = (await supabaseAdmin.from('perfis').upsert([fallback], { onConflict: 'id' })).error
+        }
+      }
+
+      if (upsertError) {
+        logAdminApiError('carteira POST perfil', upsertError)
+        await compensarFalha({
+          adminClienteId,
+          adminClienteRecemCriadoNestaRequest,
+          authUserId,
+          authRecemCriadoNestaRequest,
+          vinculoPersistido: false,
+        })
+        return NextResponse.json(
+          { ok: false, code: 'ADMIN_PERFIL_FAIL', error: 'Não foi possível salvar o perfil Connect.' },
+          { status: 400 },
+        )
+      }
+    }
+
+    // 3) vínculo
+    const vinculoPayload = {
+      cliente_id: adminClienteId,
+      sistema_id: sistemaId,
+      status: statusVinculo,
+      valor,
+      dia_vencimento: diaVencimento,
+      data_vencimento: dataVencimento,
+      inicio: dataMaisDias(0).slice(0, 10),
+      fim_trial: fimTrial,
+      observacoes,
+      status_pagamento: statusVinculo === 'trial' ? 'trial' : 'em_dia',
+      ultimo_pagamento: ultimoPagamento,
+      acesso_connect: acessoConnect,
+      auth_user_id: authUserId,
+      perfil_id: perfilId,
+    }
+
+    const finalIds = validarIdsAcessoConnect({
+      acessoConnect,
+      authUserId,
+      perfilId,
+    })
+    if (finalIds.ok === false) {
+      await compensarFalha({
+        adminClienteId,
+        adminClienteRecemCriadoNestaRequest,
+        authUserId,
+        authRecemCriadoNestaRequest,
+        vinculoPersistido: false,
+      })
+      return NextResponse.json({ ok: false, code: finalIds.code, error: finalIds.error }, { status: 422 })
+    }
+
+    const { data: vinculo, error: vinculoError } = await supabaseAdmin
+      .from('admin_cliente_sistemas')
+      .upsert([vinculoPayload], { onConflict: 'cliente_id,sistema_id' })
+      .select(COLS_ADMIN_VINCULO)
+      .maybeSingle()
+
+    if (vinculoError) {
+      logAdminApiError('carteira POST vinculo', vinculoError)
+      await compensarFalha({
+        adminClienteId,
+        adminClienteRecemCriadoNestaRequest,
+        authUserId,
+        authRecemCriadoNestaRequest,
+        vinculoPersistido: false,
+      })
+      const r = respostaErroPostgresAmigavel(vinculoError)
+      return NextResponse.json(r.body, { status: r.status })
+    }
+
+    vinculoPersistido = true
+
+    const accessLink = precisaAuth ? `${siteUrl()}/login` : ''
+    const inviteText = montarConviteClienteAdmin({
+      mode,
+      nomeSaudacao: nomeEmpresa || email,
+      email,
+      sistemaCliente: String(sistema.nome || 'Sistema'),
+      valorPlano: valor,
+      vencimento: dataVencimento,
+      accessLink: accessLink || siteUrl(),
+      senhaInicial: mode === 'created' ? senhaInicial : null,
+    })
+
+    const whatsappUrl = telefone
+      ? `https://wa.me/55${telefone.replace(/^55/, '')}?text=${encodeURIComponent(inviteText)}`
+      : ''
+
+    return NextResponse.json({
+      ok: true,
+      mode,
+      criar_acesso: acessoConnect,
+      origem,
+      authUserCreated: authRecemCriadoNestaRequest,
+      perfilCreated: Boolean(perfilId && authRecemCriadoNestaRequest),
+      accessLink,
+      temporaryPassword: mode === 'created' ? senhaInicial : null,
+      inviteText,
+      whatsappUrl,
+      admin_cliente_id: adminClienteId,
+      vinculo,
+      sistema: { id: sistema.id, nome: sistema.nome, origem: sistema.origem, ativo: sistema.ativo },
+    })
+  } catch (error: unknown) {
+    logAdminApiError('carteira POST', error)
+    await compensarFalha({
+      adminClienteId,
+      adminClienteRecemCriadoNestaRequest,
+      authUserId,
+      authRecemCriadoNestaRequest,
+      vinculoPersistido,
+    })
+    return NextResponse.json(
+      { ok: false, code: 'ADMIN_AUTH', error: 'Não autorizado.' },
+      { status: statusAuthAdmin(error) },
+    )
+  }
+}
+
+async function compensarFalha(params: {
+  adminClienteId: string | null
+  adminClienteRecemCriadoNestaRequest: boolean
+  authUserId: string | null
+  authRecemCriadoNestaRequest: boolean
+  vinculoPersistido: boolean
+}) {
+  if (
+    deveLimparAuthRecemCriado({
+      authRecemCriadoNestaRequest: params.authRecemCriadoNestaRequest,
+      falhaPosterior: true,
+    }) &&
+    params.authUserId
+  ) {
+    try {
+      await supabaseAdmin.auth.admin.deleteUser(params.authUserId)
+    } catch (cleanupErr) {
+      console.warn('[ADMIN CARTEIRA] cleanup auth:', cleanupErr)
+    }
+  }
+
+  if (
+    deveLimparAdminClienteRecemCriado({
+      adminClienteRecemCriadoNestaRequest: params.adminClienteRecemCriadoNestaRequest,
+      falhaPosterior: true,
+      vinculoPersistido: params.vinculoPersistido,
+    }) &&
+    params.adminClienteId
+  ) {
+    try {
+      const { count } = await supabaseAdmin
+        .from('admin_cliente_sistemas')
+        .select('id', { count: 'exact', head: true })
+        .eq('cliente_id', params.adminClienteId)
+
+      if (!count) {
+        await supabaseAdmin.from('admin_clientes').delete().eq('id', params.adminClienteId)
+      }
+    } catch (cleanupErr) {
+      console.warn('[ADMIN CARTEIRA] cleanup admin_cliente:', cleanupErr)
+    }
+  }
+}

@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server'
 import { dataMaisDias } from '@/lib/access'
+import {
+  deveChamarCreateUserAuth,
+  deveLimparAuthRecemCriado,
+  montarConviteClienteAdmin,
+  resolverCriarAcesso,
+  type ModoCriacaoClienteAdmin,
+} from '@/lib/admin-criar-acesso'
 import { requireAdminFromRequest } from '@/lib/api-auth'
+import { probeAdminTables, respostaAdminTablesNotReady, respostaAdminTablesProbeError } from '@/lib/admin-tables'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
@@ -368,7 +376,36 @@ export async function POST(req: Request) {
 
     const observacoes = String(body.observacoes || '').trim()
 
-    const criarAcesso = body.criar_acesso !== false
+    // Default true se flag ausente (callers antigos). Somente false explícito = sem Auth.
+    const criarAcesso = resolverCriarAcesso(body.criar_acesso)
+
+    // Sem login Connect: exige carteira ADMIN.2 (admin_*). Esta rota legado só cria Auth+perfis.
+    if (!deveChamarCreateUserAuth(criarAcesso)) {
+      const probe = await probeAdminTables()
+      if (probe.status === 'missing') {
+        const r = respostaAdminTablesNotReady()
+        return NextResponse.json(
+          {
+            ...r.body,
+            hint: 'Cadastro sem acesso usa POST /api/admin/carteira após aplicar docs/admin2-migration.sql.',
+          },
+          { status: r.status },
+        )
+      }
+      if (probe.status === 'error') {
+        const r = respostaAdminTablesProbeError(probe)
+        return NextResponse.json(r.body, { status: r.status })
+      }
+      return NextResponse.json(
+        {
+          ok: false,
+          code: 'USE_ADMIN_CARTEIRA',
+          error:
+            'Para cadastrar sem login Connect (ou sistema de terceiro), use a carteira administrativa (/api/admin/carteira) com sistema_id.',
+        },
+        { status: 422 },
+      )
+    }
 
     const dias = tipo === 'trial' ? 7 : 30
 
@@ -380,61 +417,42 @@ export async function POST(req: Request) {
     const senhaInicial = senhaTemporaria()
 
     let userId: string | null = null
+    let mode: ModoCriacaoClienteAdmin = 'created'
+    let authRecemCriadoNestaRequest = false
 
-    let mode: 'created' | 'existing' | 'external' =
-      criarAcesso ? 'created' : 'external'
+    const createResult =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: senhaInicial,
+        email_confirm: true,
+      })
 
-    if (criarAcesso) {
-      const createResult =
-        await supabaseAdmin.auth.admin.createUser({
-          email,
-          password: senhaInicial,
-          email_confirm: true,
-        })
+    if (createResult.error) {
+      const { data: perfilExistente } = await supabaseAdmin
+        .from('perfis')
+        .select('id')
+        .eq('email', email)
+        .maybeSingle()
 
-      if (createResult.error) {
-        const { data: perfilExistente } = await supabaseAdmin
-          .from('perfis')
-          .select('id')
-          .eq('email', email)
-          .maybeSingle()
-
-        if (!perfilExistente?.id) {
-          return NextResponse.json(
-            { error: createResult.error.message },
-            { status: 400 }
-          )
-        }
-
-        userId = perfilExistente.id
-
-        mode = 'existing'
-      } else {
-        userId = createResult.data.user?.id || null
-      }
-    } else {
-      const createExternalResult =
-        await supabaseAdmin.auth.admin.createUser({
-          email,
-          password: senhaInicial,
-          email_confirm: true,
-        })
-
-      if (createExternalResult.error) {
+      if (!perfilExistente?.id) {
         return NextResponse.json(
-          { error: createExternalResult.error.message },
+          { error: createResult.error.message },
           { status: 400 }
         )
       }
 
-      userId = createExternalResult.data.user?.id || null
-
-      mode = 'external'
+      userId = perfilExistente.id
+      mode = 'existing'
+      authRecemCriadoNestaRequest = false
+    } else {
+      userId = createResult.data.user?.id || null
+      authRecemCriadoNestaRequest = Boolean(userId)
+      mode = 'created'
     }
 
     if (!userId) {
       return NextResponse.json(
-        { error: 'Não foi possível criar usuário.' },
+        { error: 'Não foi possível criar o cadastro do cliente.' },
         { status: 400 }
       )
     }
@@ -455,11 +473,44 @@ export async function POST(req: Request) {
       observacoes: observacoes || null,
     }
 
-    const { error: upsertError } = await supabaseAdmin
-      .from('perfis')
-      .upsert([perfil], { onConflict: 'id' })
+    let upsertError = (
+      await supabaseAdmin.from('perfis').upsert([perfil], { onConflict: 'id' })
+    ).error
 
     if (upsertError) {
+      const msg = String(upsertError.message || '').toLowerCase()
+      const colunaOpcional =
+        msg.includes('sistema_cliente') ||
+        msg.includes('observacoes') ||
+        msg.includes('schema cache') ||
+        msg.includes('column')
+
+      if (colunaOpcional) {
+        const fallback = { ...perfil } as Record<string, unknown>
+        if (msg.includes('sistema_cliente')) delete fallback.sistema_cliente
+        if (msg.includes('observacoes')) delete fallback.observacoes
+
+        upsertError = (
+          await supabaseAdmin.from('perfis').upsert([fallback], { onConflict: 'id' })
+        ).error
+      }
+    }
+
+    if (upsertError) {
+      if (
+        deveLimparAuthRecemCriado({
+          authRecemCriadoNestaRequest,
+          falhaPosterior: true,
+        }) &&
+        userId
+      ) {
+        try {
+          await supabaseAdmin.auth.admin.deleteUser(userId)
+        } catch (cleanupErr) {
+          console.warn('[ADMIN CLIENTES] cleanup auth após falha de perfil:', cleanupErr)
+        }
+      }
+
       return NextResponse.json(
         { error: upsertError.message },
         { status: 400 }
@@ -469,48 +520,16 @@ export async function POST(req: Request) {
     const accessLink = `${siteUrl()}/login`
     const nomeSaudacao = nomeEmpresa || email
 
-    const inviteText =
-      mode === 'external'
-        ? [
-            `Olá, ${nomeSaudacao}!`,
-            '',
-            `Seu cadastro financeiro do ${sistemaCliente} foi registrado com sucesso.`,
-            '',
-            `Mensalidade: R$ ${valorPlano.toFixed(2).replace('.', ',')}`,
-            `Vencimento: ${vencimento}`,
-            '',
-            'Esse canal será usado para avisos, suporte e cobrança da mensalidade.',
-            '',
-            '— Connect Sistema',
-          ].join('\n')
-        : mode === 'created'
-          ? [
-              `Olá, ${nomeSaudacao}!`,
-              '',
-              `Seu acesso ao ${sistemaCliente} foi criado com sucesso.`,
-              '',
-              `Login: ${email}`,
-              `Senha provisória: ${senhaInicial}`,
-              '',
-              `Acesse: ${accessLink}`,
-              '',
-              'Entre com esses dados e depois altere sua senha no painel.',
-              '',
-              '— Connect Sistema',
-            ].join('\n')
-          : [
-              `Olá, ${nomeSaudacao}!`,
-              '',
-              `Seu cadastro no ${sistemaCliente} já existia e foi atualizado.`,
-              '',
-              `Login: ${email}`,
-              '',
-              `Acesse: ${accessLink}`,
-              '',
-              'Se você não lembrar a senha, use a opção "Esqueci minha senha" na tela de login.',
-              '',
-              '— Connect Sistema',
-            ].join('\n')
+    const inviteText = montarConviteClienteAdmin({
+      mode,
+      nomeSaudacao,
+      email,
+      sistemaCliente,
+      valorPlano,
+      vencimento,
+      accessLink,
+      senhaInicial: mode === 'created' ? senhaInicial : null,
+    })
 
     const whatsappUrl = telefone
       ? `https://wa.me/55${telefone.replace(/^55/, '')}?text=${encodeURIComponent(inviteText)}`
@@ -519,9 +538,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       mode,
-      accessLink: mode === 'external' ? '' : accessLink,
-      temporaryPassword:
-        mode === 'created' ? senhaInicial : null,
+      criar_acesso: true,
+      accessLink,
+      temporaryPassword: mode === 'created' ? senhaInicial : null,
       inviteText,
       whatsappUrl,
       cliente: perfil,

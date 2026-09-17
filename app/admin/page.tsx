@@ -14,6 +14,7 @@ import { emailDoUsuarioAuth } from '@/lib/access'
 import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetricas'
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
 import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
+import AdminSistemasPanel from '@/components/admin/AdminSistemasPanel'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
@@ -23,6 +24,8 @@ import {
   type FaixaSemUso,
   type StatusUsoSessao,
 } from '@/lib/sessao-uso'
+import { MSG_ADMIN_TABLES_NOT_READY } from '@/lib/admin-carteira'
+import { resolverCriarAcesso } from '@/lib/admin-criar-acesso'
 
 type FiltroStatus = 'todos' | 'trial' | 'ativo' | 'bloqueado' | 'vencidos' | 'risco'
 type TipoNovoCliente = 'trial' | 'ativo'
@@ -42,6 +45,17 @@ type PerfilAdmin = {
   status_pagamento?: string | null
   sistema_cliente?: string | null
   observacoes?: string | null
+  /** ADMIN.2 dual-read */
+  fonte?: 'legado' | 'admin'
+  admin_cliente_id?: string | null
+  auth_user_id_reset?: string | null
+  pode_reset_senha?: boolean
+  sistemasResumo?: Array<{
+    nome: string
+    origem: string
+    acesso_connect?: boolean
+    legado_texto?: boolean
+  }>
 }
 
 type SessaoUsoAdmin = {
@@ -69,8 +83,10 @@ type NovoClienteForm = {
   valor_plano: string
   tipo: TipoNovoCliente
   sistema_cliente: string
+  sistema_id: string
   observacoes: string
   criar_acesso: boolean
+  dia_vencimento: string
 }
 
 type EditForm = {
@@ -276,7 +292,9 @@ export default function AdminSaasMasterPage() {
   const [erroAdmin, setErroAdmin] = useState('')
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<FiltroStatus>('todos')
-  const [aba, setAba] = useState<'clientes' | 'sessoes' | 'metricas' | 'saude'>('clientes')
+  const [aba, setAba] = useState<'clientes' | 'sistemas' | 'sessoes' | 'metricas' | 'saude'>('clientes')
+  const [catalogoSistemas, setCatalogoSistemas] = useState<Array<{ id: string; nome: string; origem: string; ativo: boolean }>>([])
+  const [adminTablesReadyFlag, setAdminTablesReadyFlag] = useState(false)
   const [healthItens, setHealthItens] = useState<Array<{ nome: string; status: string; detalhe?: string }>>([])
   const [healthLoading, setHealthLoading] = useState(false)
   const [backupModalCliente, setBackupModalCliente] = useState<PerfilAdmin | null>(null)
@@ -311,8 +329,10 @@ export default function AdminSaasMasterPage() {
     valor_plano: '49,90',
     tipo: 'trial',
     sistema_cliente: 'Connect Sistema',
+    sistema_id: '',
     observacoes: '',
     criar_acesso: true,
+    dia_vencimento: '',
   })
 
   useEffect(() => {
@@ -451,7 +471,21 @@ export default function AdminSaasMasterPage() {
   }, [desktopActionMenu])
 
   function clienteSistema(cliente: PerfilAdmin) {
+    if (cliente.sistemasResumo && cliente.sistemasResumo.length > 0) {
+      return cliente.sistemasResumo
+        .map((s) => {
+          const tag =
+            s.origem === 'connect' ? 'CONNECT' : s.origem === 'terceiro' ? 'TERCEIRO' : 'LEGADO'
+          return `${s.nome} (${tag})`
+        })
+        .join(' · ')
+    }
     return cliente.sistema_cliente || metaLocal[cliente.id]?.sistema_cliente || 'Connect Sistema'
+  }
+
+  function clientePodeReset(cliente: PerfilAdmin) {
+    if (typeof cliente.pode_reset_senha === 'boolean') return cliente.pode_reset_senha
+    return Boolean(cliente.auth_user_id_reset || cliente.fonte !== 'admin')
   }
 
   function clienteObs(cliente: PerfilAdmin) {
@@ -473,7 +507,77 @@ export default function AdminSaasMasterPage() {
     }
   }
 
+  async function carregarCatalogoSistemas(token: string) {
+    try {
+      const res = await fetch('/api/admin/sistemas?ativos=1', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (res.status === 503 || payload?.code === 'ADMIN_TABLES_NOT_READY') {
+        setAdminTablesReadyFlag(false)
+        setCatalogoSistemas([])
+        return
+      }
+      if (!res.ok) {
+        setAdminTablesReadyFlag(false)
+        return
+      }
+      setAdminTablesReadyFlag(true)
+      const lista = Array.isArray(payload.sistemas) ? payload.sistemas : []
+      setCatalogoSistemas(lista)
+      setNovoCliente((prev) => {
+        if (prev.sistema_id) return prev
+        const connect = lista.find((s: { origem: string }) => s.origem === 'connect')
+        return connect ? { ...prev, sistema_id: connect.id, sistema_cliente: connect.nome } : prev
+      })
+    } catch {
+      setAdminTablesReadyFlag(false)
+    }
+  }
+
   async function carregarClientesAdmin(token: string): Promise<PerfilAdmin[]> {
+    // Dual-read ADMIN.2 quando tabelas prontas
+    try {
+      const carteiraRes = await fetch('/api/admin/carteira', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const carteiraPayload = await carteiraRes.json().catch(() => ({}))
+      if (carteiraRes.ok && carteiraPayload?.dualRead && Array.isArray(carteiraPayload.itens)) {
+        setAdminTablesReadyFlag(Boolean(carteiraPayload.tablesReady))
+        return (carteiraPayload.itens as Array<Record<string, unknown>>).map((item) => {
+          const sistemas = Array.isArray(item.sistemas) ? (item.sistemas as Array<Record<string, unknown>>) : []
+          const prim = sistemas[0] || {}
+          const fonte = item.fonte === 'admin' ? 'admin' : 'legado'
+          const perfilId = item.perfil_id ? String(item.perfil_id) : null
+          const authId = item.auth_user_id ? String(item.auth_user_id) : null
+          return {
+            id: fonte === 'legado' ? String(item.id) : perfilId || String(item.id),
+            email: (item.email as string) || null,
+            ativo: item.ativo !== false,
+            vencimento: (prim.data_vencimento as string) || null,
+            status: (prim.status as string) || null,
+            valor_plano: prim.valor != null ? Number(prim.valor) : null,
+            telefone: (item.telefone as string) || null,
+            nome_empresa: (item.nome_empresa as string) || (item.nome as string) || null,
+            sistema_cliente: sistemas.map((s) => s.nome).filter(Boolean).join(' · ') || null,
+            observacoes: (item.observacoes as string) || null,
+            fonte,
+            admin_cliente_id: item.admin_cliente_id ? String(item.admin_cliente_id) : null,
+            auth_user_id_reset: authId,
+            pode_reset_senha: Boolean(item.pode_reset_senha),
+            sistemasResumo: sistemas.map((s) => ({
+              nome: String(s.nome || ''),
+              origem: String(s.origem || ''),
+              acesso_connect: Boolean(s.acesso_connect),
+              legado_texto: Boolean(s.legado_texto),
+            })),
+          } satisfies PerfilAdmin
+        })
+      }
+    } catch (err) {
+      console.warn('[ADMIN] carteira dual-read fallback perfis:', err)
+    }
+
     const acumulado: PerfilAdmin[] = []
     let page = 1
     let hasMore = true
@@ -496,7 +600,14 @@ export default function AdminSaasMasterPage() {
         return acumulado
       }
 
-      acumulado.push(...((payload?.clientes as PerfilAdmin[]) || []))
+      acumulado.push(
+        ...(((payload?.clientes as PerfilAdmin[]) || []).map((c) => ({
+          ...c,
+          fonte: 'legado' as const,
+          pode_reset_senha: true,
+          auth_user_id_reset: c.id,
+        }))),
+      )
       hasMore = Boolean(payload?.pagination?.hasMore)
       page += 1
     }
@@ -519,6 +630,7 @@ export default function AdminSaasMasterPage() {
     const { data: { session } } = await supabase.auth.getSession()
     const token = accessToken || session?.access_token || ''
 
+    if (token) await carregarCatalogoSistemas(token)
     const listaClientes = token ? await carregarClientesAdmin(token) : []
     setClientes(listaClientes)
 
@@ -836,6 +948,11 @@ export default function AdminSaasMasterPage() {
   }
 
   async function resetarSenhaCliente(cliente: PerfilAdmin) {
+    if (!clientePodeReset(cliente)) {
+      alert('Este cliente não possui login Connect. Reset de senha não se aplica.')
+      return
+    }
+
     if (!cliente.email) {
       alert('Cliente sem e-mail cadastrado.')
       return
@@ -853,6 +970,8 @@ export default function AdminSaasMasterPage() {
       const accessToken = session?.access_token
       if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
 
+      const authUserId = cliente.auth_user_id_reset || (cliente.fonte === 'legado' ? cliente.id : null)
+
       const response = await fetch('/api/admin/clientes/reset-senha', {
         method: 'POST',
         headers: {
@@ -860,7 +979,7 @@ export default function AdminSaasMasterPage() {
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          user_id: cliente.id,
+          user_id: authUserId || undefined,
           email: cliente.email,
           nome_empresa: cliente.nome_empresa || '',
           telefone: cliente.telefone || '',
@@ -984,6 +1103,28 @@ export default function AdminSaasMasterPage() {
       return
     }
 
+    const sistemaSelecionado = catalogoSistemas.find((s) => s.id === novoCliente.sistema_id)
+    const origem = sistemaSelecionado?.origem || 'connect'
+    const criarAcesso = resolverCriarAcesso(novoCliente.criar_acesso)
+
+    // ADMIN.2: carteira quando tabelas prontas e sistema_id informado
+    const usarCarteira = adminTablesReadyFlag && Boolean(novoCliente.sistema_id)
+
+    if (!usarCarteira && !criarAcesso) {
+      alert(MSG_ADMIN_TABLES_NOT_READY)
+      return
+    }
+
+    if (usarCarteira && !novoCliente.sistema_id) {
+      alert('Selecione o sistema contratado.')
+      return
+    }
+
+    if (origem === 'terceiro' && criarAcesso) {
+      alert('Sistema de terceiro não cria login Connect. Desmarque “Criar acesso ao Connect”.')
+      return
+    }
+
     try {
       setSavingNew(true)
       setInviteLink('')
@@ -995,61 +1136,69 @@ export default function AdminSaasMasterPage() {
       const accessToken = session?.access_token
       if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
 
-      const response = await fetch('/api/admin/clientes', {
+      const endpoint = usarCarteira ? '/api/admin/carteira' : '/api/admin/clientes'
+      const body = usarCarteira
+        ? {
+            email: novoCliente.email,
+            nome_empresa: novoCliente.nome_empresa,
+            telefone: novoCliente.telefone,
+            observacoes: novoCliente.observacoes,
+            sistema_id: novoCliente.sistema_id,
+            valor: novoCliente.valor_plano,
+            tipo: novoCliente.tipo,
+            criar_acesso: origem === 'terceiro' ? false : criarAcesso,
+            dia_vencimento: novoCliente.dia_vencimento || undefined,
+          }
+        : { ...novoCliente }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({
-          ...novoCliente,
-        }),
+        body: JSON.stringify(body),
       })
 
       const payload = await response.json()
       if (!response.ok) throw new Error(payload?.error || 'Não foi possível criar o cliente.')
 
-      const id = payload?.cliente?.id
+      const id = payload?.cliente?.id || payload?.admin_cliente_id
       if (id) {
         const meta = readMeta()
         meta[id] = {
-          sistema_cliente: novoCliente.sistema_cliente || 'Connect Sistema',
+          sistema_cliente: sistemaSelecionado?.nome || novoCliente.sistema_cliente || 'Connect Sistema',
           observacoes: novoCliente.observacoes || '',
         }
         writeMeta(meta)
         setMetaLocal(meta)
       }
 
-      const linkFinal = String(payload?.accessLink || LOGIN_URL)
-      const textoFinal = String(payload?.inviteText || [
-        `Olá, ${novoCliente.nome_empresa || novoCliente.email}!`,
-        '',
-        `Seu acesso ao ${novoCliente.sistema_cliente || 'Connect Sistema'} foi criado com sucesso.`,
-        '',
-        `Login: ${novoCliente.email.trim().toLowerCase()}`,
-        payload?.temporaryPassword ? `Senha provisória: ${payload.temporaryPassword}` : '',
-        '',
-        `Acesse: ${linkFinal}`,
-      ].filter(Boolean).join('\n'))
+      const linkFinal = String(payload?.accessLink || (criarAcesso && origem === 'connect' ? LOGIN_URL : ''))
+      const textoFinal = String(payload?.inviteText || '')
 
       setInviteLink(linkFinal)
       setInviteText(textoFinal)
       setInvitePhone(telefoneDigitado)
 
-      try { await navigator.clipboard.writeText(textoFinal) } catch {}
+      if (textoFinal) {
+        try { await navigator.clipboard.writeText(textoFinal) } catch {}
+      }
 
       await carregarTudo()
 
-      setNovoCliente({
+      setNovoCliente((prev) => ({
         email: '',
         nome_empresa: '',
         telefone: '',
         valor_plano: '49,90',
         tipo: 'trial',
-        sistema_cliente: 'Connect Sistema',
+        sistema_cliente: prev.sistema_cliente || 'Connect Sistema',
+        sistema_id: prev.sistema_id,
         observacoes: '',
         criar_acesso: true,
-      })
+        dia_vencimento: '',
+      }))
 
       setModalOpen(true)
 
@@ -1057,7 +1206,11 @@ export default function AdminSaasMasterPage() {
         window.open(String(payload.whatsappUrl), '_blank')
       }
 
-      alert('Cliente criado com sucesso. A senha e a mensagem ficaram no cadastro para copiar/enviar.')
+      if (payload?.mode === 'admin_only' || (origem === 'terceiro') || !criarAcesso) {
+        alert('Cliente administrativo salvo. Nenhum login Connect foi criado para este vínculo.')
+      } else {
+        alert('Cliente criado com sucesso. A senha e a mensagem ficaram no cadastro para copiar/enviar.')
+      }
     } catch (error: any) {
       console.error(error)
       alert(error?.message || 'Não foi possível criar o cliente.')
@@ -1214,8 +1367,10 @@ export default function AdminSaasMasterPage() {
                     valor_plano: '49,90',
                     tipo: 'trial',
                     sistema_cliente: 'Connect Sistema',
+                    sistema_id: catalogoSistemas.find((s) => s.origem === 'connect')?.id || '',
                     observacoes: '',
                     criar_acesso: true,
+                    dia_vencimento: '',
                   })
                   setModalOpen(true)
                 }}
@@ -1286,18 +1441,24 @@ export default function AdminSaasMasterPage() {
         ) : null}
 
         <section style={{ ...styles.tabs, ...(isMobileAdmin ? styles.tabsMobile : {}) }}>
-          <button style={{ ...(aba === 'clientes' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('clientes')}>Clientes e planos</button>
+          <button style={{ ...(aba === 'clientes' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('clientes')}>Clientes</button>
+          <button style={{ ...(aba === 'sistemas' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('sistemas')}>Sistemas</button>
           <button style={{ ...(aba === 'sessoes' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('sessoes')}>Sessões ativas</button>
           <button style={{ ...(aba === 'metricas' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('metricas')}>Uso e crescimento</button>
           <button style={{ ...(aba === 'saude' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('saude')}>Saúde do sistema</button>
         </section>
 
+        {aba === 'sistemas' ? <AdminSistemasPanel isMobile={isMobileAdmin} /> : null}
+
         {aba === 'clientes' && (
           <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>
             <div style={{ ...styles.panelTop, ...(isMobileAdmin ? styles.panelTopMobile : {}) }}>
               <div>
-                <h2 style={{ ...styles.panelTitle, ...(isMobileAdmin ? styles.panelTitleMobile : {}) }}>Clientes, planos e cobrança</h2>
-                <p style={styles.panelSub}>Gerencie assinatura, status, limite, acesso, senha provisória e cobrança WhatsApp.</p>
+                <h2 style={{ ...styles.panelTitle, ...(isMobileAdmin ? styles.panelTitleMobile : {}) }}>Clientes</h2>
+                <p style={styles.panelSub}>
+                  Carteira administrativa + clientes Connect legados (dual-read).
+                  {adminTablesReadyFlag ? ' Tabelas admin_* ativas.' : ' Migration admin_* ainda não aplicada — listando perfis legados.'}
+                </p>
               </div>
               <div style={{ ...styles.toolbar, ...(isMobileAdmin ? styles.toolbarMobile : {}) }}>
                 <input style={{ ...styles.search, ...(isMobileAdmin ? styles.searchMobile : {}) }} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar cliente, sistema, e-mail ou telefone" />
@@ -1343,7 +1504,12 @@ export default function AdminSaasMasterPage() {
                 return (
                   <div key={cliente.id} style={{ ...styles.clientRow, ...(isMobileAdmin ? styles.clientRowMobile : {}) }}>
                     <div style={{ ...styles.clientIdentity, ...(isMobileAdmin ? styles.clientIdentityMobile : {}) }}>
-                      <div style={{ ...styles.clientName, ...(isMobileAdmin ? styles.clientNameMobile : {}) }}>{cliente.nome_empresa || 'Cliente sem nome'}</div>
+                      <div style={{ ...styles.clientName, ...(isMobileAdmin ? styles.clientNameMobile : {}) }}>
+                        {cliente.nome_empresa || 'Cliente sem nome'}{' '}
+                        <span style={{ fontSize: 11, fontWeight: 800, color: cliente.fonte === 'admin' ? '#86efac' : '#fbbf24' }}>
+                          {cliente.fonte === 'admin' ? 'ADMIN' : 'LEGADO'}
+                        </span>
+                      </div>
                       <div style={{ ...styles.clientLine, ...(isMobileAdmin ? styles.clientLineMobile : {}) }}>{cliente.email || '-'} {cliente.telefone ? `• ${cliente.telefone}` : ''}</div>
                       <div style={styles.systemLine}>{clienteSistema(cliente)}</div>
                     </div>
@@ -1622,7 +1788,14 @@ export default function AdminSaasMasterPage() {
                   <button style={styles.menuClose} onClick={() => setDesktopActionMenu(null)}>×</button>
                 </div>
                 <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); abrirEdicao(desktopActionMenu.cliente) }}>Editar cliente</button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); void resetarSenhaCliente(desktopActionMenu.cliente) }}>Resetar senha / WhatsApp</button>
+                <button
+                  style={styles.menuItem}
+                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id || !clientePodeReset(desktopActionMenu.cliente)}
+                  title={!clientePodeReset(desktopActionMenu.cliente) ? 'Sem login Connect' : undefined}
+                  onClick={() => { setDesktopActionMenu(null); void resetarSenhaCliente(desktopActionMenu.cliente) }}
+                >
+                  {clientePodeReset(desktopActionMenu.cliente) ? 'Resetar senha / WhatsApp' : 'Sem login Connect'}
+                </button>
                 <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); trial7(desktopActionMenu.cliente.id) }}>Trial 7 dias</button>
                 <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); void marcarComoPago(desktopActionMenu.cliente.id) }}>Marcar ativo / pago</button>
                 <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); ativar(30, desktopActionMenu.cliente.id) }}>Ativar +30 dias</button>
@@ -1663,7 +1836,13 @@ export default function AdminSaasMasterPage() {
 
               <div style={styles.mobileActionGroup}>
                 <div style={styles.mobileActionGroupTitle}>Acesso</div>
-                <button style={styles.mobileActionBtn} disabled={acaoProcessandoId === acaoClienteMobile.id} onClick={() => { setAcaoClienteMobile(null); void resetarSenhaCliente(acaoClienteMobile) }}>Resetar senha / WhatsApp</button>
+                <button
+                  style={styles.mobileActionBtn}
+                  disabled={acaoProcessandoId === acaoClienteMobile.id || !clientePodeReset(acaoClienteMobile)}
+                  onClick={() => { setAcaoClienteMobile(null); void resetarSenhaCliente(acaoClienteMobile) }}
+                >
+                  {clientePodeReset(acaoClienteMobile) ? 'Resetar senha / WhatsApp' : 'Sem login Connect'}
+                </button>
                 <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); trial7(acaoClienteMobile.id) }}>Trial 7 dias</button>
                 <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); ativar(30, acaoClienteMobile.id) }}>Ativar +30 dias</button>
                 <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); ativar(60, acaoClienteMobile.id) }}>Ativar +60 dias</button>
@@ -1717,15 +1896,45 @@ export default function AdminSaasMasterPage() {
 
       {modalOpen && (
         <Modal maxWidth={820} onClose={() => { setModalOpen(false); setInviteLink(''); setInviteText(''); setInvitePhone('') }}>
-          <div style={styles.modalTitle}>Novo cliente SaaS</div>
-          <div style={styles.modalSub}>Cadastre um cliente do Connect Sistema ou de outro sistema para controlar assinatura, WhatsApp e cobrança.</div>
+          <div style={styles.modalTitle}>Novo cliente</div>
+          <div style={styles.modalSub}>
+            Dados do cliente + sistema contratado. Login Connect só quando a origem for Connect e a opção estiver marcada.
+          </div>
 
           <div style={styles.formGrid}>
             <Input label="E-mail do cliente" value={novoCliente.email} onChange={(v) => setNovoCliente((prev) => ({ ...prev, email: v }))} placeholder="cliente@email.com" />
             <Input label="Nome da empresa" value={novoCliente.nome_empresa} onChange={(v) => setNovoCliente((prev) => ({ ...prev, nome_empresa: v }))} placeholder="Nome da empresa" />
             <Input label="Telefone / WhatsApp" value={novoCliente.telefone} onChange={(v) => setNovoCliente((prev) => ({ ...prev, telefone: v }))} placeholder="84999999999" />
-            <Input label="Sistema contratado" value={novoCliente.sistema_cliente} onChange={(v) => setNovoCliente((prev) => ({ ...prev, sistema_cliente: v }))} placeholder="Connect Sistema, Agenda, Loja..." />
+            {adminTablesReadyFlag && catalogoSistemas.length > 0 ? (
+              <div>
+                <div style={styles.inputLabel}>Sistema contratado</div>
+                <select
+                  style={{ ...styles.input, width: '100%' }}
+                  value={novoCliente.sistema_id}
+                  onChange={(e) => {
+                    const id = e.target.value
+                    const s = catalogoSistemas.find((x) => x.id === id)
+                    setNovoCliente((prev) => ({
+                      ...prev,
+                      sistema_id: id,
+                      sistema_cliente: s?.nome || prev.sistema_cliente,
+                      criar_acesso: s?.origem === 'terceiro' ? false : prev.criar_acesso,
+                    }))
+                  }}
+                >
+                  <option style={styles.selectOption} value="">Selecione…</option>
+                  {catalogoSistemas.map((s) => (
+                    <option key={s.id} style={styles.selectOption} value={s.id}>
+                      {s.nome} ({s.origem === 'connect' ? 'CONNECT' : 'TERCEIRO'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <Input label="Sistema contratado (texto)" value={novoCliente.sistema_cliente} onChange={(v) => setNovoCliente((prev) => ({ ...prev, sistema_cliente: v }))} placeholder="Connect Sistema…" />
+            )}
             <Input label="Valor mensal" value={novoCliente.valor_plano} onChange={(v) => setNovoCliente((prev) => ({ ...prev, valor_plano: v }))} placeholder="49,90" />
+            <Input label="Dia vencimento (1–28)" value={novoCliente.dia_vencimento} onChange={(v) => setNovoCliente((prev) => ({ ...prev, dia_vencimento: v }))} placeholder="10" />
             <div>
               <div style={styles.inputLabel}>Tipo inicial</div>
               <select style={{ ...styles.input, width: '100%' }} value={novoCliente.tipo} onChange={(e) => setNovoCliente((prev) => ({ ...prev, tipo: e.target.value as TipoNovoCliente }))}>
@@ -1736,9 +1945,31 @@ export default function AdminSaasMasterPage() {
           </div>
 
           <label style={styles.checkboxRow}>
-            <input type="checkbox" checked={novoCliente.criar_acesso} onChange={(e) => setNovoCliente((prev) => ({ ...prev, criar_acesso: e.target.checked }))} />
-            <span><b>Criar acesso no Connect Sistema</b><small>Desmarque para cadastrar cliente de outro sistema somente para cobrança e controle financeiro.</small></span>
+            <input
+              type="checkbox"
+              checked={novoCliente.criar_acesso}
+              disabled={catalogoSistemas.find((s) => s.id === novoCliente.sistema_id)?.origem === 'terceiro'}
+              onChange={(e) => setNovoCliente((prev) => ({ ...prev, criar_acesso: e.target.checked }))}
+            />
+            <span>
+              <b>Criar acesso ao Connect</b>
+              <small>
+                {catalogoSistemas.find((s) => s.id === novoCliente.sistema_id)?.origem === 'terceiro'
+                  ? 'Sistema de terceiro: login Connect não se aplica.'
+                  : novoCliente.criar_acesso
+                    ? 'Cria usuário Auth + perfil Connect neste vínculo.'
+                    : adminTablesReadyFlag
+                      ? 'Cadastro administrativo sem login (admin_cliente + vínculo, sem Auth).'
+                      : MSG_ADMIN_TABLES_NOT_READY}
+              </small>
+            </span>
           </label>
+
+          {!adminTablesReadyFlag && !novoCliente.criar_acesso ? (
+            <div style={{ marginTop: 8, padding: '10px 12px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 8, fontSize: 13, color: '#9a3412' }}>
+              {MSG_ADMIN_TABLES_NOT_READY}
+            </div>
+          ) : null}
 
           <div style={{ marginTop: 14 }}>
             <div style={styles.inputLabel}>Observações internas</div>
@@ -1766,7 +1997,24 @@ export default function AdminSaasMasterPage() {
 
           <div style={styles.modalActions}>
             <button style={styles.cancelButton} onClick={() => { setModalOpen(false); setInviteLink(''); setInviteText(''); setInvitePhone('') }} disabled={savingNew}>Fechar</button>
-            <button style={styles.saveButton} onClick={() => void salvarNovoCliente()} disabled={savingNew}>{savingNew ? 'Salvando...' : 'Salvar cliente'}</button>
+            <button
+              style={styles.saveButton}
+              onClick={() => void salvarNovoCliente()}
+              disabled={
+                savingNew ||
+                (!novoCliente.criar_acesso && !adminTablesReadyFlag) ||
+                (adminTablesReadyFlag && !novoCliente.sistema_id)
+              }
+              title={
+                adminTablesReadyFlag && !novoCliente.sistema_id
+                  ? 'Selecione o sistema'
+                  : !novoCliente.criar_acesso && !adminTablesReadyFlag
+                    ? MSG_ADMIN_TABLES_NOT_READY
+                    : undefined
+              }
+            >
+              {savingNew ? 'Salvando...' : 'Salvar cliente'}
+            </button>
           </div>
         </Modal>
       )}
