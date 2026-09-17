@@ -228,13 +228,14 @@ export function OrdemServicoDocumentoPage({ forcePreview = false }: { forcePrevi
       if (osPublica) {
         const cfgPayload = extrairConfigDoPayload(osPublica)
         try {
-          const cfgUrl = tokenPublico
-            ? `/api/public-docs/config?token=${encodeURIComponent(tokenPublico)}`
-            : `/api/public-docs/config?tipo=os&documentoId=${encodeURIComponent(id)}`
-          const respCfg = await fetch(cfgUrl, { cache: 'no-store' })
-          if (respCfg.ok) {
-            const dadosCfg = await respCfg.json()
-            if (dadosCfg?.config) configDoc = extrairConfigDoPayload({ cfg: dadosCfg.config })
+          // Branding público exige token — sem fallback por documentoId (SEC.1)
+          if (tokenPublico) {
+            const cfgUrl = `/api/public-docs/config?token=${encodeURIComponent(tokenPublico)}`
+            const respCfg = await fetch(cfgUrl, { cache: 'no-store' })
+            if (respCfg.ok) {
+              const dadosCfg = await respCfg.json()
+              if (dadosCfg?.config) configDoc = extrairConfigDoPayload({ cfg: dadosCfg.config })
+            }
           }
         } catch {}
 

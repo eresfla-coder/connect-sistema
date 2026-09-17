@@ -10,6 +10,11 @@ import {
 } from '@/lib/empresaPublica'
 import { configRowSupabaseToPublica } from '@/lib/documentosPublicos'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import {
+  CFG_EMPRESA_COLS_PUBLICAS,
+  PUBLIC_DOC_COLS_METADATA,
+  tokenPublicoValido,
+} from '@/lib/public-docs-auth'
 
 export type TipoMetadataPublico = 'orcamento' | 'ordem_servico'
 
@@ -22,38 +27,66 @@ function moeda(valor: unknown) {
   return Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
-async function buscarDocumentoPublico(
+function metadataGenerica(input: {
+  tipo: TipoMetadataPublico
+  documentoId: string
+  pathPrefix: string
+  versaoUrl?: string | null
+}): Metadata {
+  const site = siteUrlPublico()
+  const versao = timestampVersaoPublica(input.versaoUrl || Date.now())
+  const rotulo = input.tipo === 'ordem_servico' ? 'Ordem de serviço' : 'Orçamento'
+  const titulo = `${rotulo} — ${CONNECT_OG_FALLBACK_NAME}`
+  const description = `${rotulo} compartilhado via Connect Sistema`
+  const url = `${site}${input.pathPrefix}/${encodeURIComponent(input.documentoId)}?v=${versao}`
+  const ogImage = `${site}/logo-connect.png?v=${versao}`
+
+  return {
+    title: { absolute: titulo },
+    description,
+    openGraph: {
+      type: 'website',
+      locale: 'pt_BR',
+      url,
+      siteName: CONNECT_OG_FALLBACK_NAME,
+      title: titulo,
+      description,
+      images: [{ url: ogImage, width: 1200, height: 630, alt: CONNECT_OG_FALLBACK_NAME }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: titulo,
+      description: description.slice(0, 200),
+      images: [ogImage],
+    },
+  }
+}
+
+/**
+ * Resolve documento público somente por token (capability).
+ * NÃO busca por documentoId sozinho — evita vazamento OG sem link completo.
+ */
+async function buscarDocumentoPublicoPorToken(
   tipo: TipoMetadataPublico,
-  documentoId: string,
-  token?: string | null
+  token: string
 ) {
   const supabase = getSupabaseAdmin()
-  let doc: Record<string, unknown> | null = null
+  const { data } = await supabase
+    .from('public_documents')
+    .select(PUBLIC_DOC_COLS_METADATA)
+    .eq('token', token)
+    .maybeSingle()
 
-  if (token) {
-    const { data } = await supabase
-      .from('public_documents')
-      .select('*')
-      .eq('token', token)
-      .maybeSingle()
-    doc = data as Record<string, unknown> | null
+  if (!data) return null
+
+  const tipoDoc = String(data.tipo || '').toLowerCase()
+  if (tipo === 'ordem_servico') {
+    if (tipoDoc !== 'ordem_servico' && tipoDoc !== 'os') return null
+  } else if (tipoDoc !== 'orcamento') {
+    return null
   }
 
-  if (!doc && documentoId) {
-    const query =
-      tipo === 'ordem_servico'
-        ? supabase
-            .from('public_documents')
-            .select('*')
-            .in('tipo', ['ordem_servico', 'os'])
-            .eq('documento_id', documentoId)
-        : supabase.from('public_documents').select('*').eq('tipo', 'orcamento').eq('documento_id', documentoId)
-
-    const { data } = await query.order('updated_at', { ascending: false }).limit(1).maybeSingle()
-    doc = data as Record<string, unknown> | null
-  }
-
-  return doc
+  return data as Record<string, unknown>
 }
 
 async function carregarConfiguracoesEmpresa(userId: string) {
@@ -62,7 +95,7 @@ async function carregarConfiguracoesEmpresa(userId: string) {
     const supabase = getSupabaseAdmin()
     const { data: row } = await supabase
       .from('configuracoes_empresa')
-      .select('*')
+      .select(CFG_EMPRESA_COLS_PUBLICAS)
       .eq('user_id', userId)
       .maybeSingle()
     return row as Record<string, unknown> | null
@@ -78,11 +111,24 @@ export async function buildMetadataDocumentoPublico(input: {
   pathPrefix: string
   versaoUrl?: string | null
 }): Promise<Metadata> {
-  const doc = await buscarDocumentoPublico(input.tipo, input.documentoId, input.token)
-  const payload = (doc?.payload || {}) as Record<string, unknown>
-  const ownerId = String(
-    doc?.user_id || payload.user_id || payload.owner_user_id || ''
-  ).trim()
+  const token = tokenPublicoValido(input.token)
+  if (!token) {
+    return metadataGenerica(input)
+  }
+
+  const doc = await buscarDocumentoPublicoPorToken(input.tipo, token)
+  if (!doc) {
+    return metadataGenerica(input)
+  }
+
+  // Token de outro documento → metadados genéricos (sem enumeração)
+  const docId = String(doc.documento_id ?? '').trim()
+  if (docId && input.documentoId && docId !== String(input.documentoId)) {
+    return metadataGenerica(input)
+  }
+
+  const payload = (doc.payload || {}) as Record<string, unknown>
+  const ownerId = String(doc.user_id || payload.user_id || payload.owner_user_id || '').trim()
 
   const rowCfg = ownerId ? await carregarConfiguracoesEmpresa(ownerId) : null
   let cfg = mergeConfigDocumentoPublico(doc, payload)
@@ -98,17 +144,15 @@ export async function buildMetadataDocumentoPublico(input: {
     texto(cfg.nomeEmpresa) ||
     CONNECT_OG_FALLBACK_NAME
 
-  const tokenDoc = texto(doc?.token || input.token, '')
+  const tokenDoc = texto(doc.token || token, '')
   const versao = timestampVersaoPublica(
-    input.versaoUrl || String(doc?.updated_at || payload.updated_at || Date.now())
+    input.versaoUrl || String(doc.updated_at || payload.updated_at || Date.now())
   )
 
   const site = siteUrlPublico()
   const ogImage = tokenDoc
-    ? urlLogoOgPublica({ token: tokenDoc, userId: ownerId || undefined, v: versao })
-    : ownerId
-      ? urlLogoOgPublica({ userId: ownerId, v: versao })
-      : `${site}/logo-connect.png?v=${versao}`
+    ? urlLogoOgPublica({ token: tokenDoc, v: versao })
+    : `${site}/logo-connect.png?v=${versao}`
 
   const ehProposta =
     input.tipo === 'orcamento' &&
@@ -147,9 +191,9 @@ export async function buildMetadataDocumentoPublico(input: {
         preview: input.pathPrefix.includes('impressao'),
         v: versao,
       })
-    : `${montarUrlPublicaDocumento(input.pathPrefix, input.documentoId, { token: 'public', v: versao }).split('?')[0]}?v=${versao}`
+    : `${site}${input.pathPrefix}/${encodeURIComponent(input.documentoId)}?v=${versao}`
 
-  const metadata: Metadata = {
+  return {
     title: { absolute: titulo },
     description,
     openGraph: {
@@ -175,38 +219,21 @@ export async function buildMetadataDocumentoPublico(input: {
       images: [ogImage],
     },
   }
-
-  return metadata
 }
 
-async function buscarContratoPublico(documentoId: string, token?: string | null) {
+async function buscarContratoPublicoPorToken(token: string) {
   const supabase = getSupabaseAdmin()
-  if (token) {
-    const { data } = await supabase
-      .from('public_documents')
-      .select('*')
-      .eq('token', token)
-      .eq('document_type', 'contrato')
-      .maybeSingle()
-    if (data) return data as Record<string, unknown>
-    const legado = await supabase
-      .from('public_documents')
-      .select('*')
-      .eq('token', token)
-      .eq('tipo', 'contrato')
-      .maybeSingle()
-    return (legado.data as Record<string, unknown>) || null
-  }
-  if (!documentoId) return null
   const { data } = await supabase
     .from('public_documents')
-    .select('*')
-    .eq('document_type', 'contrato')
-    .eq('document_id', documentoId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
+    .select(PUBLIC_DOC_COLS_METADATA)
+    .eq('token', token)
     .maybeSingle()
-  return (data as Record<string, unknown>) || null
+
+  if (!data) return null
+
+  const tipo = String(data.tipo || data.document_type || '').toLowerCase()
+  if (tipo !== 'contrato') return null
+  return data as Record<string, unknown>
 }
 
 /** Metadata OpenGraph para contrato público (visualizar / impressão). */
@@ -216,10 +243,48 @@ export async function buildMetadataContratoPublico(input: {
   pathPrefix: string
   versaoUrl?: string | null
 }): Promise<Metadata> {
-  const doc = await buscarContratoPublico(input.documentoId, input.token)
-  const payload = (doc?.payload || {}) as Record<string, unknown>
+  const token = tokenPublicoValido(input.token)
+  const site = siteUrlPublico()
+  const versaoFallback = timestampVersaoPublica(input.versaoUrl || Date.now())
+
+  if (!token) {
+    const titulo = `Contrato — ${CONNECT_OG_FALLBACK_NAME}`
+    const description = 'Contrato compartilhado via Connect Sistema'
+    const ogImage = `${site}/logo-connect.png?v=${versaoFallback}`
+    return {
+      title: { absolute: titulo },
+      description,
+      openGraph: {
+        type: 'website',
+        locale: 'pt_BR',
+        url: `${site}${input.pathPrefix}/${encodeURIComponent(input.documentoId)}?v=${versaoFallback}`,
+        siteName: CONNECT_OG_FALLBACK_NAME,
+        title: titulo,
+        description,
+        images: [{ url: ogImage, width: 1200, height: 630, alt: CONNECT_OG_FALLBACK_NAME }],
+      },
+      twitter: {
+        card: 'summary_large_image',
+        title: titulo,
+        description,
+        images: [ogImage],
+      },
+    }
+  }
+
+  const doc = await buscarContratoPublicoPorToken(token)
+  if (!doc) {
+    return buildMetadataContratoPublico({ ...input, token: null })
+  }
+
+  const docId = String(doc.documento_id ?? doc.document_id ?? '').trim()
+  if (docId && input.documentoId && docId !== String(input.documentoId)) {
+    return buildMetadataContratoPublico({ ...input, token: null })
+  }
+
+  const payload = (doc.payload || {}) as Record<string, unknown>
   const contrato = (payload.contrato || {}) as Record<string, unknown>
-  const ownerId = String(doc?.user_id || payload.user_id || '').trim()
+  const ownerId = String(doc.user_id || payload.user_id || '').trim()
 
   const rowCfg = ownerId ? await carregarConfiguracoesEmpresa(ownerId) : null
   let cfg = mergeConfigDocumentoPublico(doc, payload)
@@ -235,14 +300,13 @@ export async function buildMetadataContratoPublico(input: {
     texto((payload.empresaPublica as Record<string, unknown>)?.nome) ||
     CONNECT_OG_FALLBACK_NAME
 
-  const tokenDoc = texto(doc?.token || input.token, '')
+  const tokenDoc = texto(doc.token || token, '')
   const versao = timestampVersaoPublica(
-    input.versaoUrl ?? (doc?.updated_at != null ? String(doc.updated_at) : null) ?? Date.now()
+    input.versaoUrl ?? (doc.updated_at != null ? String(doc.updated_at) : null) ?? Date.now()
   )
 
-  const site = siteUrlPublico()
   const ogImage = tokenDoc
-    ? urlLogoOgPublica({ token: tokenDoc, userId: ownerId || undefined, v: versao })
+    ? urlLogoOgPublica({ token: tokenDoc, v: versao })
     : `${site}/logo-connect.png?v=${versao}`
 
   const numero = texto(contrato.numero, `#${input.documentoId}`)
@@ -259,9 +323,7 @@ export async function buildMetadataContratoPublico(input: {
 
   const description = descPartes.join(' · ').slice(0, 300)
   const basePath = input.pathPrefix.replace(/\/$/, '')
-  const url = tokenDoc
-    ? `${site}${basePath}/${encodeURIComponent(input.documentoId)}?token=${encodeURIComponent(tokenDoc)}&v=${versao}`
-    : `${site}${basePath}/${encodeURIComponent(input.documentoId)}?v=${versao}`
+  const url = `${site}${basePath}/${encodeURIComponent(input.documentoId)}?token=${encodeURIComponent(tokenDoc)}&v=${versao}`
 
   return {
     title: { absolute: titulo },

@@ -1,5 +1,6 @@
 import type { ConfigEmpresaPublica } from '@/lib/documentosPublicos'
 import { configEmpresaPadraoPublica, logoUrlAbsolutaPublica, mergeConfigPublicacao } from '@/lib/documentosPublicos'
+import { montarUrlLogoOgPublica } from '@/lib/public-docs-auth'
 
 export const CONNECT_OG_FALLBACK_NAME = 'Connect Sistema'
 
@@ -24,14 +25,17 @@ export function timestampVersaoPublica(valor?: string | number | null) {
   return Number.isNaN(t) ? Date.now() : t
 }
 
-/** URL HTTPS estável para crawlers (WhatsApp/Facebook) — nunca data: base64. */
+/**
+ * URL HTTPS estável para crawlers (WhatsApp/Facebook) — nunca data: base64.
+ * Capability = token público. userId sozinho não autoriza logo (evita enumeração).
+ */
 export function urlLogoOgPublica(opts: { token?: string; userId?: string; v?: string | number }) {
-  const base = siteUrlPublico()
-  const qs = new URLSearchParams()
-  if (opts.token) qs.set('token', opts.token)
-  if (opts.userId) qs.set('userId', opts.userId)
-  qs.set('v', String(opts.v ?? Date.now()))
-  return `${base}/api/og/empresa-logo?${qs.toString()}`
+  void opts.userId
+  return montarUrlLogoOgPublica({
+    siteBase: siteUrlPublico(),
+    token: opts.token,
+    v: opts.v,
+  })
 }
 
 export function resolverNomeEmpresaPublica(...fontes: Array<Record<string, unknown> | null | undefined>) {
@@ -73,8 +77,8 @@ export function camposEmpresaNoPayload(
   const temLogoEmpresa = Boolean(logoBruta && logoBruta !== '/logo-connect.png')
   const v = opts.v ?? Date.now()
 
-  const empresa_logo_og = temLogoEmpresa
-    ? urlLogoOgPublica({ token: opts.token, userId: opts.userId, v })
+  const empresa_logo_og = temLogoEmpresa && opts.token
+    ? urlLogoOgPublica({ token: opts.token, v })
     : `${siteUrlPublico()}/logo-connect.png?v=${v}`
 
   const tel = String(

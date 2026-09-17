@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { siteUrlPublico } from '@/lib/empresaPublica'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { tokenPublicoValido } from '@/lib/public-docs-auth'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -18,6 +19,11 @@ function parseDataUrl(dataUrl: string) {
   }
 }
 
+/**
+ * Logo OG via capability (token de public_documents).
+ * userId sozinho NÃO autoriza — evita enumeração.
+ * Uma consulta ao documento; fallback de configuracoes_empresa só se o token for válido.
+ */
 async function carregarLogoPorToken(token: string) {
   const supabase = getSupabaseAdmin()
   const { data: doc } = await supabase
@@ -26,8 +32,10 @@ async function carregarLogoPorToken(token: string) {
     .eq('token', token)
     .maybeSingle()
 
-  const payload = (doc?.payload || {}) as Record<string, unknown>
-  const userId = String(doc?.user_id || payload.user_id || payload.owner_user_id || '').trim()
+  if (!doc) return { logo: '', updatedAt: null as string | null }
+
+  const payload = (doc.payload || {}) as Record<string, unknown>
+  const userId = String(doc.user_id || payload.user_id || payload.owner_user_id || '').trim()
 
   let logo = String(
     payload.empresa_logo ||
@@ -40,42 +48,29 @@ async function carregarLogoPorToken(token: string) {
   if ((!logo || logo === FALLBACK) && userId) {
     const { data: cfg } = await supabase
       .from('configuracoes_empresa')
-      .select('logo_url,nome_empresa,updated_at')
+      .select('logo_url,updated_at')
       .eq('user_id', userId)
       .maybeSingle()
     if (cfg?.logo_url) logo = String(cfg.logo_url)
   }
 
-  return { logo, updatedAt: doc?.updated_at || null }
-}
-
-async function carregarLogoPorUserId(userId: string) {
-  const supabase = getSupabaseAdmin()
-  const { data: cfg } = await supabase
-    .from('configuracoes_empresa')
-    .select('logo_url,updated_at')
-    .eq('user_id', userId)
-    .maybeSingle()
-  return { logo: String(cfg?.logo_url || ''), updatedAt: cfg?.updated_at || null }
+  return { logo, updatedAt: doc.updated_at || null }
 }
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const token = searchParams.get('token') || searchParams.get('p') || ''
-    const userId = searchParams.get('userId') || searchParams.get('user_id') || ''
+    const token = tokenPublicoValido(searchParams.get('token') || searchParams.get('p') || '')
     const v = searchParams.get('v') || String(Date.now())
+    const base = siteUrlPublico()
 
-    let logo = ''
-    if (token) {
-      const dados = await carregarLogoPorToken(token)
-      logo = dados.logo
-    } else if (userId) {
-      const dados = await carregarLogoPorUserId(userId)
-      logo = dados.logo
+    // Sem token válido → logo padrão (sem enumerar userId)
+    if (!token) {
+      return NextResponse.redirect(`${base}${FALLBACK}?v=${encodeURIComponent(v)}`, 302)
     }
 
-    const base = siteUrlPublico()
+    const dados = await carregarLogoPorToken(token)
+    const logo = dados.logo
 
     if (!logo || logo === FALLBACK) {
       return NextResponse.redirect(`${base}${FALLBACK}?v=${encodeURIComponent(v)}`, 302)

@@ -628,12 +628,13 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           } catch {}
         }
 
-        if (!cfgApiPublica && (tokenPublico || docPublico || payload)) {
+        // Branding público só com token (capability). Sem token: usa payload/local — nunca tipo+documentoId.
+        if (!cfgApiPublica && tokenPublico) {
           try {
-            const qsCfg = tokenPublico
-              ? `token=${encodeURIComponent(tokenPublico)}`
-              : `tipo=orcamento&documentoId=${encodeURIComponent(documentoIdPublico || id)}`
-            const respCfg = await fetch(`/api/public-docs/config?${qsCfg}`, { cache: 'no-store' })
+            const respCfg = await fetch(
+              `/api/public-docs/config?token=${encodeURIComponent(tokenPublico)}`,
+              { cache: 'no-store' }
+            )
             if (respCfg.ok) {
               const dadosCfg = await respCfg.json()
               if (dadosCfg?.config) cfgApiPublica = dadosCfg.config

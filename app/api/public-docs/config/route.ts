@@ -2,84 +2,107 @@ import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { urlLogoOgPublica, timestampVersaoPublica, resolverNomeEmpresaPublica } from '@/lib/empresaPublica'
 import { configRowSupabaseToPublica, mergeConfigPublicacao } from '@/lib/documentosPublicos'
+import {
+  CFG_EMPRESA_COLS_PUBLICAS,
+  PUBLIC_DOC_COLS_BRANDING,
+  montarConfigPublicaBranding,
+  respostaPublicaNegada,
+  sanitizarRespostaConfigPublica,
+  tokenPertenceAoDocumento,
+  tokenPublicoValido,
+  extrairCfgDoPayload,
+} from '@/lib/public-docs-auth'
 
 function normalizePhone(value?: string | null) {
   return String(value || '').replace(/\D/g, '')
 }
 
-function erro(message: string, status = 400) {
-  return NextResponse.json({ error: message }, { status })
+function negar() {
+  const { status, body } = respostaPublicaNegada()
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+    },
+  })
 }
 
+/**
+ * Branding público de documento.
+ * Capability obrigatória: token de public_documents.
+ * NÃO resolve por tipo+documentoId sozinhos.
+ * NÃO devolve payload do documento.
+ */
 export async function GET(request: Request) {
   try {
-    const supabase = getSupabaseAdmin()
     const { searchParams } = new URL(request.url)
-    const token = searchParams.get('token') || searchParams.get('p')
+    const token = tokenPublicoValido(searchParams.get('token') || searchParams.get('p'))
     const tipo = searchParams.get('tipo') || ''
     const documentoId = searchParams.get('documentoId') || searchParams.get('id') || ''
 
-    let query = supabase
-      .from('public_documents')
-      .select('tipo, documento_id, payload, user_id, token, updated_at')
-      .limit(1)
-
-    if (token) {
-      query = query.eq('token', token)
-    } else if (tipo && documentoId) {
-      const tipoNorm = String(tipo).toLowerCase()
-      query =
-        tipoNorm === 'os' || tipoNorm === 'ordem_servico'
-          ? query.in('tipo', ['ordem_servico', 'os']).eq('documento_id', documentoId).order('updated_at', { ascending: false })
-          : query.eq('tipo', tipo).eq('documento_id', documentoId).order('updated_at', { ascending: false })
-    } else {
-      return erro('Token ou documento não fornecido.')
+    if (!token) {
+      return negar()
     }
 
-    const { data: doc, error: docError } = await query.maybeSingle()
+    const supabase = getSupabaseAdmin()
+    const { data: doc, error: docError } = await supabase
+      .from('public_documents')
+      .select(PUBLIC_DOC_COLS_BRANDING)
+      .eq('token', token)
+      .maybeSingle()
 
     if (docError || !doc) {
-      return erro('Documento não encontrado.', 404)
+      return negar()
     }
 
-    const payload = doc.payload || {}
-    const payloadCfg = payload.cfg || payload.config || {}
-    const ownerId = doc.user_id || payload.user_id || payload.owner_user_id || payloadCfg.user_id || payloadCfg.owner_user_id || ''
+    if (
+      !tokenPertenceAoDocumento(doc, {
+        token,
+        tipo: tipo || null,
+        documentoId: documentoId || null,
+      })
+    ) {
+      return negar()
+    }
 
-    let configAtual: Record<string, any> = {}
+    const payload = (doc.payload || {}) as Record<string, unknown>
+    const payloadCfg = extrairCfgDoPayload(payload)
+    const ownerId = String(
+      doc.user_id || payload.user_id || payload.owner_user_id || payloadCfg.user_id || ''
+    ).trim()
+
+    let configAtual: Record<string, unknown> = {}
     if (ownerId) {
       const { data: cfg } = await supabase
         .from('configuracoes_empresa')
-        .select('*')
+        .select(CFG_EMPRESA_COLS_PUBLICAS)
         .eq('user_id', ownerId)
         .maybeSingle()
 
-      if (cfg) configAtual = cfg
+      if (cfg) configAtual = cfg as Record<string, unknown>
     }
 
     const telefoneAtual = normalizePhone(
-      configAtual.celular_empresa ||
-        configAtual.whatsapp_empresa ||
-        configAtual.telefone ||
-        ''
+      String(configAtual.celular_empresa || configAtual.whatsapp_empresa || configAtual.telefone || '')
     )
     const telefonePayload = normalizePhone(
-      payloadCfg.celularEmpresa ||
-        payloadCfg.whatsappEmpresa ||
-        payloadCfg.celular ||
-        payloadCfg.whatsapp ||
-        payloadCfg.telefoneEmpresa ||
-        payloadCfg.telefone ||
-        ''
+      String(
+        payloadCfg.celularEmpresa ||
+          payloadCfg.whatsappEmpresa ||
+          payloadCfg.celular ||
+          payloadCfg.whatsapp ||
+          payloadCfg.telefoneEmpresa ||
+          payloadCfg.telefone ||
+          ''
+      )
     )
-
     const telefoneFinal = telefoneAtual || telefonePayload
     const versao = timestampVersaoPublica(doc.updated_at || Date.now())
-    const tokenDoc = String(doc.token || token || '')
+    const tokenDoc = String(doc.token || token)
 
     const cfgMerged = mergeConfigPublicacao(
-      configRowSupabaseToPublica(configAtual as Record<string, unknown>),
-      payloadCfg as Record<string, unknown>,
+      configRowSupabaseToPublica(configAtual),
+      payloadCfg,
       {
         empresa_nome: payload.empresa_nome,
         empresa_logo: payload.empresa_logo,
@@ -93,50 +116,34 @@ export async function GET(request: Request) {
       resolverNomeEmpresaPublica(payload, payloadCfg, configAtual) ||
       String(cfgMerged.nomeEmpresa || 'Connect Sistema')
 
-    const config = {
-      nomeEmpresa,
-      tipoPessoa: cfgMerged.tipoPessoa || 'PJ',
-      cpf: String(configAtual.cpf || cfgMerged.cpf || ''),
-      cnpj: String(configAtual.cnpj || cfgMerged.cnpj || ''),
-      cep: String(configAtual.cep || cfgMerged.cep || ''),
-      bairro: String(configAtual.bairro || cfgMerged.bairro || ''),
-      telefone: String(telefoneFinal || cfgMerged.telefone || ''),
-      celularEmpresa: String(configAtual.celular_empresa || cfgMerged.celularEmpresa || telefoneFinal || ''),
-      whatsappEmpresa: String(configAtual.whatsapp_empresa || cfgMerged.whatsapp || telefoneFinal || ''),
-      telefoneEmpresa: String(configAtual.telefone || cfgMerged.telefoneEmpresa || telefoneFinal || ''),
-      email: String(payload.empresa_email || configAtual.email || cfgMerged.email || ''),
-      endereco: String(payload.empresa_endereco || configAtual.endereco || cfgMerged.endereco || ''),
-      cidadeUf: String(configAtual.cidade_uf || cfgMerged.cidadeUf || ''),
-      responsavel: String(configAtual.responsavel || cfgMerged.responsavel || ''),
-      logoUrl: cfgMerged.logoUrl || '/logo-connect.png',
-      empresa_logo_og: tokenDoc
-        ? urlLogoOgPublica({ token: tokenDoc, userId: ownerId || undefined, v: versao })
-        : urlLogoOgPublica({ userId: ownerId || undefined, v: versao }),
-      corPrimaria: String(configAtual.cor_primaria || payloadCfg.corPrimaria || '#16a34a'),
-      corSecundaria: String(configAtual.cor_secundaria || payloadCfg.corSecundaria || '#dcfce7'),
-      tituloPdf: String(configAtual.titulo_pdf || payloadCfg.tituloPdf || 'Orçamento Comercial'),
-      rodapePdf: String(configAtual.rodape_pdf || payloadCfg.rodapePdf || 'Obrigado pela preferência.'),
-      validadePadrao: String(configAtual.validade_padrao ?? payloadCfg.validadePadrao ?? '7 dias'),
-      prazoEntregaPadrao: String(configAtual.prazo_entrega_padrao || payloadCfg.prazoEntregaPadrao || '3 dias'),
-      formaPagamentoPadrao: String(configAtual.forma_pagamento_padrao || payloadCfg.formaPagamentoPadrao || 'PIX'),
-      mostrarQuantidade: configAtual.mostrar_quantidade ?? payloadCfg.mostrarQuantidade ?? true,
-      user_id: ownerId || '',
-      owner_user_id: ownerId || '',
-    }
+    const empresaLogoOg = urlLogoOgPublica({ token: tokenDoc, v: versao })
 
-    return NextResponse.json({
-      tipo: doc.tipo,
-      documento_id: doc.documento_id,
-      found: true,
-      config_atualizada: !!configAtual.id,
-      config,
-      payload,
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+    const config = sanitizarRespostaConfigPublica(
+      montarConfigPublicaBranding({
+        nomeEmpresa,
+        cfgMerged: cfgMerged as unknown as Record<string, unknown>,
+        configAtual,
+        telefoneFinal,
+        empresaLogoOg,
+      }) as Record<string, unknown>
+    )
+
+    return NextResponse.json(
+      {
+        tipo: doc.tipo,
+        documento_id: doc.documento_id,
+        found: true,
+        config_atualizada: Boolean(configAtual.id),
+        config,
       },
-    })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Erro interno' }, { status: 500 })
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        },
+      }
+    )
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Erro interno'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
