@@ -25,6 +25,14 @@ import { garantirPublicacaoOrcamento, type PublicacaoOrcamentoResult } from '@/l
 import { registrarLogSistema } from '@/lib/logs-sistema'
 import { exportarOrcamentosExcel } from '@/lib/export-modulos'
 import { criarGuardaAcaoUnica, deveLiberarNoRetorno } from '@/lib/acao-unica'
+import {
+  prepararTotaisOrcamentoCliente,
+  hidratarDescontoEditor,
+  montarTotaisParaSalvar,
+  calcularDescontoEmReais,
+  calcularTotalFinalOrcamento,
+  parseDescontoInputEditor,
+} from '@/lib/orcamento-desconto'
 type TipoPessoaCliente = 'PF' | 'PJ'
 
 type Cliente = {
@@ -2196,12 +2204,19 @@ export default function OrcamentoPage() {
   const metragemAtual = useMemo(() => calcularMetragem(larguraItem, alturaItem), [larguraItem, alturaItem])
   const subtotal = useMemo(() => itens.reduce((acc, item) => acc + calcularTotalItem(item), 0), [itens])
   const itensCliente = useMemo(() => itens.filter((item) => item.mostrarCliente !== false), [itens])
-  const valorDesconto = useMemo(() => {
-    const numero = textoDecimalLivreParaNumero(descontoInput)
-    if (descontoTipo === 'percentual') return Math.max(0, Math.min(100, numero)) * subtotal / 100
-    return Math.max(0, numero)
-  }, [descontoInput, descontoTipo, subtotal])
-  const total = useMemo(() => Math.max(0, subtotal + valorEntrega - valorDesconto), [subtotal, valorEntrega, valorDesconto])
+  const valorDesconto = useMemo(
+    () =>
+      calcularDescontoEmReais({
+        subtotal,
+        descontoTipo,
+        descontoInput: parseDescontoInputEditor(descontoInput),
+      }),
+    [descontoInput, descontoTipo, subtotal],
+  )
+  const total = useMemo(
+    () => calcularTotalFinalOrcamento({ subtotal, entrega: valorEntrega, desconto: valorDesconto }),
+    [subtotal, valorEntrega, valorDesconto],
+  )
 
   const resumo = useMemo(() => {
     const totalDocumentos = orcamentosSalvos.length
@@ -2265,17 +2280,17 @@ export default function OrcamentoPage() {
   }
 
   function prepararOrcamentoCliente(dados: OrcamentoSalvo): OrcamentoSalvo {
-    const itensVisiveis = (dados.itens || []).filter((item) => item.mostrarCliente !== false)
-    const subtotalVisivel = itensVisiveis.reduce((acc, item) => acc + calcularTotalItem(item), 0)
-    const descontoVisivel = subtotal > 0 ? Number(((valorDesconto * subtotalVisivel) / subtotal).toFixed(2)) : 0
-    const totalVisivel = Math.max(0, subtotalVisivel + Number(dados.entrega || 0) - descontoVisivel)
-
+    // Fonte canônica: dados do orçamento salvo — NÃO o estado do formulário aberto.
+    // Bug anterior: usava `subtotal`/`valorDesconto` do editor e zerava o desconto
+    // ao clicar Visualizar na lista com formulário vazio/fechado.
+    const totais = prepararTotaisOrcamentoCliente(dados)
     return {
       ...dados,
-      itens: itensVisiveis,
-      subtotal: subtotalVisivel,
-      desconto: descontoVisivel,
-      total: totalVisivel,
+      itens: totais.itens as ItemOrcamento[],
+      subtotal: totais.subtotal,
+      desconto: totais.desconto,
+      entrega: totais.entrega,
+      total: totais.total,
     }
   }
 
@@ -3234,6 +3249,13 @@ export default function OrcamentoPage() {
 
       if (editandoOrcamentoId !== null) {
         const atual = orcamentosSalvos.find((item) => item.id === editandoOrcamentoId)
+        const totaisSalvar = montarTotaisParaSalvar({
+          itens,
+          entrega: valorEntrega,
+          descontoTipo,
+          descontoInput,
+          descontoAntigo: Number(atual?.desconto || 0),
+        })
 
         const atualizadoBase: OrcamentoSalvo = {
           id: editandoOrcamentoId,
@@ -3242,10 +3264,10 @@ export default function OrcamentoPage() {
           modelo: modeloOrcamento,
           cliente: clienteSelecionado,
           itens,
-          subtotal,
-          entrega: valorEntrega,
-          desconto: valorDesconto,
-          total,
+          subtotal: totaisSalvar.subtotal,
+          entrega: totaisSalvar.entrega,
+          desconto: totaisSalvar.desconto,
+          total: totaisSalvar.total,
           formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
           formasPagamentoLista: formasPagamentoSelecionadas,
           observacaoPagamento: '',
@@ -3294,6 +3316,12 @@ export default function OrcamentoPage() {
       }
 
       const id = obterIdOrcamentoAtivo('salvar-orcamento-novo')
+      const totaisSalvar = montarTotaisParaSalvar({
+        itens,
+        entrega: valorEntrega,
+        descontoTipo,
+        descontoInput,
+      })
       const novoBase: OrcamentoSalvo = {
         id,
         numero: gerarNumeroDocumentoIgnorandoAtual(),
@@ -3301,10 +3329,10 @@ export default function OrcamentoPage() {
         modelo: modeloOrcamento,
         cliente: clienteSelecionado,
         itens,
-        subtotal,
-        entrega: valorEntrega,
-        desconto: valorDesconto,
-        total,
+        subtotal: totaisSalvar.subtotal,
+        entrega: totaisSalvar.entrega,
+        desconto: totaisSalvar.desconto,
+        total: totaisSalvar.total,
         formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
         formasPagamentoLista: formasPagamentoSelecionadas,
         observacaoPagamento: '',
@@ -3472,8 +3500,9 @@ export default function OrcamentoPage() {
     setPrazoEntrega(orc.prazoEntrega || '')
     setEnderecoEntrega(orc.enderecoEntrega || orc.cliente?.endereco || '')
     setValorEntrega(Number(orc.entrega || 0))
-    setDescontoTipo('valor')
-    setDescontoInput(Number(orc.desconto || 0) > 0 ? formatarDecimalVisual(Number(orc.desconto || 0)) : '')
+    const descontoHidratado = hidratarDescontoEditor(orc.desconto)
+    setDescontoTipo(descontoHidratado.descontoTipo)
+    setDescontoInput(descontoHidratado.descontoInput)
     setMostrarBuscaCliente(false)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -3693,6 +3722,13 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
 
     if (editandoOrcamentoId !== null) {
       const atual = orcamentosSalvos.find((item) => item.id === editandoOrcamentoId)
+      const totaisSalvar = montarTotaisParaSalvar({
+        itens,
+        entrega: valorEntrega,
+        descontoTipo,
+        descontoInput,
+        descontoAntigo: Number(atual?.desconto || 0),
+      })
 
       dadosParaAbrir = {
         id: editandoOrcamentoId,
@@ -3701,10 +3737,10 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         modelo: modeloOrcamento,
         cliente: clienteSelecionado,
         itens,
-        subtotal,
-        entrega: valorEntrega,
-        desconto: valorDesconto,
-        total,
+        subtotal: totaisSalvar.subtotal,
+        entrega: totaisSalvar.entrega,
+        desconto: totaisSalvar.desconto,
+        total: totaisSalvar.total,
         formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
         formasPagamentoLista: formasPagamentoSelecionadas,
         observacaoPagamento: '',
@@ -3722,6 +3758,12 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
       upsertOrcamentoNaLista(dadosParaAbrir, 'gerar-pdf-update')
     } else {
       const existente = orcamentosSalvos.find((item) => item.id === idParaAbrir)
+      const totaisSalvar = montarTotaisParaSalvar({
+        itens,
+        entrega: valorEntrega,
+        descontoTipo,
+        descontoInput,
+      })
       dadosParaAbrir = {
         id: idParaAbrir,
         numero: existente?.numero || gerarNumeroDocumentoIgnorandoAtual(),
@@ -3729,10 +3771,10 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
         modelo: modeloOrcamento,
         cliente: clienteSelecionado,
         itens,
-        subtotal,
-        entrega: valorEntrega,
-        desconto: valorDesconto,
-        total,
+        subtotal: totaisSalvar.subtotal,
+        entrega: totaisSalvar.entrega,
+        desconto: totaisSalvar.desconto,
+        total: totaisSalvar.total,
         formaPagamento: pagamentoOrcamentoTexto(formasPagamentoSelecionadas, '', parcelasBoleto),
         formasPagamentoLista: formasPagamentoSelecionadas,
         observacaoPagamento: '',

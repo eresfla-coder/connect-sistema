@@ -20,6 +20,7 @@ import {
   OBSERVACAO_PADRAO_ORCAMENTO,
   validadeOrcamentoAtiva,
 } from '@/lib/orcamentoTextos'
+import { prepararTotaisOrcamentoCliente } from '@/lib/orcamento-desconto'
 
 type Cliente = {
   nome?: string
@@ -843,15 +844,22 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
     ? orc!.itens!.filter((item) => item.mostrarCliente !== false)
     : []
 
-  const subtotalCalculado = useMemo(
-    () => itens.reduce((acc, item) => acc + totalItem(item), 0),
-    [itens]
+  const totaisCliente = useMemo(
+    () =>
+      prepararTotaisOrcamentoCliente({
+        itens: Array.isArray(orc?.itens) ? orc!.itens : [],
+        subtotal: orc?.subtotal,
+        desconto: orc?.desconto,
+        entrega: orc?.entrega,
+        total: orc?.total,
+      }),
+    [orc],
   )
 
-  const subtotal = subtotalCalculado
-  const frete = Number(orc?.entrega || 0)
-  const desconto = Number(orc?.desconto || 0)
-  const total = Math.max(subtotal + frete - desconto, 0)
+  const subtotal = totaisCliente.subtotal
+  const frete = totaisCliente.entrega
+  const desconto = totaisCliente.desconto
+  const total = totaisCliente.total
 
   const linkCompartilhamento = useMemo(() => {
     if (linkPublicoQr) return linkPublicoQr
@@ -1338,11 +1346,15 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           </article>
 
           <article className="orc-total-card">
-            <div><span>Subtotal</span><strong>{moeda(subtotal)}</strong></div>
-            <div><span>Frete</span><strong>{moeda(frete)}</strong></div>
-            <div><span>Desconto</span><strong>{moeda(desconto)}</strong></div>
+            <div><span>Subtotal dos itens</span><strong>{moeda(subtotal)}</strong></div>
+            {frete > 0 ? (
+              <div><span>Frete</span><strong>{moeda(frete)}</strong></div>
+            ) : null}
+            {desconto > 0 ? (
+              <div><span>Desconto</span><strong>- {moeda(desconto)}</strong></div>
+            ) : null}
             <div className="orc-grand">
-              <span className="orc-grand-label">Valor total</span>
+              <span className="orc-grand-label">TOTAL</span>
               <strong className="orc-grand-value">{moeda(total)}</strong>
             </div>
           </article>
