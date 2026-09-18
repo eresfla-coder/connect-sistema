@@ -4,7 +4,7 @@ import {
   acessoConnectDoVinculo,
   deveCriarAuthConnect,
   deveLimparAdminClienteRecemCriado,
-  montarItemLegadoLista,
+  filtrarItensCarteiraOficial,
   normalizarEmailAdmin,
   validarAcessoPorOrigem,
   validarIdsAcessoConnect,
@@ -98,14 +98,20 @@ export async function GET(req: Request) {
     }
 
     const tablesReady = probe.status === 'ready'
-    const itens: AdminListaItem[] = []
-    const perfilIdsVinculados = new Set<string>()
+    if (!tablesReady) {
+      const r = respostaAdminTablesNotReady()
+      return NextResponse.json(
+        { ...r.body, dualRead: false, tablesReady: false, total: 0, itens: [] },
+        { status: r.status },
+      )
+    }
 
-    if (tablesReady) {
-      const { data: clientesAdmin, error } = await supabaseAdmin
-        .from('admin_clientes')
-        .select(
-          `
+    // ADMIN.2.5 — fonte oficial: somente admin_*. Sem dual-read de public.perfis.
+    const itens: AdminListaItem[] = []
+    const { data: clientesAdmin, error } = await supabaseAdmin
+      .from('admin_clientes')
+      .select(
+        `
           id,nome,nome_empresa,email,telefone,documento,observacoes,ativo,created_at,updated_at,
           vinculos:admin_cliente_sistemas(
             id,status,valor,dia_vencimento,data_vencimento,inicio,fim_trial,observacoes,
@@ -113,100 +119,71 @@ export async function GET(req: Request) {
             sistema:admin_sistemas(id,slug,nome,origem,ativo)
           )
         `,
-        )
-        .order('created_at', { ascending: false })
-
-      if (error) {
-        logAdminApiError('carteira GET admin', error)
-        const r = respostaErroPostgresAmigavel(error)
-        return NextResponse.json(r.body, { status: r.status })
-      }
-
-      for (const c of clientesAdmin || []) {
-        const vinculos = Array.isArray((c as { vinculos?: unknown }).vinculos)
-          ? ((c as { vinculos: Array<Record<string, unknown>> }).vinculos)
-          : []
-
-        for (const v of vinculos) {
-          if (v.perfil_id) perfilIdsVinculados.add(String(v.perfil_id))
-          if (v.auth_user_id) perfilIdsVinculados.add(String(v.auth_user_id))
-        }
-
-        const sistemas = vinculos.map((v) => {
-          const sistema = (v.sistema || {}) as Record<string, unknown>
-          const origemRaw = String(sistema.origem || 'terceiro')
-          const origem: OrigemSistemaAdmin = origemRaw === 'connect' ? 'connect' : 'terceiro'
-          return {
-            vinculo_id: String(v.id || ''),
-            sistema_id: sistema.id ? String(sistema.id) : null,
-            nome: String(sistema.nome || 'Sistema'),
-            origem,
-            status: (v.status as string) || null,
-            valor: v.valor != null ? Number(v.valor) : null,
-            data_vencimento: v.data_vencimento ? String(v.data_vencimento) : null,
-            dia_vencimento: v.dia_vencimento != null ? Number(v.dia_vencimento) : null,
-            acesso_connect: Boolean(v.acesso_connect),
-            auth_user_id: v.auth_user_id ? String(v.auth_user_id) : null,
-            perfil_id: v.perfil_id ? String(v.perfil_id) : null,
-            legado_texto: false,
-            sistema_cliente_legado: null as string | null,
-          }
-        })
-
-        const authIds = sistemas.map((s) => s.auth_user_id).filter(Boolean) as string[]
-        itens.push({
-          fonte: 'admin',
-          id: String((c as { id: string }).id),
-          admin_cliente_id: String((c as { id: string }).id),
-          nome: (c as { nome?: string | null }).nome || null,
-          nome_empresa: (c as { nome_empresa?: string | null }).nome_empresa || null,
-          email: (c as { email?: string | null }).email || null,
-          telefone: (c as { telefone?: string | null }).telefone || null,
-          observacoes: (c as { observacoes?: string | null }).observacoes || null,
-          ativo: (c as { ativo?: boolean }).ativo !== false,
-          legado: false,
-          sistemas,
-          auth_user_id: authIds[0] || null,
-          perfil_id: sistemas.find((s) => s.perfil_id)?.perfil_id || null,
-          pode_reset_senha: authIds.length > 0,
-        })
-      }
-    }
-
-    const { data: perfis, error: perfisError } = await supabaseAdmin
-      .from('perfis')
-      .select(
-        'id,email,ativo,vencimento,status,valor_plano,telefone,nome_empresa,observacoes,sistema_cliente,data_criacao',
       )
-      .order('data_criacao', { ascending: false })
-      .limit(200)
+      .order('created_at', { ascending: false })
 
-    if (perfisError) {
-      logAdminApiError('carteira GET perfis', perfisError)
-      const r = respostaErroPostgresAmigavel(perfisError)
+    if (error) {
+      logAdminApiError('carteira GET admin', error)
+      const r = respostaErroPostgresAmigavel(error)
       return NextResponse.json(r.body, { status: r.status })
     }
 
-    for (const p of perfis || []) {
-      if (perfilIdsVinculados.has(String(p.id))) continue
-      itens.push(
-        montarItemLegadoLista({
-          perfilId: String(p.id),
-          email: p.email,
-          nomeEmpresa: p.nome_empresa,
-          telefone: p.telefone,
-          status: p.status,
-          valorPlano: p.valor_plano != null ? Number(p.valor_plano) : null,
-          vencimento: p.vencimento,
-          sistemaCliente: p.sistema_cliente,
-          observacoes: p.observacoes,
-          ativo: p.ativo,
-        }),
-      )
+    for (const c of clientesAdmin || []) {
+      const vinculos = Array.isArray((c as { vinculos?: unknown }).vinculos)
+        ? ((c as { vinculos: Array<Record<string, unknown>> }).vinculos)
+        : []
+
+      const sistemas = vinculos.map((v) => {
+        const sistema = (v.sistema || {}) as Record<string, unknown>
+        const origemRaw = String(sistema.origem || 'terceiro')
+        const origem: OrigemSistemaAdmin = origemRaw === 'connect' ? 'connect' : 'terceiro'
+        return {
+          vinculo_id: String(v.id || ''),
+          sistema_id: sistema.id ? String(sistema.id) : null,
+          nome: String(sistema.nome || 'Sistema'),
+          origem,
+          status: (v.status as string) || null,
+          valor: v.valor != null ? Number(v.valor) : null,
+          data_vencimento: v.data_vencimento ? String(v.data_vencimento) : null,
+          dia_vencimento: v.dia_vencimento != null ? Number(v.dia_vencimento) : null,
+          acesso_connect: Boolean(v.acesso_connect),
+          auth_user_id: v.auth_user_id ? String(v.auth_user_id) : null,
+          perfil_id: v.perfil_id ? String(v.perfil_id) : null,
+          legado_texto: false,
+          sistema_cliente_legado: null as string | null,
+        }
+      })
+
+      const prim = sistemas[0]
+      const primRaw = vinculos[0] || {}
+      const authIds = sistemas.map((s) => s.auth_user_id).filter(Boolean) as string[]
+      itens.push({
+        fonte: 'admin',
+        id: String((c as { id: string }).id),
+        admin_cliente_id: String((c as { id: string }).id),
+        nome: (c as { nome?: string | null }).nome || null,
+        nome_empresa: (c as { nome_empresa?: string | null }).nome_empresa || null,
+        email: (c as { email?: string | null }).email || null,
+        telefone: (c as { telefone?: string | null }).telefone || null,
+        observacoes: (c as { observacoes?: string | null }).observacoes || null,
+        ativo: (c as { ativo?: boolean }).ativo !== false,
+        legado: false,
+        status: prim?.status || null,
+        valor_plano: prim?.valor ?? null,
+        vencimento: prim?.data_vencimento || null,
+        status_pagamento: primRaw.status_pagamento ? String(primRaw.status_pagamento) : null,
+        ultimo_pagamento: primRaw.ultimo_pagamento ? String(primRaw.ultimo_pagamento) : null,
+        data_criacao: (c as { created_at?: string | null }).created_at || null,
+        sistemas,
+        auth_user_id: authIds[0] || null,
+        perfil_id: sistemas.find((s) => s.perfil_id)?.perfil_id || null,
+        pode_reset_senha: authIds.length > 0,
+      })
     }
 
+    const oficiais = filtrarItensCarteiraOficial(itens)
     const filtrados = q
-      ? itens.filter((item) => {
+      ? oficiais.filter((item) => {
           const blob = [
             item.nome,
             item.nome_empresa,
@@ -218,12 +195,13 @@ export async function GET(req: Request) {
             .toLowerCase()
           return blob.includes(q)
         })
-      : itens
+      : oficiais
 
     return NextResponse.json({
       ok: true,
-      tablesReady,
-      dualRead: true,
+      tablesReady: true,
+      dualRead: false,
+      fonte: 'admin_carteira',
       total: filtrados.length,
       itens: filtrados,
     })

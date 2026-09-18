@@ -2,9 +2,13 @@
 import { describe, it } from 'node:test'
 import {
   acessoConnectDoVinculo,
+  BACKFILL_PERFIS_CONNECT_APROVADOS,
+  backfillRestritoAosUuidsAprovados,
+  calcularMetricasCarteiraAdmin,
   deveCriarAuthConnect,
   deveCriarPerfilConnect,
   deveLimparAdminClienteRecemCriado,
+  filtrarItensCarteiraOficial,
   montarItemLegadoLista,
   normalizarEmailAdmin,
   normalizarOrigemSistema,
@@ -14,6 +18,7 @@ import {
   validarAcessoPorOrigem,
   validarIdsAcessoConnect,
   vinculoTemAcessoConnectIncompativelComTerceiro,
+  type AdminListaItem,
 } from '../lib/admin-carteira.ts'
 import {
   deveChamarCreateUserAuth,
@@ -186,7 +191,7 @@ describe('ADMIN.2.1 — invariantes carteira', () => {
     assert.equal(acessoConnectDoVinculo({ origem: 'connect', criarAcesso: false }), false)
   })
 
-  it('extras: legado + reset + multi-sistema + flag default', () => {
+  it('extras: legado helper + reset + multi-sistema + flag default', () => {
     assert.equal(umClientePodeTerVariosSistemas(), true)
     assert.equal(podeOperarAuthConnect(null), false)
     assert.equal(podeOperarAuthConnect('uuid'), true)
@@ -206,5 +211,132 @@ describe('ADMIN.2.1 — invariantes carteira', () => {
       accessLink: '',
     })
     assert.match(convite, /login/i)
+  })
+
+  it('21) carteira oficial não lista automaticamente perfis legados', () => {
+    const misturado: AdminListaItem[] = [
+      montarItemLegadoLista({ perfilId: 'barbearia-user', email: 'teste.live@example.com', sistemaCliente: 'Connect Pro' }),
+      {
+        fonte: 'admin',
+        id: 'ac-1',
+        admin_cliente_id: 'ac-1',
+        nome: null,
+        nome_empresa: 'BIRA',
+        email: 'bira@x.com',
+        telefone: null,
+        observacoes: null,
+        ativo: true,
+        legado: false,
+        sistemas: [],
+        auth_user_id: 'dd1f6a30-73a4-459f-9335-96dc56523089',
+        perfil_id: 'dd1f6a30-73a4-459f-9335-96dc56523089',
+        pode_reset_senha: true,
+      },
+    ]
+    const oficiais = filtrarItensCarteiraOficial(misturado)
+    assert.equal(oficiais.length, 1)
+    assert.equal(oficiais[0]?.email, 'bira@x.com')
+    assert.equal(oficiais.some((i) => i.email === 'teste.live@example.com'), false)
+  })
+
+  it('22) Barbearia/Gym sem admin_cliente não aparece; Connect vinculado aparece; terceiro aparece', () => {
+    const barbearia = montarItemLegadoLista({
+      perfilId: 'gym-1',
+      email: 'newstyle@x.com',
+      sistemaCliente: 'Connect Pro',
+    })
+    const connect: AdminListaItem = {
+      fonte: 'admin',
+      id: 'a1',
+      admin_cliente_id: 'a1',
+      nome: null,
+      nome_empresa: 'Connect Cliente',
+      email: 'c@x.com',
+      telefone: null,
+      observacoes: null,
+      ativo: true,
+      legado: false,
+      sistemas: [
+        {
+          vinculo_id: 'v1',
+          sistema_id: 's1',
+          nome: 'Connect Sistema',
+          origem: 'connect',
+          status: 'ativo',
+          valor: 49.9,
+          data_vencimento: '2026-10-01',
+          acesso_connect: true,
+          auth_user_id: 'u1',
+          perfil_id: 'u1',
+          legado_texto: false,
+          sistema_cliente_legado: null,
+        },
+      ],
+      auth_user_id: 'u1',
+      perfil_id: 'u1',
+      pode_reset_senha: true,
+    }
+    const terceiro: AdminListaItem = {
+      ...connect,
+      id: 'a2',
+      admin_cliente_id: 'a2',
+      email: 't@x.com',
+      nome_empresa: 'PDV Terceiro',
+      auth_user_id: null,
+      perfil_id: null,
+      pode_reset_senha: false,
+      sistemas: [
+        {
+          ...connect.sistemas[0]!,
+          origem: 'terceiro',
+          acesso_connect: false,
+          auth_user_id: null,
+          perfil_id: null,
+          nome: 'Infostart',
+        },
+      ],
+    }
+    const lista = filtrarItensCarteiraOficial([barbearia, connect, terceiro])
+    assert.equal(lista.length, 2)
+    assert.ok(lista.some((i) => i.email === 'c@x.com'))
+    assert.ok(lista.some((i) => i.email === 't@x.com'))
+    assert.equal(lista.some((i) => i.email === 'newstyle@x.com'), false)
+  })
+
+  it('23) métricas não contam os 29 perfis; só carteira admin', () => {
+    const metricas = calcularMetricasCarteiraAdmin([
+      { status: 'ativo', ativo: true, valor_plano: 49.9, vencimento: '2026-12-01', status_pagamento: 'em_dia' },
+      { status: 'bloqueado', ativo: false, valor_plano: 120, vencimento: '2026-10-10', status_pagamento: 'bloqueado' },
+    ])
+    assert.equal(metricas.total, 2)
+    assert.notEqual(metricas.total, 29)
+    assert.equal(metricas.bloqueados, 1)
+    assert.equal(metricas.mrr, 49.9)
+    assert.equal(metricas.recebidoMes, 49.9)
+  })
+
+  it('24) Auth/perfis independentes da listagem; terceiro e Connect sem login sem Auth; Connect com login vincula', () => {
+    assert.equal(deveChamarCreateUserAuthParaOrigem({ origem: 'terceiro', criarAcesso: true }), false)
+    assert.equal(deveChamarCreateUserAuthParaOrigem({ origem: 'connect', criarAcesso: false }), false)
+    assert.equal(deveChamarCreateUserAuthParaOrigem({ origem: 'connect', criarAcesso: true }), true)
+    assert.equal(
+      validarIdsAcessoConnect({
+        acessoConnect: true,
+        authUserId: 'same',
+        perfilId: 'same',
+      }).ok,
+      true,
+    )
+  })
+
+  it('25) backfill restrito aos 3 UUIDs aprovados', () => {
+    assert.equal(BACKFILL_PERFIS_CONNECT_APROVADOS.length, 3)
+    const ids = BACKFILL_PERFIS_CONNECT_APROVADOS.map((x) => x.perfilId)
+    assert.equal(backfillRestritoAosUuidsAprovados(ids), true)
+    assert.equal(backfillRestritoAosUuidsAprovados([...ids, '00000000-0000-0000-0000-000000000099']), false)
+    assert.equal(backfillRestritoAosUuidsAprovados([]), false)
+    assert.ok(ids.includes('dd1f6a30-73a4-459f-9335-96dc56523089'))
+    assert.ok(ids.includes('eda88f6d-1417-4ade-9d79-4ea50ea4c6b6'))
+    assert.ok(ids.includes('3ec1947d-2ec0-4d96-8d15-2a11da10ea70'))
   })
 })

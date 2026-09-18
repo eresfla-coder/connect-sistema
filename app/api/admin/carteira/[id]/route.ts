@@ -118,3 +118,31 @@ export async function PATCH(req: Request, ctx: Ctx) {
     return NextResponse.json({ ok: false, code: 'ADMIN_AUTH', error: 'Não autorizado.' }, { status: statusAuthAdmin(error) })
   }
 }
+
+/** Remove só da carteira admin_*. NÃO apaga Auth/perfis/assinaturas. */
+export async function DELETE(req: Request, ctx: Ctx) {
+  try {
+    await requireAdminFromRequest(req)
+    const blocked = await gateTables()
+    if (blocked) return blocked
+
+    const { id } = await ctx.params
+    const { error } = await supabaseAdmin.from('admin_clientes').delete().eq('id', id)
+
+    if (error) {
+      logAdminApiError('carteira/[id] DELETE', error)
+      const r = respostaErroPostgresAmigavel(error)
+      return NextResponse.json(r.body, { status: r.status })
+    }
+
+    return NextResponse.json({
+      ok: true,
+      removed: id,
+      authPreserved: true,
+      note: 'Cliente removido apenas da carteira admin_*. Auth/perfis preservados.',
+    })
+  } catch (error: unknown) {
+    logAdminApiError('carteira/[id] DELETE', error)
+    return NextResponse.json({ ok: false, code: 'ADMIN_AUTH', error: 'Não autorizado.' }, { status: statusAuthAdmin(error) })
+  }
+}

@@ -204,12 +204,23 @@ export type AdminListaItem = {
   observacoes: string | null
   ativo: boolean
   legado: boolean
+  /** Campos comerciais agregados do 1º vínculo (métricas da carteira). */
+  status?: string | null
+  valor_plano?: number | null
+  vencimento?: string | null
+  status_pagamento?: string | null
+  ultimo_pagamento?: string | null
+  data_criacao?: string | null
   sistemas: SistemaListaItem[]
   auth_user_id: string | null
   perfil_id: string | null
   pode_reset_senha: boolean
 }
 
+/**
+ * @deprecated ADMIN.2.5 — dual-read removido da listagem oficial.
+ * Mantido só para testes/ferramentas; NÃO usar em GET /api/admin/carteira.
+ */
 export function montarItemLegadoLista(params: {
   perfilId: string
   email?: string | null
@@ -254,6 +265,100 @@ export function montarItemLegadoLista(params: {
     perfil_id: params.perfilId,
     pode_reset_senha: true,
   }
+}
+
+/** ADMIN.2.5 — carteira oficial = somente fonte admin (nunca perfis soltos). */
+export function filtrarItensCarteiraOficial(itens: AdminListaItem[]): AdminListaItem[] {
+  return (itens || []).filter((item) => item.fonte === 'admin' && item.legado !== true)
+}
+
+export type MetricasCarteiraAdmin = {
+  total: number
+  trials: number
+  bloqueados: number
+  mrr: number
+  recebidoMes: number
+  novos30: number
+  vencidos: number
+  vencendo7: number
+}
+
+export type ItemMetricasCarteira = {
+  status?: string | null
+  ativo?: boolean | null
+  valor_plano?: number | null
+  vencimento?: string | null
+  status_pagamento?: string | null
+  data_criacao?: string | null
+}
+
+function diasAteVencimento(vencimento?: string | null): number | null {
+  if (!vencimento) return null
+  const d = new Date(`${String(vencimento).slice(0, 10)}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return null
+  return Math.floor((d.getTime() - Date.now()) / 86400000)
+}
+
+function vencimentoPermanente(item: ItemMetricasCarteira): boolean {
+  const v = String(item.vencimento || '')
+  return v.startsWith('2099') || Number(item.valor_plano || 0) === 0
+}
+
+/** KPIs da carteira admin_* — NÃO conta os 29 perfis legados. */
+export function calcularMetricasCarteiraAdmin(itens: ItemMetricasCarteira[]): MetricasCarteiraAdmin {
+  const total = itens.length
+  const trials = itens.filter((c) => /trial|teste/i.test(String(c.status || ''))).length
+  const bloqueados = itens.filter(
+    (c) => String(c.status || '').toLowerCase() === 'bloqueado' || c.ativo === false,
+  ).length
+  const vencidos = itens.filter((c) => {
+    if (vencimentoPermanente(c)) return false
+    const dias = diasAteVencimento(c.vencimento)
+    return dias !== null && dias < 0
+  }).length
+  const vencendo7 = itens.filter((c) => {
+    if (vencimentoPermanente(c)) return false
+    const dias = diasAteVencimento(c.vencimento)
+    return dias !== null && dias >= 0 && dias <= 7
+  }).length
+  const mrr = itens
+    .filter((c) => String(c.status || '').toLowerCase() !== 'bloqueado' && c.ativo !== false)
+    .reduce((acc, c) => acc + Number(c.valor_plano || 0), 0)
+  const recebidoMes = itens
+    .filter((c) => ['em_dia', 'pago'].includes(String(c.status_pagamento || '').toLowerCase()))
+    .reduce((acc, c) => acc + Number(c.valor_plano || 0), 0)
+  const novos30 = itens.filter((c) => {
+    const criado = c.data_criacao ? new Date(c.data_criacao) : null
+    return !!criado && !Number.isNaN(criado.getTime()) && Date.now() - criado.getTime() <= 30 * 86400000
+  }).length
+  return { total, trials, bloqueados, mrr, recebidoMes, novos30, vencidos, vencendo7 }
+}
+
+/**
+ * UUIDs aprovados para backfill controlado (ADMIN.2.5).
+ * Qualquer SQL/script de backfill deve restringir-se a este conjunto.
+ */
+export const BACKFILL_PERFIS_CONNECT_APROVADOS = [
+  {
+    key: 'BIRA_MOVEIS',
+    perfilId: 'dd1f6a30-73a4-459f-9335-96dc56523089',
+    email: 'biramoveisrusticosrn2025@gmail.com',
+  },
+  {
+    key: 'GUEDES_MOVEIS',
+    perfilId: 'eda88f6d-1417-4ade-9d79-4ea50ea4c6b6',
+    email: 'gmmoveisplanejadoss@gmail.com',
+  },
+  {
+    key: 'SAMYR_GOIANINHA',
+    perfilId: '3ec1947d-2ec0-4d96-8d15-2a11da10ea70',
+    email: 'samygoaninha@gmail.com',
+  },
+] as const
+
+export function backfillRestritoAosUuidsAprovados(ids: string[]): boolean {
+  const allowed = new Set<string>(BACKFILL_PERFIS_CONNECT_APROVADOS.map((x) => x.perfilId))
+  return ids.length > 0 && ids.every((id) => allowed.has(id)) && ids.length <= allowed.size
 }
 
 export function umClientePodeTerVariosSistemas(): boolean {

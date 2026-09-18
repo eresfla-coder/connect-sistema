@@ -474,18 +474,22 @@ export default function AdminSaasMasterPage() {
     if (cliente.sistemasResumo && cliente.sistemasResumo.length > 0) {
       return cliente.sistemasResumo
         .map((s) => {
-          const tag =
-            s.origem === 'connect' ? 'CONNECT' : s.origem === 'terceiro' ? 'TERCEIRO' : 'LEGADO'
+          const tag = s.origem === 'connect' ? 'CONNECT' : 'TERCEIRO'
           return `${s.nome} (${tag})`
         })
         .join(' · ')
     }
-    return cliente.sistema_cliente || metaLocal[cliente.id]?.sistema_cliente || 'Connect Sistema'
+    return cliente.sistema_cliente || metaLocal[cliente.id]?.sistema_cliente || '—'
   }
 
   function clientePodeReset(cliente: PerfilAdmin) {
     if (typeof cliente.pode_reset_senha === 'boolean') return cliente.pode_reset_senha
-    return Boolean(cliente.auth_user_id_reset || cliente.fonte !== 'admin')
+    return Boolean(cliente.auth_user_id_reset)
+  }
+
+  /** ID operacional Auth/perfis para ações legadas (trial/ativar/bloquear/renovar). */
+  function idOperacionalPerfil(cliente: PerfilAdmin): string | null {
+    return cliente.auth_user_id_reset || (cliente.fonte === 'legado' ? cliente.id : null)
   }
 
   function clienteObs(cliente: PerfilAdmin) {
@@ -536,83 +540,63 @@ export default function AdminSaasMasterPage() {
   }
 
   async function carregarClientesAdmin(token: string): Promise<PerfilAdmin[]> {
-    // Dual-read ADMIN.2 quando tabelas prontas
+    // ADMIN.2.5 — fonte oficial admin_* (sem dual-read dos 29 perfis)
     try {
       const carteiraRes = await fetch('/api/admin/carteira', {
         headers: { Authorization: `Bearer ${token}` },
       })
       const carteiraPayload = await carteiraRes.json().catch(() => ({}))
-      if (carteiraRes.ok && carteiraPayload?.dualRead && Array.isArray(carteiraPayload.itens)) {
-        setAdminTablesReadyFlag(Boolean(carteiraPayload.tablesReady))
-        return (carteiraPayload.itens as Array<Record<string, unknown>>).map((item) => {
-          const sistemas = Array.isArray(item.sistemas) ? (item.sistemas as Array<Record<string, unknown>>) : []
-          const prim = sistemas[0] || {}
-          const fonte = item.fonte === 'admin' ? 'admin' : 'legado'
-          const perfilId = item.perfil_id ? String(item.perfil_id) : null
-          const authId = item.auth_user_id ? String(item.auth_user_id) : null
-          return {
-            id: fonte === 'legado' ? String(item.id) : perfilId || String(item.id),
-            email: (item.email as string) || null,
-            ativo: item.ativo !== false,
-            vencimento: (prim.data_vencimento as string) || null,
-            status: (prim.status as string) || null,
-            valor_plano: prim.valor != null ? Number(prim.valor) : null,
-            telefone: (item.telefone as string) || null,
-            nome_empresa: (item.nome_empresa as string) || (item.nome as string) || null,
-            sistema_cliente: sistemas.map((s) => s.nome).filter(Boolean).join(' · ') || null,
-            observacoes: (item.observacoes as string) || null,
-            fonte,
-            admin_cliente_id: item.admin_cliente_id ? String(item.admin_cliente_id) : null,
-            auth_user_id_reset: authId,
-            pode_reset_senha: Boolean(item.pode_reset_senha),
-            sistemasResumo: sistemas.map((s) => ({
-              nome: String(s.nome || ''),
-              origem: String(s.origem || ''),
-              acesso_connect: Boolean(s.acesso_connect),
-              legado_texto: Boolean(s.legado_texto),
-            })),
-          } satisfies PerfilAdmin
-        })
-      }
-    } catch (err) {
-      console.warn('[ADMIN] carteira dual-read fallback perfis:', err)
-    }
 
-    const acumulado: PerfilAdmin[] = []
-    let page = 1
-    let hasMore = true
-
-    while (hasMore && page <= 20) {
-      const response = await fetch(`/api/admin/clientes?page=${page}&limit=50`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (response.status === 403) {
+      if (carteiraRes.status === 403) {
         router.push('/dashboard')
         return []
       }
 
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        console.error('ADMIN_PERFIS_ERROR', payload?.error)
-        return acumulado
+      if (carteiraRes.ok && Array.isArray(carteiraPayload.itens)) {
+        setAdminTablesReadyFlag(Boolean(carteiraPayload.tablesReady))
+        return (carteiraPayload.itens as Array<Record<string, unknown>>)
+          .filter((item) => item.fonte === 'admin' && item.legado !== true)
+          .map((item) => {
+            const sistemas = Array.isArray(item.sistemas) ? (item.sistemas as Array<Record<string, unknown>>) : []
+            const authId = item.auth_user_id ? String(item.auth_user_id) : null
+            return {
+              id: String(item.admin_cliente_id || item.id),
+              email: (item.email as string) || null,
+              ativo: item.ativo !== false,
+              vencimento: (item.vencimento as string) || null,
+              status: (item.status as string) || null,
+              valor_plano: item.valor_plano != null ? Number(item.valor_plano) : null,
+              telefone: (item.telefone as string) || null,
+              nome_empresa: (item.nome_empresa as string) || (item.nome as string) || null,
+              sistema_cliente: sistemas.map((s) => s.nome).filter(Boolean).join(' · ') || null,
+              observacoes: (item.observacoes as string) || null,
+              data_criacao: (item.data_criacao as string) || null,
+              status_pagamento: (item.status_pagamento as string) || null,
+              ultimo_pagamento: (item.ultimo_pagamento as string) || null,
+              fonte: 'admin' as const,
+              admin_cliente_id: item.admin_cliente_id ? String(item.admin_cliente_id) : String(item.id),
+              auth_user_id_reset: authId,
+              pode_reset_senha: Boolean(item.pode_reset_senha),
+              sistemasResumo: sistemas.map((s) => ({
+                nome: String(s.nome || ''),
+                origem: String(s.origem || ''),
+                acesso_connect: Boolean(s.acesso_connect),
+                legado_texto: Boolean(s.legado_texto),
+              })),
+            } satisfies PerfilAdmin
+          })
       }
 
-      acumulado.push(
-        ...(((payload?.clientes as PerfilAdmin[]) || []).map((c) => ({
-          ...c,
-          fonte: 'legado' as const,
-          pode_reset_senha: true,
-          auth_user_id_reset: c.id,
-        }))),
-      )
-      hasMore = Boolean(payload?.pagination?.hasMore)
-      page += 1
+      if (carteiraPayload?.code === 'ADMIN_TABLES_NOT_READY' || carteiraRes.status === 503) {
+        setAdminTablesReadyFlag(false)
+        console.warn('[ADMIN] admin_* não prontas — carteira vazia (sem fallback para perfis).')
+        return []
+      }
+    } catch (err) {
+      console.warn('[ADMIN] falha ao carregar carteira admin_*:', err)
     }
 
-    return acumulado
+    return []
   }
 
   async function carregarTudo(accessToken?: string) {
@@ -715,6 +699,12 @@ export default function AdminSaasMasterPage() {
       const accessToken = session?.access_token
       if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
 
+      const clienteLocal = clientes.find((c) => c.id === id)
+      const perfilId = clienteLocal ? idOperacionalPerfil(clienteLocal) : id
+      if (!perfilId) {
+        throw new Error('Cliente da carteira sem Auth/perfil vinculado. Ajuste o vínculo Connect antes.')
+      }
+
       const response = await fetch('/api/admin/clientes', {
         method: 'PATCH',
         headers: {
@@ -722,7 +712,7 @@ export default function AdminSaasMasterPage() {
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          id,
+          id: perfilId,
           updates,
         }),
       })
@@ -798,7 +788,7 @@ export default function AdminSaasMasterPage() {
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          user_id: renovarCliente.id,
+          user_id: idOperacionalPerfil(renovarCliente) || renovarCliente.id,
           plano_tier: form.plano_tier,
           valor_pago: valor,
           forma_pagamento: form.forma_pagamento,
@@ -841,7 +831,14 @@ export default function AdminSaasMasterPage() {
 
   async function excluirCliente(cliente: PerfilAdmin) {
     const nome = cliente.nome_empresa || cliente.email || 'este cliente'
-    const confirmar = confirm(`Excluir definitivamente ${nome}?\n\nEssa ação remove o cliente do painel admin e também tenta remover o acesso de login.`)
+    const confirmar =
+      cliente.fonte === 'admin'
+        ? confirm(
+            `Remover ${nome} da carteira comercial?\n\nAuth/login e perfis NÃO serão apagados — apenas o cadastro admin_*.`,
+          )
+        : confirm(
+            `Excluir definitivamente ${nome}?\n\nEssa ação remove o cliente do painel admin e também tenta remover o acesso de login.`,
+          )
 
     if (!confirmar) return
 
@@ -855,17 +852,28 @@ export default function AdminSaasMasterPage() {
 
       if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
 
-      const response = await fetch(`/api/admin/clientes?id=${encodeURIComponent(cliente.id)}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-
-      const payload = await response.json().catch(() => ({}))
-
-      if (!response.ok) {
-        throw new Error(payload?.error || 'Não foi possível excluir o cliente.')
+      if (cliente.fonte === 'admin' && cliente.admin_cliente_id) {
+        const response = await fetch(`/api/admin/carteira/${encodeURIComponent(cliente.admin_cliente_id)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Não foi possível excluir o cliente da carteira.')
+        }
+      } else {
+        const perfilId = idOperacionalPerfil(cliente)
+        if (!perfilId) throw new Error('Cliente sem id operacional.')
+        const response = await fetch(`/api/admin/clientes?id=${encodeURIComponent(perfilId)}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Não foi possível excluir o cliente.')
+        }
       }
 
       const meta = readMeta()
@@ -875,7 +883,7 @@ export default function AdminSaasMasterPage() {
 
       setClientes((lista) => lista.filter((item) => item.id !== cliente.id))
       await refreshClientes()
-      alert('Cliente excluído com sucesso.')
+      alert(cliente.fonte === 'admin' ? 'Cliente removido da carteira (Auth preservado).' : 'Cliente excluído com sucesso.')
     } catch (error: any) {
       console.error(error)
       alert(error?.message || 'Não foi possível excluir o cliente.')
@@ -1219,6 +1227,7 @@ export default function AdminSaasMasterPage() {
     }
   }
 
+  // ADMIN.2.5 — KPIs da carteira comercial (admin_*). Não inclui os 29 perfis.
   const resumo = useMemo(() => {
     const total = clientes.length
     const ativos = clientes.filter((c) => String(c.status || '').toLowerCase() === 'ativo').length
@@ -1456,8 +1465,10 @@ export default function AdminSaasMasterPage() {
               <div>
                 <h2 style={{ ...styles.panelTitle, ...(isMobileAdmin ? styles.panelTitleMobile : {}) }}>Clientes</h2>
                 <p style={styles.panelSub}>
-                  Carteira administrativa + clientes Connect legados (dual-read).
-                  {adminTablesReadyFlag ? ' Tabelas admin_* ativas.' : ' Migration admin_* ainda não aplicada — listando perfis legados.'}
+                  Carteira comercial oficial (`admin_*`). Perfis/Auth legados não entram automaticamente.
+                  {adminTablesReadyFlag
+                    ? ' Um cliente aparece aqui só com vínculo em admin_cliente_sistemas.'
+                    : ' Migration admin_* ausente ou indisponível — lista vazia até as tabelas estarem prontas.'}
                 </p>
               </div>
               <div style={{ ...styles.toolbar, ...(isMobileAdmin ? styles.toolbarMobile : {}) }}>
@@ -1499,16 +1510,19 @@ export default function AdminSaasMasterPage() {
               {clientesFiltrados.map((cliente) => {
                 const plan = planoCliente(cliente)
                 const risk = riscoCliente(cliente)
-                const sessao = sessoesMap.get(cliente.id) || sessoesMap.get(String(cliente.email || '').toLowerCase())
+                const sessao =
+                  sessoesMap.get(String(cliente.auth_user_id_reset || '')) ||
+                  sessoesMap.get(cliente.id) ||
+                  sessoesMap.get(String(cliente.email || '').toLowerCase())
 
                 return (
                   <div key={cliente.id} style={{ ...styles.clientRow, ...(isMobileAdmin ? styles.clientRowMobile : {}) }}>
                     <div style={{ ...styles.clientIdentity, ...(isMobileAdmin ? styles.clientIdentityMobile : {}) }}>
                       <div style={{ ...styles.clientName, ...(isMobileAdmin ? styles.clientNameMobile : {}) }}>
                         {cliente.nome_empresa || 'Cliente sem nome'}{' '}
-                        <span style={{ fontSize: 11, fontWeight: 800, color: cliente.fonte === 'admin' ? '#86efac' : '#fbbf24' }}>
-                          {cliente.fonte === 'admin' ? 'ADMIN' : 'LEGADO'}
-                        </span>
+                        {cliente.fonte === 'admin' ? (
+                          <span style={{ fontSize: 11, fontWeight: 800, color: '#86efac' }}>CARTEIRA</span>
+                        ) : null}
                       </div>
                       <div style={{ ...styles.clientLine, ...(isMobileAdmin ? styles.clientLineMobile : {}) }}>{cliente.email || '-'} {cliente.telefone ? `• ${cliente.telefone}` : ''}</div>
                       <div style={styles.systemLine}>{clienteSistema(cliente)}</div>
