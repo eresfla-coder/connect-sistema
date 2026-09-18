@@ -17,9 +17,11 @@ type SistemaAdmin = {
 
 type Props = {
   isMobile?: boolean
+  /** Chamado após criar/alterar sistema para o select Novo cliente refletir o catálogo. */
+  onCatalogChanged?: () => void
 }
 
-export default function AdminSistemasPanel({ isMobile }: Props) {
+export default function AdminSistemasPanel({ isMobile, onCatalogChanged }: Props) {
   const [sistemas, setSistemas] = useState<SistemaAdmin[]>([])
   const [tablesReady, setTablesReady] = useState(true)
   const [loading, setLoading] = useState(true)
@@ -92,6 +94,7 @@ export default function AdminSistemasPanel({ isMobile }: Props) {
       if (!res.ok) throw new Error(payload?.error || 'Não foi possível salvar.')
       setForm({ nome: '', origem: 'connect', url: '', descricao: '' })
       await carregar()
+      onCatalogChanged?.()
       alert('Sistema cadastrado.')
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Erro ao salvar sistema.')
@@ -117,6 +120,7 @@ export default function AdminSistemasPanel({ isMobile }: Props) {
       const payload = await res.json()
       if (!res.ok) throw new Error(payload?.error || 'Falha ao atualizar.')
       await carregar()
+      onCatalogChanged?.()
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Erro ao atualizar sistema.')
     }

@@ -15,7 +15,14 @@ import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetrica
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
 import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
 import AdminSistemasPanel from '@/components/admin/AdminSistemasPanel'
-import { labelOrigemSistemaBadge } from '@/lib/admin-carteira'
+import {
+  labelOrigemSistemaBadge,
+  labelSistemaContratadoSelect,
+  sistemasAtivosParaContratacao,
+  TEXTO_AJUDA_CRIAR_ACESSO_CONNECT,
+  TEXTO_AJUDA_SOMENTE_ADMIN,
+  deveExibirOpcaoCriarAcessoConnect,
+} from '@/lib/admin-carteira'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
@@ -25,7 +32,6 @@ import {
   type FaixaSemUso,
   type StatusUsoSessao,
 } from '@/lib/sessao-uso'
-import { MSG_ADMIN_TABLES_NOT_READY } from '@/lib/admin-carteira'
 import { resolverCriarAcesso } from '@/lib/admin-criar-acesso'
 
 type FiltroStatus = 'todos' | 'trial' | 'ativo' | 'bloqueado' | 'vencidos' | 'risco'
@@ -512,7 +518,9 @@ export default function AdminSaasMasterPage() {
     }
   }
 
-  async function carregarCatalogoSistemas(token: string) {
+  async function carregarCatalogoSistemas(token: string): Promise<
+    Array<{ id: string; nome: string; origem: string; ativo: boolean }>
+  > {
     try {
       const res = await fetch('/api/admin/sistemas?ativos=1', {
         headers: { Authorization: `Bearer ${token}` },
@@ -521,22 +529,31 @@ export default function AdminSaasMasterPage() {
       if (res.status === 503 || payload?.code === 'ADMIN_TABLES_NOT_READY') {
         setAdminTablesReadyFlag(false)
         setCatalogoSistemas([])
-        return
+        return []
       }
       if (!res.ok) {
         setAdminTablesReadyFlag(false)
-        return
+        return []
       }
       setAdminTablesReadyFlag(true)
-      const lista = Array.isArray(payload.sistemas) ? payload.sistemas : []
+      const lista = sistemasAtivosParaContratacao(
+        Array.isArray(payload.sistemas) ? payload.sistemas : [],
+      ).map((s: { id: string; nome: string; origem: string; ativo?: boolean }) => ({
+        id: String(s.id),
+        nome: String(s.nome || ''),
+        origem: String(s.origem || ''),
+        ativo: s.ativo !== false,
+      }))
       setCatalogoSistemas(lista)
       setNovoCliente((prev) => {
         if (prev.sistema_id) return prev
-        const connect = lista.find((s: { origem: string }) => s.origem === 'connect')
+        const connect = lista.find((s) => s.origem === 'connect')
         return connect ? { ...prev, sistema_id: connect.id, sistema_cliente: connect.nome } : prev
       })
+      return lista
     } catch {
       setAdminTablesReadyFlag(false)
+      return []
     }
   }
 
@@ -1120,7 +1137,7 @@ export default function AdminSaasMasterPage() {
     const usarCarteira = adminTablesReadyFlag && Boolean(novoCliente.sistema_id)
 
     if (!usarCarteira && !criarAcesso) {
-      alert(MSG_ADMIN_TABLES_NOT_READY)
+      alert('Catálogo comercial temporariamente indisponível. Selecione um sistema ou tente novamente.')
       return
     }
 
@@ -1367,22 +1384,29 @@ export default function AdminSaasMasterPage() {
               <button
                 style={styles.primaryHeroButton}
                 onClick={() => {
-                  setInviteLink('')
-                  setInviteText('')
-                  setInvitePhone('')
-                  setNovoCliente({
-                    email: '',
-                    nome_empresa: '',
-                    telefone: '',
-                    valor_plano: '49,90',
-                    tipo: 'trial',
-                    sistema_cliente: 'Connect Sistema',
-                    sistema_id: catalogoSistemas.find((s) => s.origem === 'connect')?.id || '',
-                    observacoes: '',
-                    criar_acesso: true,
-                    dia_vencimento: '',
-                  })
-                  setModalOpen(true)
+                  void (async () => {
+                    const { data: { session } } = await supabase.auth.getSession()
+                    const token = session?.access_token
+                    const lista = token ? await carregarCatalogoSistemas(token) : catalogoSistemas
+                    const connect = lista.find((s) => s.origem === 'connect')
+                    const defaultSistema = connect || lista[0]
+                    setInviteLink('')
+                    setInviteText('')
+                    setInvitePhone('')
+                    setNovoCliente({
+                      email: '',
+                      nome_empresa: '',
+                      telefone: '',
+                      valor_plano: '49,90',
+                      tipo: 'trial',
+                      sistema_cliente: defaultSistema?.nome || 'Connect Sistema',
+                      sistema_id: defaultSistema?.id || '',
+                      observacoes: '',
+                      criar_acesso: defaultSistema?.origem === 'connect',
+                      dia_vencimento: '',
+                    })
+                    setModalOpen(true)
+                  })()
                 }}
               >
                 + Novo cliente
@@ -1461,7 +1485,18 @@ export default function AdminSaasMasterPage() {
           <button style={{ ...(aba === 'saude' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('saude')}>Saúde do sistema</button>
         </section>
 
-        {aba === 'sistemas' ? <AdminSistemasPanel isMobile={isMobileAdmin} /> : null}
+        {aba === 'sistemas' ? (
+          <AdminSistemasPanel
+            isMobile={isMobileAdmin}
+            onCatalogChanged={() => {
+              void (async () => {
+                const { data: { session } } = await supabase.auth.getSession()
+                const token = session?.access_token
+                if (token) await carregarCatalogoSistemas(token)
+              })()
+            }}
+          />
+        ) : null}
 
         {aba === 'clientes' && (
           <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>
@@ -1919,7 +1954,7 @@ export default function AdminSaasMasterPage() {
         <Modal maxWidth={820} onClose={() => { setModalOpen(false); setInviteLink(''); setInviteText(''); setInvitePhone('') }}>
           <div style={styles.modalTitle}>Novo cliente</div>
           <div style={styles.modalSub}>
-            Dados do cliente + sistema contratado. Login Connect só quando a origem for Connect e a opção estiver marcada.
+            Dados do cliente e sistema contratado. Login no Connect só quando o sistema for próprio e a opção estiver marcada.
           </div>
 
           <div style={styles.formGrid}>
@@ -1935,18 +1970,19 @@ export default function AdminSaasMasterPage() {
                   onChange={(e) => {
                     const id = e.target.value
                     const s = catalogoSistemas.find((x) => x.id === id)
+                    const origem = s?.origem
                     setNovoCliente((prev) => ({
                       ...prev,
                       sistema_id: id,
                       sistema_cliente: s?.nome || prev.sistema_cliente,
-                      criar_acesso: s?.origem === 'terceiro' ? false : prev.criar_acesso,
+                      criar_acesso: origem === 'connect' ? prev.criar_acesso : false,
                     }))
                   }}
                 >
                   <option style={styles.selectOption} value="">Selecione…</option>
                   {catalogoSistemas.map((s) => (
                     <option key={s.id} style={styles.selectOption} value={s.id}>
-                      {s.nome} ({labelOrigemSistemaBadge(s.origem)})
+                      {labelSistemaContratadoSelect({ nome: s.nome, origem: s.origem })}
                     </option>
                   ))}
                 </select>
@@ -1965,30 +2001,29 @@ export default function AdminSaasMasterPage() {
             </div>
           </div>
 
-          <label style={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={novoCliente.criar_acesso}
-              disabled={catalogoSistemas.find((s) => s.id === novoCliente.sistema_id)?.origem === 'terceiro'}
-              onChange={(e) => setNovoCliente((prev) => ({ ...prev, criar_acesso: e.target.checked }))}
-            />
-            <span>
-              <b>Criar acesso ao Connect</b>
-              <small>
-                {catalogoSistemas.find((s) => s.id === novoCliente.sistema_id)?.origem === 'terceiro'
-                  ? 'Sistema de terceiro: login Connect não se aplica.'
-                  : novoCliente.criar_acesso
-                    ? 'Cria usuário Auth + perfil Connect neste vínculo.'
-                    : adminTablesReadyFlag
-                      ? 'Cadastro administrativo sem login (admin_cliente + vínculo, sem Auth).'
-                      : MSG_ADMIN_TABLES_NOT_READY}
-              </small>
-            </span>
-          </label>
+          {deveExibirOpcaoCriarAcessoConnect(
+            catalogoSistemas.find((s) => s.id === novoCliente.sistema_id)?.origem,
+          ) ? (
+            <label style={styles.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={novoCliente.criar_acesso}
+                onChange={(e) => setNovoCliente((prev) => ({ ...prev, criar_acesso: e.target.checked }))}
+              />
+              <span>
+                <b>Criar acesso ao Connect</b>
+                <small>
+                  {novoCliente.criar_acesso
+                    ? TEXTO_AJUDA_CRIAR_ACESSO_CONNECT
+                    : TEXTO_AJUDA_SOMENTE_ADMIN}
+                </small>
+              </span>
+            </label>
+          ) : null}
 
           {!adminTablesReadyFlag && !novoCliente.criar_acesso ? (
             <div style={{ marginTop: 8, padding: '10px 12px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 8, fontSize: 13, color: '#9a3412' }}>
-              {MSG_ADMIN_TABLES_NOT_READY}
+              Catálogo comercial temporariamente indisponível. Selecione um sistema ou tente novamente.
             </div>
           ) : null}
 
@@ -2030,7 +2065,7 @@ export default function AdminSaasMasterPage() {
                 adminTablesReadyFlag && !novoCliente.sistema_id
                   ? 'Selecione o sistema'
                   : !novoCliente.criar_acesso && !adminTablesReadyFlag
-                    ? MSG_ADMIN_TABLES_NOT_READY
+                    ? 'Catálogo comercial temporariamente indisponível.'
                     : undefined
               }
             >

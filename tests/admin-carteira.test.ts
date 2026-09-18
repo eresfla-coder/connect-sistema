@@ -2,23 +2,35 @@
 import { describe, it } from 'node:test'
 import {
   acessoConnectDoVinculo,
+  avaliarSistemaParaContratacao,
   BACKFILL_PERFIS_CONNECT_APROVADOS,
   backfillRestritoAosUuidsAprovados,
   calcularMetricasCarteiraAdmin,
+  camposPersistidosAcessoVinculo,
+  CODIGO_ORIGEM_ACESSO_INVALIDO,
+  CODIGO_SISTEMA_INATIVO,
+  CODIGO_SISTEMA_INEXISTENTE,
   deveCriarAuthConnect,
   deveCriarPerfilConnect,
+  deveExibirOpcaoCriarAcessoConnect,
   deveLimparAdminClienteRecemCriado,
   filtrarItensCarteiraOficial,
   labelOrigemSistemaBadge,
   labelOrigemSistemaFormOption,
   labelOrigemSistemaLista,
+  labelSistemaContratadoSelect,
   montarItemLegadoLista,
   normalizarEmailAdmin,
   normalizarOrigemSistema,
   podeAlterarOrigemConnectParaTerceiro,
   podeOperarAuthConnect,
+  sistemasAtivosParaContratacao,
+  TEXTO_AJUDA_CRIAR_ACESSO_CONNECT,
+  TEXTO_AJUDA_SOMENTE_ADMIN,
+  textoAjudaCriarAcessoConnect,
   umClientePodeTerVariosSistemas,
   validarAcessoPorOrigem,
+  validarCriarAcessoComOrigem,
   validarIdsAcessoConnect,
   vinculoTemAcessoConnectIncompativelComTerceiro,
   type AdminListaItem,
@@ -350,5 +362,114 @@ describe('ADMIN.2.1 — invariantes carteira', () => {
     assert.equal(labelOrigemSistemaLista('terceiro'), 'TERCEIRO / REVENDIDO')
     assert.equal(labelOrigemSistemaFormOption('connect'), 'Próprio (Connect)')
     assert.equal(labelOrigemSistemaFormOption('terceiro'), 'Terceiro / Revendido')
+  })
+})
+
+describe('ADMIN.2.10 — Novo cliente com sistemas terceiro', () => {
+  const catalogo = [
+    { id: 's-connect', nome: 'Connect Sistema', origem: 'connect' as const, ativo: true },
+    { id: 's-info', nome: 'INFOSTART', origem: 'terceiro' as const, ativo: true },
+    { id: 's-off', nome: 'Inativo X', origem: 'terceiro' as const, ativo: false },
+  ]
+
+  it('1) catálogo connect+terceiro retorna ambos ativos', () => {
+    const ativos = sistemasAtivosParaContratacao(catalogo)
+    assert.equal(ativos.length, 2)
+    assert.ok(ativos.some((s) => s.origem === 'connect'))
+    assert.ok(ativos.some((s) => s.origem === 'terceiro' && s.nome === 'INFOSTART'))
+  })
+
+  it('2) sistema terceiro aparece no modelo do Novo cliente', () => {
+    const opcoes = sistemasAtivosParaContratacao(catalogo).map((s) =>
+      labelSistemaContratadoSelect({ nome: s.nome, origem: s.origem }),
+    )
+    assert.ok(opcoes.includes('Connect Sistema (PRÓPRIO)'))
+    assert.ok(opcoes.includes('INFOSTART (TERCEIRO)'))
+  })
+
+  it('3) terceiro nunca permite criar_acesso=true', () => {
+    const r = validarCriarAcessoComOrigem({ origem: 'terceiro', criarAcesso: true })
+    assert.equal(r.ok, false)
+    if (r.ok === false) assert.equal(r.code, CODIGO_ORIGEM_ACESSO_INVALIDO)
+    assert.equal(deveExibirOpcaoCriarAcessoConnect('terceiro'), false)
+  })
+
+  it('4) terceiro nunca chama createUser', () => {
+    assert.equal(deveChamarCreateUserAuthParaOrigem({ origem: 'terceiro', criarAcesso: true }), false)
+    assert.equal(deveChamarCreateUserAuthParaOrigem({ origem: 'terceiro', criarAcesso: false }), false)
+    assert.equal(deveCriarAuthConnect({ origem: 'terceiro', criarAcesso: true }), false)
+  })
+
+  it('5–7) terceiro persiste acesso_connect=false e IDs null', () => {
+    const p = camposPersistidosAcessoVinculo({
+      origem: 'terceiro',
+      criarAcesso: true,
+      authUserId: 'should-ignore',
+      perfilId: 'should-ignore',
+    })
+    assert.equal(p.criar_acesso, false)
+    assert.equal(p.acesso_connect, false)
+    assert.equal(p.auth_user_id, null)
+    assert.equal(p.perfil_id, null)
+  })
+
+  it('8) Connect sem login não cria Auth', () => {
+    assert.equal(deveChamarCreateUserAuthParaOrigem({ origem: 'connect', criarAcesso: false }), false)
+    const p = camposPersistidosAcessoVinculo({ origem: 'connect', criarAcesso: false })
+    assert.equal(p.acesso_connect, false)
+    assert.equal(p.auth_user_id, null)
+    assert.equal(p.perfil_id, null)
+  })
+
+  it('9) Connect com login mantém fluxo existente', () => {
+    assert.equal(deveChamarCreateUserAuthParaOrigem({ origem: 'connect', criarAcesso: true }), true)
+    assert.equal(deveCriarAuthConnect({ origem: 'connect', criarAcesso: true }), true)
+    assert.equal(deveExibirOpcaoCriarAcessoConnect('connect'), true)
+    const p = camposPersistidosAcessoVinculo({
+      origem: 'connect',
+      criarAcesso: true,
+      authUserId: 'u1',
+      perfilId: 'u1',
+    })
+    assert.equal(p.acesso_connect, true)
+    assert.equal(p.auth_user_id, 'u1')
+    assert.equal(p.perfil_id, 'u1')
+  })
+
+  it('10) sistema inativo não pode ser contratado', () => {
+    const r = avaliarSistemaParaContratacao({ id: 's-off', ativo: false })
+    assert.equal(r.ok, false)
+    if (r.ok === false) assert.equal(r.code, CODIGO_SISTEMA_INATIVO)
+    assert.equal(
+      sistemasAtivosParaContratacao(catalogo).some((s) => s.id === 's-off'),
+      false,
+    )
+  })
+
+  it('11) sistema inexistente é rejeitado', () => {
+    const r = avaliarSistemaParaContratacao(null)
+    assert.equal(r.ok, false)
+    if (r.ok === false) assert.equal(r.code, CODIGO_SISTEMA_INEXISTENTE)
+  })
+
+  it('12) texto técnico não aparece no modal', () => {
+    const textos = [
+      TEXTO_AJUDA_CRIAR_ACESSO_CONNECT,
+      TEXTO_AJUDA_SOMENTE_ADMIN,
+      textoAjudaCriarAcessoConnect(true),
+      textoAjudaCriarAcessoConnect(false),
+    ].join('\n')
+    for (const proibido of [
+      'admin_cliente',
+      'admin_cliente_sistemas',
+      'Auth',
+      'perfis',
+      'createUser',
+      'sem Auth',
+    ]) {
+      assert.equal(textos.includes(proibido), false, `não deve conter: ${proibido}`)
+    }
+    assert.match(TEXTO_AJUDA_CRIAR_ACESSO_CONNECT, /login/i)
+    assert.match(TEXTO_AJUDA_SOMENTE_ADMIN, /administrativo/i)
   })
 })

@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server'
 import { dataMaisDias } from '@/lib/access'
 import {
   acessoConnectDoVinculo,
+  avaliarSistemaParaContratacao,
   deveCriarAuthConnect,
   deveLimparAdminClienteRecemCriado,
   filtrarItensCarteiraOficial,
   normalizarEmailAdmin,
   validarAcessoPorOrigem,
+  validarCriarAcessoComOrigem,
   validarIdsAcessoConnect,
   type AdminListaItem,
   type OrigemSistemaAdmin,
@@ -234,7 +236,7 @@ export async function POST(req: Request) {
     const documento = String(body.documento || '').trim() || null
     const observacoes = String(body.observacoes || '').trim() || null
     const sistemaId = String(body.sistema_id || '').trim()
-    const criarAcesso = resolverCriarAcesso(body.criar_acesso)
+    const criarAcessoPedido = resolverCriarAcesso(body.criar_acesso)
     const tipo = body.tipo === 'ativo' ? 'ativo' : 'trial'
     const statusVinculo: StatusVinculoAdmin =
       body.status === 'ativo' || body.status === 'bloqueado' || body.status === 'cancelado' || body.status === 'inadimplente'
@@ -262,15 +264,39 @@ export async function POST(req: Request) {
       .eq('id', sistemaId)
       .maybeSingle()
 
-    if (sistemaError || !sistema?.id) {
-      return NextResponse.json({ ok: false, code: 'ADMIN_NOT_FOUND', error: 'Sistema não encontrado no catálogo.' }, { status: 404 })
+    if (sistemaError) {
+      logAdminApiError('carteira POST sistema', sistemaError)
+      const r = respostaErroPostgresAmigavel(sistemaError)
+      return NextResponse.json(r.body, { status: r.status })
     }
 
-    const origem = String(sistema.origem) as OrigemSistemaAdmin
+    const sistemaOk = avaliarSistemaParaContratacao(sistema)
+    if (sistemaOk.ok === false) {
+      const status = sistemaOk.code === 'ADMIN_NOT_FOUND' ? 404 : 422
+      return NextResponse.json(
+        { ok: false, code: sistemaOk.code, error: sistemaOk.error },
+        { status },
+      )
+    }
+
+    const origem = String(sistema!.origem) as OrigemSistemaAdmin
     if (origem !== 'connect' && origem !== 'terceiro') {
       return NextResponse.json({ ok: false, code: 'ADMIN_VALIDATION', error: 'Origem do sistema inválida.' }, { status: 400 })
     }
 
+    // Rejeitar combinação inválida ANTES de qualquer createUser / escrita Auth
+    const criarAcessoCheck = validarCriarAcessoComOrigem({
+      origem,
+      criarAcesso: criarAcessoPedido,
+    })
+    if (criarAcessoCheck.ok === false) {
+      return NextResponse.json(
+        { ok: false, code: criarAcessoCheck.code, error: criarAcessoCheck.error },
+        { status: 422 },
+      )
+    }
+
+    const criarAcesso = origem === 'terceiro' ? false : criarAcessoPedido
     const acessoConnect = acessoConnectDoVinculo({ origem, criarAcesso })
     const validacaoOrigem = validarAcessoPorOrigem({ origem, acessoConnect })
     if (validacaoOrigem.ok === false) {

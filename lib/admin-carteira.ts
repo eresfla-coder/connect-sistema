@@ -383,3 +383,107 @@ export function labelOrigemSistemaLista(origem: string): string {
 export function labelOrigemSistemaFormOption(origem: 'connect' | 'terceiro'): string {
   return origem === 'connect' ? 'Próprio (Connect)' : 'Terceiro / Revendido'
 }
+
+export const CODIGO_SISTEMA_INATIVO = 'ADMIN_SISTEMA_INATIVO'
+export const MSG_SISTEMA_INATIVO =
+  'Este sistema está inativo e não pode ser contratado para novos clientes.'
+
+export const CODIGO_SISTEMA_INEXISTENTE = 'ADMIN_NOT_FOUND'
+export const MSG_SISTEMA_INEXISTENTE = 'Sistema não encontrado no catálogo.'
+
+/** Valida sistema do catálogo antes de contratar (Novo cliente). */
+export function avaliarSistemaParaContratacao(
+  sistema: { id?: string | null; ativo?: boolean | null } | null | undefined,
+): { ok: true } | { ok: false; code: string; error: string } {
+  if (!sistema?.id) {
+    return { ok: false, code: CODIGO_SISTEMA_INEXISTENTE, error: MSG_SISTEMA_INEXISTENTE }
+  }
+  if (sistema.ativo === false) {
+    return { ok: false, code: CODIGO_SISTEMA_INATIVO, error: MSG_SISTEMA_INATIVO }
+  }
+  return { ok: true }
+}
+
+/**
+ * Campos persistidos no vínculo após decisão de origem + criar_acesso
+ * (antes de Auth — IDs só preenchidos se createUser ocorrer).
+ */
+export function camposPersistidosAcessoVinculo(params: {
+  origem: OrigemSistemaAdmin
+  criarAcesso: boolean
+  authUserId?: string | null
+  perfilId?: string | null
+}): {
+  criar_acesso: boolean
+  acesso_connect: boolean
+  auth_user_id: string | null
+  perfil_id: string | null
+} {
+  const criarAcesso =
+    params.origem === 'terceiro' ? false : params.criarAcesso === true
+  const acesso_connect = acessoConnectDoVinculo({
+    origem: params.origem,
+    criarAcesso,
+  })
+  if (!acesso_connect) {
+    return {
+      criar_acesso: false,
+      acesso_connect: false,
+      auth_user_id: null,
+      perfil_id: null,
+    }
+  }
+  return {
+    criar_acesso: true,
+    acesso_connect: true,
+    auth_user_id: params.authUserId ? String(params.authUserId) : null,
+    perfil_id: params.perfilId ? String(params.perfilId) : null,
+  }
+}
+
+/** Catálogo do select Novo cliente: somente ativos (connect + terceiro). */
+export function sistemasAtivosParaContratacao<T extends { ativo?: boolean | null }>(
+  sistemas: T[],
+): T[] {
+  return (sistemas || []).filter((s) => s.ativo !== false)
+}
+
+/** Label do select Novo cliente: nome original + badge de origem. */
+export function labelSistemaContratadoSelect(params: {
+  nome: string
+  origem: string
+}): string {
+  return `${params.nome} (${labelOrigemSistemaBadge(params.origem)})`
+}
+
+export const TEXTO_AJUDA_CRIAR_ACESSO_CONNECT =
+  'Criar login para este cliente acessar o Connect.'
+export const TEXTO_AJUDA_SOMENTE_ADMIN =
+  'Somente controle administrativo, sem acesso ao sistema.'
+
+/** Opção de login Connect só para origem=connect. */
+export function deveExibirOpcaoCriarAcessoConnect(origem: string | null | undefined): boolean {
+  return String(origem || '').toLowerCase() === 'connect'
+}
+
+export function textoAjudaCriarAcessoConnect(criarAcesso: boolean): string {
+  return criarAcesso ? TEXTO_AJUDA_CRIAR_ACESSO_CONNECT : TEXTO_AJUDA_SOMENTE_ADMIN
+}
+
+/**
+ * Terceiro + criar_acesso=true é combinação inválida (rejeitar na API).
+ * Não normalizar silenciosamente — o caller deve falhar com 422.
+ */
+export function validarCriarAcessoComOrigem(params: {
+  origem: OrigemSistemaAdmin
+  criarAcesso: boolean
+}): { ok: true } | { ok: false; code: string; error: string } {
+  if (params.origem === 'terceiro' && params.criarAcesso === true) {
+    return {
+      ok: false,
+      code: CODIGO_ORIGEM_ACESSO_INVALIDO,
+      error: MSG_TERCEIRO_SEM_ACESSO_CONNECT,
+    }
+  }
+  return { ok: true }
+}
