@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { dataMaisDias } from '@/lib/access'
 import {
   acessoConnectDoVinculo,
   avaliarSistemaParaContratacao,
@@ -14,6 +13,12 @@ import {
   type OrigemSistemaAdmin,
   type StatusVinculoAdmin,
 } from '@/lib/admin-carteira'
+import {
+  camposIniciaisVinculoComercial,
+  dataCalendarioLocal,
+  normalizarStatusInicial,
+  type StatusInicialComercial,
+} from '@/lib/admin-ciclo-comercial'
 import {
   COLS_ADMIN_CLIENTE,
   COLS_ADMIN_VINCULO,
@@ -48,11 +53,13 @@ type BodyCadastro = {
   documento?: string
   observacoes?: string
   sistema_id?: string
-  status?: StatusVinculoAdmin
+  status?: StatusVinculoAdmin | StatusInicialComercial
+  /** @deprecated ADMIN.3.1 — preferir status (ativo|trial|bloqueado) */
+  tipo?: 'trial' | 'ativo'
   valor?: string | number
   dia_vencimento?: number | string
   data_vencimento?: string
-  tipo?: 'trial' | 'ativo'
+  dias_trial?: number | string
   criar_acesso?: boolean
 }
 
@@ -148,6 +155,7 @@ export async function GET(req: Request) {
           valor: v.valor != null ? Number(v.valor) : null,
           data_vencimento: v.data_vencimento ? String(v.data_vencimento) : null,
           dia_vencimento: v.dia_vencimento != null ? Number(v.dia_vencimento) : null,
+          status_pagamento: v.status_pagamento ? String(v.status_pagamento) : null,
           acesso_connect: Boolean(v.acesso_connect),
           auth_user_id: v.auth_user_id ? String(v.auth_user_id) : null,
           perfil_id: v.perfil_id ? String(v.perfil_id) : null,
@@ -237,19 +245,11 @@ export async function POST(req: Request) {
     const observacoes = String(body.observacoes || '').trim() || null
     const sistemaId = String(body.sistema_id || '').trim()
     const criarAcessoPedido = resolverCriarAcesso(body.criar_acesso)
-    const tipo = body.tipo === 'ativo' ? 'ativo' : 'trial'
-    const statusVinculo: StatusVinculoAdmin =
-      body.status === 'ativo' || body.status === 'bloqueado' || body.status === 'cancelado' || body.status === 'inadimplente'
-        ? body.status
-        : tipo === 'ativo'
-          ? 'ativo'
-          : 'trial'
+    // ADMIN.3.1 — status inicial (ativo|trial|bloqueado). Compat: tipo legado → status.
+    const statusInicial = normalizarStatusInicial(
+      body.status || (body.tipo === 'ativo' ? 'ativo' : body.tipo === 'trial' ? 'trial' : 'trial'),
+    )
     const valor = parseValor(body.valor)
-    const diaVencimentoRaw = body.dia_vencimento != null ? Number(body.dia_vencimento) : null
-    const diaVencimento =
-      diaVencimentoRaw != null && Number.isFinite(diaVencimentoRaw) && diaVencimentoRaw >= 1 && diaVencimentoRaw <= 28
-        ? Math.floor(diaVencimentoRaw)
-        : null
 
     if (!email) {
       return NextResponse.json({ ok: false, code: 'ADMIN_VALIDATION', error: 'Informe o e-mail do cliente.' }, { status: 400 })
@@ -257,6 +257,33 @@ export async function POST(req: Request) {
     if (!sistemaId) {
       return NextResponse.json({ ok: false, code: 'ADMIN_VALIDATION', error: 'Selecione o sistema contratado.' }, { status: 400 })
     }
+
+    let camposComerciais
+    try {
+      camposComerciais = camposIniciaisVinculoComercial({
+        statusInicial,
+        hoje: dataCalendarioLocal(),
+        diaVencimento: body.dia_vencimento != null && body.dia_vencimento !== '' ? Number(body.dia_vencimento) : null,
+        diasTrial: body.dias_trial != null && body.dias_trial !== '' ? Number(body.dias_trial) : 7,
+        dataVencimentoOverride: body.data_vencimento || null,
+      })
+    } catch (e: unknown) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: 'ADMIN_VALIDATION',
+          error: e instanceof Error ? e.message : 'Dados comerciais inválidos.',
+        },
+        { status: 400 },
+      )
+    }
+
+    const statusVinculo = camposComerciais.status as StatusVinculoAdmin
+    const dataVencimento = camposComerciais.data_vencimento
+    const fimTrial = camposComerciais.fim_trial
+    const ultimoPagamento = camposComerciais.ultimo_pagamento
+    const diaVencimento = camposComerciais.dia_vencimento
+    const statusPagamento = camposComerciais.status_pagamento
 
     const { data: sistema, error: sistemaError } = await supabaseAdmin
       .from('admin_sistemas')
@@ -313,12 +340,6 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, code: idsOk.code, error: idsOk.error }, { status: 422 })
       }
     }
-
-    const dias = tipo === 'trial' ? 7 : 30
-    const dataVencimento =
-      String(body.data_vencimento || '').trim().slice(0, 10) || dataMaisDias(dias).slice(0, 10)
-    const fimTrial = statusVinculo === 'trial' ? dataVencimento : null
-    const ultimoPagamento = statusVinculo === 'ativo' ? dataMaisDias(0).slice(0, 10) : null
 
     // 1) admin_cliente
     {
@@ -469,9 +490,9 @@ export async function POST(req: Request) {
         telefone: telefone || null,
         valor_plano: valor,
         status: statusVinculo === 'trial' ? 'trial' : statusVinculo === 'bloqueado' ? 'bloqueado' : 'ativo',
-        ativo: true,
+        ativo: statusVinculo !== 'bloqueado',
         vencimento: dataVencimento,
-        status_pagamento: statusVinculo === 'trial' ? 'trial' : 'em_dia',
+        status_pagamento: statusPagamento,
         ultimo_pagamento: ultimoPagamento,
         sistema_cliente: String(sistema.nome || 'Connect Sistema'),
         observacoes,
@@ -512,10 +533,10 @@ export async function POST(req: Request) {
       valor,
       dia_vencimento: diaVencimento,
       data_vencimento: dataVencimento,
-      inicio: dataMaisDias(0).slice(0, 10),
+      inicio: camposComerciais.inicio,
       fim_trial: fimTrial,
       observacoes,
-      status_pagamento: statusVinculo === 'trial' ? 'trial' : 'em_dia',
+      status_pagamento: statusPagamento,
       ultimo_pagamento: ultimoPagamento,
       acesso_connect: acessoConnect,
       auth_user_id: authUserId,

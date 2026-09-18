@@ -23,6 +23,10 @@ import {
   TEXTO_AJUDA_SOMENTE_ADMIN,
   deveExibirOpcaoCriarAcessoConnect,
 } from '@/lib/admin-carteira'
+import {
+  montarMensagemCobrancaPorOrigem,
+  calcularMetricasCicloComercial,
+} from '@/lib/admin-ciclo-comercial'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
@@ -35,7 +39,7 @@ import {
 import { resolverCriarAcesso } from '@/lib/admin-criar-acesso'
 
 type FiltroStatus = 'todos' | 'trial' | 'ativo' | 'bloqueado' | 'vencidos' | 'risco'
-type TipoNovoCliente = 'trial' | 'ativo'
+type StatusInicialNovo = 'ativo' | 'trial' | 'bloqueado'
 
 type PerfilAdmin = {
   id: string
@@ -58,8 +62,15 @@ type PerfilAdmin = {
   auth_user_id_reset?: string | null
   pode_reset_senha?: boolean
   sistemasResumo?: Array<{
+    vinculo_id?: string
+    sistema_id?: string | null
     nome: string
     origem: string
+    status?: string | null
+    valor?: number | null
+    data_vencimento?: string | null
+    dia_vencimento?: number | null
+    status_pagamento?: string | null
     acesso_connect?: boolean
     legado_texto?: boolean
   }>
@@ -88,7 +99,8 @@ type NovoClienteForm = {
   nome_empresa: string
   telefone: string
   valor_plano: string
-  tipo: TipoNovoCliente
+  status_inicial: StatusInicialNovo
+  dias_trial: string
   sistema_cliente: string
   sistema_id: string
   observacoes: string
@@ -98,15 +110,18 @@ type NovoClienteForm = {
 
 type EditForm = {
   id: string
+  admin_cliente_id?: string | null
+  vinculo_id?: string | null
   email: string
   nome_empresa: string
   telefone: string
   valor_plano: string
   status: string
-  plano_tier: string
   vencimento: string
+  dia_vencimento: string
   sistema_cliente: string
   observacoes: string
+  origem?: string
 }
 
 type UsoSistema = {
@@ -334,12 +349,13 @@ export default function AdminSaasMasterPage() {
     nome_empresa: '',
     telefone: '',
     valor_plano: '49,90',
-    tipo: 'trial',
+    status_inicial: 'ativo',
+    dias_trial: '7',
     sistema_cliente: 'Connect Sistema',
     sistema_id: '',
     observacoes: '',
     criar_acesso: true,
-    dia_vencimento: '',
+    dia_vencimento: '10',
   })
 
   useEffect(() => {
@@ -494,9 +510,42 @@ export default function AdminSaasMasterPage() {
     return Boolean(cliente.auth_user_id_reset)
   }
 
-  /** ID operacional Auth/perfis para ações legadas (trial/ativar/bloquear/renovar). */
+  /** ID operacional Auth/perfis para ações legadas Connect (reset senha / sessão). */
   function idOperacionalPerfil(cliente: PerfilAdmin): string | null {
     return cliente.auth_user_id_reset || (cliente.fonte === 'legado' ? cliente.id : null)
+  }
+
+  function vinculoPrincipal(cliente: PerfilAdmin) {
+    return cliente.sistemasResumo?.[0] || null
+  }
+
+  async function acaoComercialCarteira(
+    cliente: PerfilAdmin,
+    acao: 'renovar' | 'marcar_pago' | 'bloquear' | 'desbloquear' | 'atualizar',
+    extra?: Record<string, unknown> & { vinculo_id?: string },
+  ) {
+    const adminId = cliente.admin_cliente_id || (cliente.fonte === 'admin' ? cliente.id : null)
+    const vinculoId = extra?.vinculo_id || vinculoPrincipal(cliente)?.vinculo_id
+    if (!adminId || !vinculoId) {
+      throw new Error('Cliente sem vínculo comercial. Cadastre o sistema contratado na carteira.')
+    }
+    const { data: { session } } = await supabase.auth.getSession()
+    const accessToken = session?.access_token
+    if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
+
+    const { vinculo_id: _ignored, ...rest } = extra || {}
+    const response = await fetch(`/api/admin/carteira/${encodeURIComponent(adminId)}/sistemas`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ vinculo_id: vinculoId, acao, ...rest }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(payload?.error || 'Não foi possível concluir a ação comercial.')
+    await refreshClientes()
+    return payload
   }
 
   function clienteObs(cliente: PerfilAdmin) {
@@ -596,8 +645,15 @@ export default function AdminSaasMasterPage() {
               auth_user_id_reset: authId,
               pode_reset_senha: Boolean(item.pode_reset_senha),
               sistemasResumo: sistemas.map((s) => ({
+                vinculo_id: s.vinculo_id ? String(s.vinculo_id) : undefined,
+                sistema_id: s.sistema_id ? String(s.sistema_id) : null,
                 nome: String(s.nome || ''),
                 origem: String(s.origem || ''),
+                status: s.status ? String(s.status) : null,
+                valor: s.valor != null ? Number(s.valor) : null,
+                data_vencimento: s.data_vencimento ? String(s.data_vencimento) : null,
+                dia_vencimento: s.dia_vencimento != null ? Number(s.dia_vencimento) : null,
+                status_pagamento: s.status_pagamento ? String(s.status_pagamento) : null,
                 acesso_connect: Boolean(s.acesso_connect),
                 legado_texto: Boolean(s.legado_texto),
               })),
@@ -720,7 +776,7 @@ export default function AdminSaasMasterPage() {
       const clienteLocal = clientes.find((c) => c.id === id)
       const perfilId = clienteLocal ? idOperacionalPerfil(clienteLocal) : id
       if (!perfilId) {
-        throw new Error('Cliente da carteira sem Auth/perfil vinculado. Ajuste o vínculo Connect antes.')
+        throw new Error('Cliente da carteira sem Auth/perfil vinculado. Use as ações comerciais da carteira.')
       }
 
       const response = await fetch('/api/admin/clientes', {
@@ -750,39 +806,89 @@ export default function AdminSaasMasterPage() {
     }
   }
 
-  async function trial7(id: string) {
-    await atualizarCliente(id, {
-      status: 'trial',
-      ativo: true,
-      vencimento: dataMaisDias(7),
-      status_pagamento: 'trial',
-      ultimo_pagamento: null,
-    })
+  async function trial7(cliente: PerfilAdmin) {
+    try {
+      setAcaoProcessandoId(cliente.id)
+      if (cliente.fonte === 'admin') {
+        const hoje = new Date()
+        const fim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() + 7)
+        const iso = `${fim.getFullYear()}-${String(fim.getMonth() + 1).padStart(2, '0')}-${String(fim.getDate()).padStart(2, '0')}`
+        await acaoComercialCarteira(cliente, 'atualizar', { status: 'trial', data_vencimento: iso })
+        return
+      }
+      await atualizarCliente(cliente.id, {
+        status: 'trial',
+        ativo: true,
+        vencimento: dataMaisDias(7),
+        status_pagamento: 'trial',
+        ultimo_pagamento: null,
+      })
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : 'Falha no trial.')
+    } finally {
+      setAcaoProcessandoId(null)
+    }
   }
 
-  async function ativar(dias: number, id: string) {
-    await atualizarCliente(id, {
-      status: 'ativo',
-      ativo: true,
-      plano_tier: 'starter',
-      vencimento: dataMaisDias(dias),
-      status_pagamento: 'em_dia',
-      ultimo_pagamento: hojeISO(),
-    })
+  async function ativar(dias: number, cliente: PerfilAdmin) {
+    try {
+      setAcaoProcessandoId(cliente.id)
+      if (cliente.fonte === 'admin') {
+        await acaoComercialCarteira(cliente, 'desbloquear')
+        return
+      }
+      await atualizarCliente(cliente.id, {
+        status: 'ativo',
+        ativo: true,
+        plano_tier: 'starter',
+        vencimento: dataMaisDias(dias),
+        status_pagamento: 'em_dia',
+        ultimo_pagamento: hojeISO(),
+      })
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : 'Falha ao ativar.')
+    } finally {
+      setAcaoProcessandoId(null)
+    }
   }
 
-  async function marcarComoPago(id: string) {
-    await atualizarCliente(id, {
-      status: 'ativo',
-      ativo: true,
-      plano_tier: 'starter',
-      vencimento: dataMaisDias(30),
-      status_pagamento: 'pago',
-      ultimo_pagamento: hojeISO(),
-    })
+  async function marcarComoPago(cliente: PerfilAdmin) {
+    try {
+      setAcaoProcessandoId(cliente.id)
+      if (cliente.fonte === 'admin') {
+        await acaoComercialCarteira(cliente, 'marcar_pago')
+        return
+      }
+      await atualizarCliente(cliente.id, {
+        status: 'ativo',
+        ativo: true,
+        plano_tier: 'starter',
+        vencimento: dataMaisDias(30),
+        status_pagamento: 'pago',
+        ultimo_pagamento: hojeISO(),
+      })
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : 'Falha ao marcar pagamento.')
+    } finally {
+      setAcaoProcessandoId(null)
+    }
   }
 
   function abrirRenovacaoManual(cliente: PerfilAdmin) {
+    if (cliente.fonte === 'admin') {
+      void (async () => {
+        try {
+          setAcaoProcessandoId(cliente.id)
+          await acaoComercialCarteira(cliente, 'renovar')
+          alert('Vínculo renovado: próximo vencimento avançado pelo dia comercial.')
+        } catch (error: unknown) {
+          alert(error instanceof Error ? error.message : 'Falha ao renovar.')
+        } finally {
+          setAcaoProcessandoId(null)
+        }
+      })()
+      return
+    }
     setRenovarCliente(cliente)
     setRenovarResultado(null)
     setRenovarOpen(true)
@@ -839,12 +945,23 @@ export default function AdminSaasMasterPage() {
     setRenovarResultado(null)
   }
 
-  async function bloquear(id: string) {
-    await atualizarCliente(id, {
-      status: 'bloqueado',
-      ativo: false,
-      status_pagamento: 'bloqueado',
-    })
+  async function bloquear(cliente: PerfilAdmin) {
+    try {
+      setAcaoProcessandoId(cliente.id)
+      if (cliente.fonte === 'admin') {
+        await acaoComercialCarteira(cliente, 'bloquear')
+        return
+      }
+      await atualizarCliente(cliente.id, {
+        status: 'bloqueado',
+        ativo: false,
+        status_pagamento: 'bloqueado',
+      })
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : 'Falha ao bloquear.')
+    } finally {
+      setAcaoProcessandoId(null)
+    }
   }
 
   async function excluirCliente(cliente: PerfilAdmin) {
@@ -912,29 +1029,18 @@ export default function AdminSaasMasterPage() {
 
   function cobrarWhatsapp(cliente: PerfilAdmin) {
     const nome = cliente.nome_empresa || cliente.email || 'cliente'
-    const sistema = clienteSistema(cliente)
-    const plano = planoCliente(cliente)
-    const risco = riscoCliente(cliente)
-    const statusAtual = String(cliente.status || '').toLowerCase()
-    const atrasado = risco.nivel === 'critico' || statusAtual === 'bloqueado'
-    const linkPagamento = `${SITE_URL}/assinatura`
-    const statusTexto = atrasado ? 'Atrasado' : statusAtual === 'ativo' ? 'Ativo' : (cliente.status || 'Pendente')
-    const mensagem = [
-      `Olá, ${nome}!`,
-      '',
-      `Passando para lembrar sobre sua mensalidade do ${sistema}.`,
-      `Plano: ${plano.nome}`,
-      `Valor: ${toMoney(cliente.valor_plano || 0)}`,
-      `Vencimento: ${cliente.vencimento || '-'}`,
-      `Status: ${statusTexto}`,
-      `Link de pagamento/assinatura: ${linkPagamento}`,
-      '',
-      atrasado
-        ? 'Seu acesso pode ser bloqueado por atraso. Me chama aqui para regularizar agora.'
-        : 'Para manter o acesso e o suporte em dia, me chama por aqui para regularizar.',
-      '',
-      '— Connect Sistema',
-    ].join('\n')
+    const v = vinculoPrincipal(cliente)
+    const origem = (v?.origem === 'connect' ? 'connect' : 'terceiro') as 'connect' | 'terceiro'
+    const sistema = v?.nome || clienteSistema(cliente)
+    const { mensagem } = montarMensagemCobrancaPorOrigem({
+      origem,
+      nome,
+      sistema,
+      valor: Number(v?.valor ?? cliente.valor_plano ?? 0),
+      vencimento: v?.data_vencimento || cliente.vencimento,
+      status: v?.status || cliente.status,
+      siteUrl: SITE_URL,
+    })
 
     const resultado = abrirWhatsappUrl(montarUrlWhatsapp(whatsappDestino(cliente.telefone), mensagem))
     if (resultado.mostrarLink && resultado.url) {
@@ -1059,17 +1165,21 @@ export default function AdminSaasMasterPage() {
   }
 
   function abrirEdicao(cliente: PerfilAdmin) {
+    const v = vinculoPrincipal(cliente)
     setEditForm({
       id: cliente.id,
+      admin_cliente_id: cliente.admin_cliente_id || (cliente.fonte === 'admin' ? cliente.id : null),
+      vinculo_id: v?.vinculo_id || null,
       email: cliente.email || '',
       nome_empresa: cliente.nome_empresa || '',
       telefone: cliente.telefone || '',
-      valor_plano: String(cliente.valor_plano ?? '49.90').replace('.', ','),
-      status: cliente.status || 'trial',
-      plano_tier: String(cliente.plano_tier || 'starter'),
-      vencimento: cliente.vencimento || '',
-      sistema_cliente: clienteSistema(cliente),
+      valor_plano: String(v?.valor ?? cliente.valor_plano ?? '49.90').replace('.', ','),
+      status: v?.status || cliente.status || 'ativo',
+      vencimento: v?.data_vencimento || cliente.vencimento || '',
+      dia_vencimento: v?.dia_vencimento != null ? String(v.dia_vencimento) : '',
+      sistema_cliente: v?.nome || clienteSistema(cliente),
       observacoes: clienteObs(cliente),
+      origem: v?.origem,
     })
     setEditOpen(true)
   }
@@ -1091,29 +1201,51 @@ export default function AdminSaasMasterPage() {
       writeMeta(meta)
       setMetaLocal(meta)
 
-      const statusEdicao = editForm.status
+      const clienteLocal = clientes.find((c) => c.id === editForm.id)
       const valorPlano = parseMoney(editForm.valor_plano)
-      const definitivo = valorPlano === 0 || editForm.vencimento === '2099-12-31'
-      const planoTier = definitivo
-        ? 'empresa'
-        : statusEdicao === 'ativo'
-          ? (editForm.plano_tier && editForm.plano_tier !== 'trial' ? editForm.plano_tier : 'starter')
-          : editForm.plano_tier
 
-      await atualizarCliente(editForm.id, {
-        email: editForm.email.trim().toLowerCase(),
-        nome_empresa: editForm.nome_empresa.trim() || null,
-        telefone: normalizePhone(editForm.telefone) || null,
-        valor_plano: valorPlano,
-        status: definitivo ? 'ativo' : statusEdicao,
-        plano_tier: planoTier,
-        ativo: statusEdicao !== 'bloqueado',
-        vencimento: definitivo ? '2099-12-31' : editForm.vencimento || null,
-        status_pagamento: definitivo || statusEdicao === 'ativo' ? 'em_dia' : statusEdicao === 'trial' ? 'trial' : undefined,
-        ultimo_pagamento: definitivo || statusEdicao === 'ativo' ? hojeISO() : undefined,
-        sistema_cliente: editForm.sistema_cliente || 'Connect Sistema',
-        observacoes: editForm.observacoes || null,
-      })
+      if (clienteLocal?.fonte === 'admin' && editForm.admin_cliente_id && editForm.vinculo_id) {
+        const { data: { session } } = await supabase.auth.getSession()
+        const accessToken = session?.access_token
+        if (!accessToken) throw new Error('Sessão inválida.')
+
+        const patchCli = await fetch(`/api/admin/carteira/${encodeURIComponent(editForm.admin_cliente_id)}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            email: editForm.email.trim().toLowerCase(),
+            nome_empresa: editForm.nome_empresa.trim() || null,
+            telefone: normalizePhone(editForm.telefone) || null,
+            observacoes: editForm.observacoes || null,
+          }),
+        })
+        const payloadCli = await patchCli.json().catch(() => ({}))
+        if (!patchCli.ok) throw new Error(payloadCli?.error || 'Falha ao atualizar cliente.')
+
+        await acaoComercialCarteira(clienteLocal, 'atualizar', {
+          vinculo_id: editForm.vinculo_id || undefined,
+          status: editForm.status,
+          valor: valorPlano,
+          dia_vencimento: editForm.dia_vencimento || undefined,
+          data_vencimento: editForm.vencimento || undefined,
+          observacoes: editForm.observacoes || null,
+        })
+      } else {
+        await atualizarCliente(editForm.id, {
+          email: editForm.email.trim().toLowerCase(),
+          nome_empresa: editForm.nome_empresa.trim() || null,
+          telefone: normalizePhone(editForm.telefone) || null,
+          valor_plano: valorPlano,
+          status: editForm.status,
+          ativo: editForm.status !== 'bloqueado',
+          vencimento: editForm.vencimento || null,
+          sistema_cliente: editForm.sistema_cliente || 'Connect Sistema',
+          observacoes: editForm.observacoes || null,
+        })
+      }
 
       setEditOpen(false)
       setEditForm(null)
@@ -1171,11 +1303,15 @@ export default function AdminSaasMasterPage() {
             observacoes: novoCliente.observacoes,
             sistema_id: novoCliente.sistema_id,
             valor: novoCliente.valor_plano,
-            tipo: novoCliente.tipo,
+            status: novoCliente.status_inicial,
+            dias_trial: novoCliente.status_inicial === 'trial' ? novoCliente.dias_trial : undefined,
             criar_acesso: origem === 'terceiro' ? false : criarAcesso,
             dia_vencimento: novoCliente.dia_vencimento || undefined,
           }
-        : { ...novoCliente }
+        : {
+            ...novoCliente,
+            tipo: novoCliente.status_inicial === 'ativo' ? 'ativo' : 'trial',
+          }
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -1218,12 +1354,13 @@ export default function AdminSaasMasterPage() {
         nome_empresa: '',
         telefone: '',
         valor_plano: '49,90',
-        tipo: 'trial',
+        status_inicial: 'ativo',
+        dias_trial: '7',
         sistema_cliente: prev.sistema_cliente || 'Connect Sistema',
         sistema_id: prev.sistema_id,
         observacoes: '',
         criar_acesso: true,
-        dia_vencimento: '',
+        dia_vencimento: prev.dia_vencimento || '10',
       }))
 
       setModalOpen(true)
@@ -1245,39 +1382,46 @@ export default function AdminSaasMasterPage() {
     }
   }
 
-  // ADMIN.2.5 — KPIs da carteira comercial (admin_*). Não inclui os 29 perfis.
+  // ADMIN.3.1 — KPIs por vínculos comerciais (MRR só ativo; RECEBIDO só pago/em_dia)
   const resumo = useMemo(() => {
-    const total = clientes.length
+    const metricas = calcularMetricasCicloComercial({
+      clientes: clientes.map((c) => ({
+        data_criacao: c.data_criacao,
+        vinculos: (c.sistemasResumo || []).map((s) => ({
+          status: s.status || c.status,
+          valor: s.valor ?? c.valor_plano,
+          data_vencimento: s.data_vencimento || c.vencimento,
+          status_pagamento: s.status_pagamento || c.status_pagamento,
+        })),
+      })),
+    })
     const ativos = clientes.filter((c) => String(c.status || '').toLowerCase() === 'ativo').length
-    const trials = clientes.filter((c) => statusTrialAdmin(c.status)).length
-    const bloqueados = clientes.filter((c) => String(c.status || '').toLowerCase() === 'bloqueado' || c.ativo === false).length
-    const vencidos = clientes.filter((c) => !isPermanent(c) && (daysUntil(c.vencimento) || 0) < 0).length
-    const vencendo7 = clientes.filter((c) => {
-      const dias = daysUntil(c.vencimento)
-      return !isPermanent(c) && dias !== null && dias >= 0 && dias <= 7
-    }).length
-    const risco = vencidos + bloqueados + vencendo7
-    const mrr = clientes
-      .filter((c) => String(c.status || '').toLowerCase() !== 'bloqueado' && c.ativo !== false)
-      .reduce((acc, c) => acc + Number(c.valor_plano || 0), 0)
-    const faturamentoAnual = clientes
-      .filter((c) => String(c.status || '').toLowerCase() !== 'bloqueado' && c.ativo !== false && Number(c.valor_plano || 0) >= 400)
-      .reduce((acc, c) => acc + Number(c.valor_plano || 0), 0)
-    const recebidoMes = clientes
-      .filter((c) => ['em_dia', 'pago'].includes(String(c.status_pagamento || '').toLowerCase()))
-      .reduce((acc, c) => acc + Number(c.valor_plano || 0), 0)
-    const novos30 = clientes.filter((c) => {
-      const criado = c.data_criacao ? new Date(c.data_criacao) : null
-      return !!criado && !Number.isNaN(criado.getTime()) && Date.now() - criado.getTime() <= 30 * 86400000
-    }).length
     const renovacoesRecentes = clientes
       .filter((c) => !!c.ultimo_pagamento)
       .sort((a, b) => new Date(b.ultimo_pagamento || '').getTime() - new Date(a.ultimo_pagamento || '').getTime())
       .slice(0, 6)
-    const arpa = ativos > 0 ? mrr / ativos : 0
-    const conversaoTrial = trials + ativos > 0 ? Math.round((ativos / (trials + ativos)) * 100) : 0
-    const churnRisco = total > 0 ? Math.round((risco / total) * 100) : 0
-    return { total, ativos, trials, bloqueados, vencidos, vencendo7, risco, mrr, faturamentoAnual, recebidoMes, novos30, renovacoesRecentes, arpa, conversaoTrial, churnRisco }
+    const risco = metricas.vencidos + metricas.bloqueados + metricas.vencendo7
+    const arpa = ativos > 0 ? metricas.mrr / ativos : 0
+    const conversaoTrial =
+      metricas.trials + ativos > 0 ? Math.round((ativos / (metricas.trials + ativos)) * 100) : 0
+    const churnRisco = metricas.totalClientes > 0 ? Math.round((risco / metricas.totalClientes) * 100) : 0
+    return {
+      total: metricas.totalClientes,
+      ativos,
+      trials: metricas.trials,
+      bloqueados: metricas.bloqueados,
+      vencidos: metricas.vencidos,
+      vencendo7: metricas.vencendo7,
+      risco,
+      mrr: metricas.mrr,
+      faturamentoAnual: metricas.anual,
+      recebidoMes: metricas.recebido,
+      novos30: metricas.novos,
+      renovacoesRecentes,
+      arpa,
+      conversaoTrial,
+      churnRisco,
+    }
   }, [clientes])
 
   const sistemasDisponiveis = useMemo(() => {
@@ -1398,12 +1542,13 @@ export default function AdminSaasMasterPage() {
                       nome_empresa: '',
                       telefone: '',
                       valor_plano: '49,90',
-                      tipo: 'trial',
+                      status_inicial: 'ativo',
+                      dias_trial: '7',
                       sistema_cliente: defaultSistema?.nome || 'Connect Sistema',
                       sistema_id: defaultSistema?.id || '',
                       observacoes: '',
                       criar_acesso: defaultSistema?.origem === 'connect',
-                      dia_vencimento: '',
+                      dia_vencimento: '10',
                     })
                     setModalOpen(true)
                   })()
@@ -1852,15 +1997,13 @@ export default function AdminSaasMasterPage() {
                 >
                   {clientePodeReset(desktopActionMenu.cliente) ? 'Resetar senha / WhatsApp' : 'Sem login Connect'}
                 </button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); trial7(desktopActionMenu.cliente.id) }}>Trial 7 dias</button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); void marcarComoPago(desktopActionMenu.cliente.id) }}>Marcar ativo / pago</button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); ativar(30, desktopActionMenu.cliente.id) }}>Ativar +30 dias</button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); ativar(60, desktopActionMenu.cliente.id) }}>Ativar +60 dias</button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); ativar(365, desktopActionMenu.cliente.id) }}>Renovar anual</button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); abrirRenovacaoManual(desktopActionMenu.cliente) }}>Renovar sistema / Marcar pago</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); void trial7(desktopActionMenu.cliente) }}>Trial 7 dias</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); void marcarComoPago(desktopActionMenu.cliente) }}>Marcar pago</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); void ativar(30, desktopActionMenu.cliente) }}>Desbloquear / Ativar</button>
+                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); abrirRenovacaoManual(desktopActionMenu.cliente) }}>Renovar ciclo</button>
                 <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); mensagemUpgrade(desktopActionMenu.cliente) }}>Oferta upgrade</button>
                 <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); setBackupModalCliente(desktopActionMenu.cliente) }}>Backups do cliente</button>
-                <button style={styles.menuDanger} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { if (confirm('Bloquear este cliente?')) { setDesktopActionMenu(null); void bloquear(desktopActionMenu.cliente.id) } }}>Bloquear</button>
+                <button style={styles.menuDanger} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { if (confirm('Bloquear este vínculo comercial?')) { setDesktopActionMenu(null); void bloquear(desktopActionMenu.cliente) } }}>Bloquear</button>
                 <button style={styles.menuDelete} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); void excluirCliente(desktopActionMenu.cliente) }}>Excluir cliente</button>
               </div>
             </div>,
@@ -1886,8 +2029,8 @@ export default function AdminSaasMasterPage() {
                 <div style={styles.mobileActionGroupTitle}>Ações principais</div>
                 <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); abrirEdicao(acaoClienteMobile) }}>Editar cliente</button>
                 <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); cobrarWhatsapp(acaoClienteMobile) }}>Cobrar WhatsApp</button>
-                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); abrirRenovacaoManual(acaoClienteMobile) }}>Renovar sistema / Marcar pago</button>
-                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); void marcarComoPago(acaoClienteMobile.id) }}>Marcar ativo / pago</button>
+                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); abrirRenovacaoManual(acaoClienteMobile) }}>Renovar ciclo</button>
+                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); void marcarComoPago(acaoClienteMobile) }}>Marcar pago</button>
               </div>
 
               <div style={styles.mobileActionGroup}>
@@ -1899,10 +2042,8 @@ export default function AdminSaasMasterPage() {
                 >
                   {clientePodeReset(acaoClienteMobile) ? 'Resetar senha / WhatsApp' : 'Sem login Connect'}
                 </button>
-                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); trial7(acaoClienteMobile.id) }}>Trial 7 dias</button>
-                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); ativar(30, acaoClienteMobile.id) }}>Ativar +30 dias</button>
-                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); ativar(60, acaoClienteMobile.id) }}>Ativar +60 dias</button>
-                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); ativar(365, acaoClienteMobile.id) }}>Renovar anual</button>
+                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); void trial7(acaoClienteMobile) }}>Trial 7 dias</button>
+                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); void ativar(30, acaoClienteMobile) }}>Desbloquear / Ativar</button>
               </div>
 
               <div style={styles.mobileActionGroup}>
@@ -1916,9 +2057,10 @@ export default function AdminSaasMasterPage() {
                   style={styles.mobileActionDanger}
                   disabled={isPermanent(acaoClienteMobile)}
                   onClick={() => {
-                    if (confirm('Bloquear este cliente?')) {
+                    const alvo = acaoClienteMobile
+                    if (confirm('Bloquear este vínculo comercial?')) {
                       setAcaoClienteMobile(null)
-                      void bloquear(acaoClienteMobile.id)
+                      void bloquear(alvo)
                     }
                   }}
                 >
@@ -1993,12 +2135,30 @@ export default function AdminSaasMasterPage() {
             <Input label="Valor mensal" value={novoCliente.valor_plano} onChange={(v) => setNovoCliente((prev) => ({ ...prev, valor_plano: v }))} placeholder="49,90" />
             <Input label="Dia vencimento (1–28)" value={novoCliente.dia_vencimento} onChange={(v) => setNovoCliente((prev) => ({ ...prev, dia_vencimento: v }))} placeholder="10" />
             <div>
-              <div style={styles.inputLabel}>Tipo inicial</div>
-              <select style={{ ...styles.input, width: '100%' }} value={novoCliente.tipo} onChange={(e) => setNovoCliente((prev) => ({ ...prev, tipo: e.target.value as TipoNovoCliente }))}>
-                <option style={styles.selectOption} value="trial">Trial 7 dias</option>
-                <option style={styles.selectOption} value="ativo">Ativo 30 dias</option>
+              <div style={styles.inputLabel}>Status inicial</div>
+              <select
+                style={{ ...styles.input, width: '100%' }}
+                value={novoCliente.status_inicial}
+                onChange={(e) =>
+                  setNovoCliente((prev) => ({
+                    ...prev,
+                    status_inicial: e.target.value as StatusInicialNovo,
+                  }))
+                }
+              >
+                <option style={styles.selectOption} value="ativo">Ativo</option>
+                <option style={styles.selectOption} value="trial">Trial</option>
+                <option style={styles.selectOption} value="bloqueado">Bloqueado</option>
               </select>
             </div>
+            {novoCliente.status_inicial === 'trial' ? (
+              <Input
+                label="Dias de teste"
+                value={novoCliente.dias_trial}
+                onChange={(v) => setNovoCliente((prev) => ({ ...prev, dias_trial: v }))}
+                placeholder="7"
+              />
+            ) : null}
           </div>
 
           {deveExibirOpcaoCriarAcessoConnect(
@@ -2078,30 +2238,27 @@ export default function AdminSaasMasterPage() {
       {editOpen && editForm && (
         <Modal maxWidth={760} onClose={() => { setEditOpen(false); setEditForm(null) }}>
           <div style={styles.modalTitle}>Editar cliente</div>
-          <div style={styles.modalSub}>Altere dados comerciais, valor mensal, sistema contratado, status e vencimento.</div>
+          <div style={styles.modalSub}>Dados comerciais do cliente e do vínculo selecionado. A origem do sistema não é alterada aqui.</div>
 
           <div style={styles.formGrid}>
             <Input label="E-mail" value={editForm.email} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, email: v }) : prev)} placeholder="cliente@email.com" />
             <Input label="Nome / empresa" value={editForm.nome_empresa} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, nome_empresa: v }) : prev)} placeholder="Nome da empresa" />
             <Input label="Telefone / WhatsApp" value={editForm.telefone} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, telefone: v }) : prev)} placeholder="84999999999" />
-            <Input label="Sistema contratado" value={editForm.sistema_cliente} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, sistema_cliente: v }) : prev)} placeholder="Connect Sistema" />
+            <Input
+              label={editForm.origem ? `Sistema (${labelOrigemSistemaBadge(editForm.origem)})` : 'Sistema contratado'}
+              value={editForm.sistema_cliente}
+              onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, sistema_cliente: v }) : prev)}
+              placeholder="Connect Sistema"
+            />
             <Input label="Valor mensal" value={editForm.valor_plano} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, valor_plano: v }) : prev)} placeholder="49,90" />
-            <Input label="Vencimento" value={editForm.vencimento} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, vencimento: v }) : prev)} placeholder="2026-05-30" />
+            <Input label="Dia vencimento (1–28)" value={editForm.dia_vencimento} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, dia_vencimento: v }) : prev)} placeholder="10" />
+            <Input label="Próximo vencimento" value={editForm.vencimento} onChange={(v) => setEditForm((prev) => prev ? ({ ...prev, vencimento: v }) : prev)} placeholder="2026-10-10" />
             <div>
-              <div style={styles.inputLabel}>Status</div>
+              <div style={styles.inputLabel}>Status do vínculo</div>
               <select style={{ ...styles.input, width: '100%' }} value={editForm.status} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, status: e.target.value }) : prev)}>
+                <option style={styles.selectOption} value="ativo">Ativo</option>
                 <option style={styles.selectOption} value="trial">Trial</option>
-                <option style={styles.selectOption} value="ativo">Ativo / Pago</option>
                 <option style={styles.selectOption} value="bloqueado">Bloqueado</option>
-              </select>
-            </div>
-            <div>
-              <div style={styles.inputLabel}>Plano</div>
-              <select style={{ ...styles.input, width: '100%' }} value={editForm.plano_tier} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, plano_tier: e.target.value }) : prev)}>
-                <option style={styles.selectOption} value="trial">Trial</option>
-                <option style={styles.selectOption} value="starter">Starter</option>
-                <option style={styles.selectOption} value="pro">Pro</option>
-                <option style={styles.selectOption} value="empresa">Empresa</option>
               </select>
             </div>
           </div>

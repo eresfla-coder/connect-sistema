@@ -186,6 +186,7 @@ export type SistemaListaItem = {
   valor: number | null
   data_vencimento: string | null
   dia_vencimento?: number | null
+  status_pagamento?: string | null
   acesso_connect: boolean
   auth_user_id: string | null
   perfil_id: string | null
@@ -304,25 +305,29 @@ function vencimentoPermanente(item: ItemMetricasCarteira): boolean {
   return v.startsWith('2099') || Number(item.valor_plano || 0) === 0
 }
 
-/** KPIs da carteira admin_* — NÃO conta os 29 perfis legados. */
+/** KPIs da carteira admin_* — NÃO conta os 29 perfis legados.
+ * ADMIN.3.1: MRR só status ativo; RECEBIDO só em_dia/pago; vencidos/vencendo ignoram bloqueados.
+ */
 export function calcularMetricasCarteiraAdmin(itens: ItemMetricasCarteira[]): MetricasCarteiraAdmin {
   const total = itens.length
   const trials = itens.filter((c) => /trial|teste/i.test(String(c.status || ''))).length
   const bloqueados = itens.filter(
-    (c) => String(c.status || '').toLowerCase() === 'bloqueado' || c.ativo === false,
+    (c) => String(c.status || '').toLowerCase() === 'bloqueado',
   ).length
   const vencidos = itens.filter((c) => {
+    if (String(c.status || '').toLowerCase() === 'bloqueado') return false
     if (vencimentoPermanente(c)) return false
     const dias = diasAteVencimento(c.vencimento)
     return dias !== null && dias < 0
   }).length
   const vencendo7 = itens.filter((c) => {
+    if (String(c.status || '').toLowerCase() === 'bloqueado') return false
     if (vencimentoPermanente(c)) return false
     const dias = diasAteVencimento(c.vencimento)
     return dias !== null && dias >= 0 && dias <= 7
   }).length
   const mrr = itens
-    .filter((c) => String(c.status || '').toLowerCase() !== 'bloqueado' && c.ativo !== false)
+    .filter((c) => String(c.status || '').toLowerCase() === 'ativo')
     .reduce((acc, c) => acc + Number(c.valor_plano || 0), 0)
   const recebidoMes = itens
     .filter((c) => ['em_dia', 'pago'].includes(String(c.status_pagamento || '').toLowerCase()))
