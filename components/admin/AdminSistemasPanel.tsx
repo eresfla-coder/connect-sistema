@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { supabase } from '@/lib/supabase-browser'
-import { MSG_ADMIN_TABLES_NOT_READY } from '@/lib/admin-carteira'
+import { labelOrigemSistemaFormOption, labelOrigemSistemaLista } from '@/lib/admin-carteira'
 
 type SistemaAdmin = {
   id: string
@@ -126,8 +126,7 @@ export default function AdminSistemasPanel({ isMobile }: Props) {
     return (
       <section style={{ ...styles.panel, ...(isMobile ? styles.panelMobile : {}) }}>
         <h2 style={styles.title}>Sistemas</h2>
-        <p style={styles.sub}>{MSG_ADMIN_TABLES_NOT_READY}</p>
-        <p style={styles.hint}>Arquivo: docs/admin2-migration.sql (ainda não executar neste round se não aprovado).</p>
+        <p style={styles.sub}>O catálogo de sistemas ainda não está disponível neste ambiente.</p>
       </section>
     )
   }
@@ -137,7 +136,7 @@ export default function AdminSistemasPanel({ isMobile }: Props) {
       <div style={styles.top}>
         <div>
           <h2 style={styles.title}>Sistemas</h2>
-          <p style={styles.sub}>Catálogo comercial: Connect ou terceiro. Não hardcodado — cadastre aqui.</p>
+          <p style={styles.sub}>Cadastre os produtos que você administra ou revende.</p>
         </div>
         <button style={styles.refresh} onClick={() => void carregar()} disabled={loading}>
           {loading ? 'Atualizando…' : 'Atualizar'}
@@ -153,7 +152,7 @@ export default function AdminSistemasPanel({ isMobile }: Props) {
             style={styles.input}
             value={form.nome}
             onChange={(e) => setForm((p) => ({ ...p, nome: e.target.value }))}
-            placeholder="Ex.: Connect Sistema, PDV XYZ"
+            placeholder="Ex.: Connect Sistema, Infostart"
           />
         </label>
         <label style={styles.label}>
@@ -163,12 +162,12 @@ export default function AdminSistemasPanel({ isMobile }: Props) {
             value={form.origem}
             onChange={(e) => setForm((p) => ({ ...p, origem: e.target.value as 'connect' | 'terceiro' }))}
           >
-            <option value="connect">Sistema Connect</option>
-            <option value="terceiro">Sistema de terceiro</option>
+            <option value="connect">{labelOrigemSistemaFormOption('connect')}</option>
+            <option value="terceiro">{labelOrigemSistemaFormOption('terceiro')}</option>
           </select>
         </label>
         <label style={styles.label}>
-          URL (opcional)
+          URL do sistema (opcional)
           <input
             style={styles.input}
             value={form.url}
@@ -200,7 +199,7 @@ export default function AdminSistemasPanel({ isMobile }: Props) {
               <div style={styles.nome}>{s.nome}</div>
               <div style={styles.meta}>
                 <span style={s.origem === 'connect' ? styles.badgeConnect : styles.badgeTerceiro}>
-                  {s.origem === 'connect' ? 'CONNECT' : 'TERCEIRO'}
+                  {labelOrigemSistemaLista(s.origem)}
                 </span>
                 <span style={s.ativo ? styles.badgeAtivo : styles.badgeInativo}>
                   {s.ativo ? 'Ativo' : 'Inativo'}

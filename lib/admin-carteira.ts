@@ -364,3 +364,22 @@ export function backfillRestritoAosUuidsAprovados(ids: string[]): boolean {
 export function umClientePodeTerVariosSistemas(): boolean {
   return true
 }
+
+/** Labels comerciais (UI). Valores persistidos: connect | terceiro. */
+export function labelOrigemSistemaBadge(origem: string): string {
+  const o = String(origem || '').toLowerCase()
+  if (o === 'connect') return 'PRÓPRIO'
+  if (o === 'terceiro') return 'TERCEIRO'
+  return o ? o.toUpperCase() : '—'
+}
+
+export function labelOrigemSistemaLista(origem: string): string {
+  const o = String(origem || '').toLowerCase()
+  if (o === 'connect') return 'PRÓPRIO (CONNECT)'
+  if (o === 'terceiro') return 'TERCEIRO / REVENDIDO'
+  return o ? o.toUpperCase() : '—'
+}
+
+export function labelOrigemSistemaFormOption(origem: 'connect' | 'terceiro'): string {
+  return origem === 'connect' ? 'Próprio (Connect)' : 'Terceiro / Revendido'
+}

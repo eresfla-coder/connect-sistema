@@ -15,6 +15,7 @@ import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetrica
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
 import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
 import AdminSistemasPanel from '@/components/admin/AdminSistemasPanel'
+import { labelOrigemSistemaBadge } from '@/lib/admin-carteira'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
@@ -474,7 +475,7 @@ export default function AdminSaasMasterPage() {
     if (cliente.sistemasResumo && cliente.sistemasResumo.length > 0) {
       return cliente.sistemasResumo
         .map((s) => {
-          const tag = s.origem === 'connect' ? 'CONNECT' : 'TERCEIRO'
+          const tag = labelOrigemSistemaBadge(s.origem)
           return `${s.nome} (${tag})`
         })
         .join(' · ')
@@ -834,7 +835,7 @@ export default function AdminSaasMasterPage() {
     const confirmar =
       cliente.fonte === 'admin'
         ? confirm(
-            `Remover ${nome} da carteira comercial?\n\nAuth/login e perfis NÃO serão apagados — apenas o cadastro admin_*.`,
+            `Remover ${nome} da carteira comercial?\n\nO acesso de login do cliente NÃO será apagado — apenas o cadastro comercial.`,
           )
         : confirm(
             `Excluir definitivamente ${nome}?\n\nEssa ação remove o cliente do painel admin e também tenta remover o acesso de login.`,
@@ -1401,15 +1402,18 @@ export default function AdminSaasMasterPage() {
           </div>
         </section>
 
-        <AdminAssinaturasMetricas />
-
-        <section style={{ ...styles.kpiGrid, ...(isMobileAdmin ? styles.kpiGridMobile : {}) }}>
+        <section style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 950, letterSpacing: '.16em', textTransform: 'uppercase', color: '#86efac', marginBottom: 10 }}>
+            Carteira comercial
+          </div>
+          <div style={{ ...styles.kpiGrid, ...(isMobileAdmin ? styles.kpiGridMobile : {}), marginTop: 0 }}>
           <KpiCard titulo="Clientes" valor={String(resumo.total)} detalhe={`${resumo.ativos} ativos`} cor="#60a5fa" icone="👥" />
           <KpiCard titulo="MRR" valor={toMoney(resumo.mrr)} detalhe={`ARPA ${toMoney(resumo.arpa)}`} cor="#22c55e" icone="💰" />
           <KpiCard titulo="Recebido" valor={toMoney(resumo.recebidoMes)} detalhe="pagamentos confirmados" cor="#a78bfa" icone="✅" />
           <KpiCard titulo="Anual" valor={toMoney(resumo.faturamentoAnual)} detalhe="contratos anuais ativos" cor="#f59e0b" icone="🏆" />
           <KpiCard titulo="Trials" valor={String(resumo.trials)} detalhe={`${resumo.conversaoTrial}% conversão base`} cor="#facc15" icone="🧪" />
           <KpiCard titulo="Novos" valor={String(resumo.novos30)} detalhe="clientes em 30 dias" cor="#38bdf8" icone="📈" />
+          </div>
         </section>
 
         {isMobileAdmin ? (
@@ -1465,10 +1469,10 @@ export default function AdminSaasMasterPage() {
               <div>
                 <h2 style={{ ...styles.panelTitle, ...(isMobileAdmin ? styles.panelTitleMobile : {}) }}>Clientes</h2>
                 <p style={styles.panelSub}>
-                  Carteira comercial oficial (`admin_*`). Perfis/Auth legados não entram automaticamente.
-                  {adminTablesReadyFlag
-                    ? ' Um cliente aparece aqui só com vínculo em admin_cliente_sistemas.'
-                    : ' Migration admin_* ausente ou indisponível — lista vazia até as tabelas estarem prontas.'}
+                  Clientes e sistemas administrados pela Connect.
+                  {!adminTablesReadyFlag
+                    ? ' Catálogo comercial temporariamente indisponível neste ambiente.'
+                    : ''}
                 </p>
               </div>
               <div style={{ ...styles.toolbar, ...(isMobileAdmin ? styles.toolbarMobile : {}) }}>
@@ -1746,11 +1750,14 @@ export default function AdminSaasMasterPage() {
           <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>
             <div style={styles.panelTop}>
               <div>
-                <h2 style={styles.panelTitle}>Uso do sistema e crescimento</h2>
-                <p style={styles.panelSub}>Leitura rápida do volume operacional dos clientes dentro do Connect.</p>
+                <h2 style={styles.panelTitle}>Uso e crescimento</h2>
+                <p style={styles.panelSub}>
+                  Métricas operacionais do Connect (assinaturas e volume de uso). São independentes da carteira comercial acima.
+                </p>
               </div>
             </div>
-            <div style={styles.usageGrid}>
+            <AdminAssinaturasMetricas />
+            <div style={{ ...styles.usageGrid, marginTop: 18 }}>
               <UsageCard label="Clientes cadastrados" value={uso.clientes} icon="👥" />
               <UsageCard label="Produtos/serviços" value={uso.produtos} icon="📦" />
               <UsageCard label="Orçamentos" value={uso.orcamentos} icon="💰" />
@@ -1939,7 +1946,7 @@ export default function AdminSaasMasterPage() {
                   <option style={styles.selectOption} value="">Selecione…</option>
                   {catalogoSistemas.map((s) => (
                     <option key={s.id} style={styles.selectOption} value={s.id}>
-                      {s.nome} ({s.origem === 'connect' ? 'CONNECT' : 'TERCEIRO'})
+                      {s.nome} ({labelOrigemSistemaBadge(s.origem)})
                     </option>
                   ))}
                 </select>

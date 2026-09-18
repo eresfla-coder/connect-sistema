@@ -9,6 +9,9 @@ import {
   deveCriarPerfilConnect,
   deveLimparAdminClienteRecemCriado,
   filtrarItensCarteiraOficial,
+  labelOrigemSistemaBadge,
+  labelOrigemSistemaFormOption,
+  labelOrigemSistemaLista,
   montarItemLegadoLista,
   normalizarEmailAdmin,
   normalizarOrigemSistema,
@@ -338,5 +341,14 @@ describe('ADMIN.2.1 — invariantes carteira', () => {
     assert.ok(ids.includes('dd1f6a30-73a4-459f-9335-96dc56523089'))
     assert.ok(ids.includes('eda88f6d-1417-4ade-9d79-4ea50ea4c6b6'))
     assert.ok(ids.includes('3ec1947d-2ec0-4d96-8d15-2a11da10ea70'))
+  })
+
+  it('26) labels comerciais de origem (UI)', () => {
+    assert.equal(labelOrigemSistemaBadge('connect'), 'PRÓPRIO')
+    assert.equal(labelOrigemSistemaBadge('terceiro'), 'TERCEIRO')
+    assert.equal(labelOrigemSistemaLista('connect'), 'PRÓPRIO (CONNECT)')
+    assert.equal(labelOrigemSistemaLista('terceiro'), 'TERCEIRO / REVENDIDO')
+    assert.equal(labelOrigemSistemaFormOption('connect'), 'Próprio (Connect)')
+    assert.equal(labelOrigemSistemaFormOption('terceiro'), 'Terceiro / Revendido')
   })
 })

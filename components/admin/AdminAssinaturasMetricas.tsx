@@ -51,7 +51,7 @@ export default function AdminAssinaturasMetricas() {
     void carregar()
   }, [])
 
-  if (loading) return <div style={{ padding: 16, fontWeight: 800, color: '#64748b' }}>Carregando métricas de assinatura...</div>
+  if (loading) return <div style={{ padding: 16, fontWeight: 800, color: '#64748b' }}>Carregando métricas operacionais...</div>
   if (erro) return <div style={{ padding: 16, color: '#b45309', fontWeight: 800 }}>{erro}</div>
   if (!metricas) return null
 
@@ -67,8 +67,11 @@ export default function AdminAssinaturasMetricas() {
   return (
     <section style={{ marginTop: 18, borderRadius: 22, padding: 18, background: 'rgba(15,23,42,.55)', border: '1px solid rgba(148,163,184,.25)' }}>
       <div style={{ fontSize: 11, fontWeight: 950, letterSpacing: '.16em', textTransform: 'uppercase', color: '#93c5fd', marginBottom: 10 }}>
-        Assinatura SaaS • Métricas
+        Métricas operacionais Connect
       </div>
+      <p style={{ margin: '0 0 10px', fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
+        Baseadas em assinaturas do Connect — não confundir com a carteira comercial.
+      </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
         {cards.map((c) => (
           <div key={c.label} style={{ borderRadius: 14, padding: 12, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)' }}>
