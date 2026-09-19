@@ -224,8 +224,12 @@ describe('ADMIN.2.1 — invariantes carteira', () => {
       valorPlano: 1,
       vencimento: '2026-01-01',
       accessLink: '',
+      origem: 'connect',
+      criarAcesso: false,
+      diaVencimento: 10,
     })
-    assert.match(convite, /login/i)
+    assert.match(convite, /cadastro comercial no Connect/i)
+    assert.doesNotMatch(convite, /foi registrado/i)
   })
 
   it('21) carteira oficial não lista automaticamente perfis legados', () => {

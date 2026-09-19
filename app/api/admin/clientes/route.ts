@@ -529,6 +529,8 @@ export async function POST(req: Request) {
       vencimento,
       accessLink,
       senhaInicial: mode === 'created' ? senhaInicial : null,
+      origem: 'connect',
+      criarAcesso: true,
     })
 
     const whatsappUrl = telefone

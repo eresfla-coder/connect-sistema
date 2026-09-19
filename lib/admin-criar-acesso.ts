@@ -50,6 +50,108 @@ export function deveLimparAuthRecemCriado(params: {
   return params.authRecemCriadoNestaRequest === true && params.falhaPosterior === true
 }
 
+function formatarValorMensagem(valor: number | string | null | undefined): string {
+  const n = Number(String(valor ?? '0').replace(',', '.'))
+  const v = Number.isFinite(n) ? n : 0
+  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+/**
+ * ADMIN.3.5 — mensagem WhatsApp do cadastro (rascunho ou pós-API).
+ * Terceiro: só comercial, sem Connect/login/assinatura/MP.
+ * Pré-salvamento: nunca afirma que “foi registrado”.
+ */
+export function montarMensagemWhatsappCadastroCliente(params: {
+  origem: OrigemSistemaAdminLocal
+  criarAcesso: boolean
+  nomeSaudacao: string
+  sistemaCliente: string
+  valorPlano?: number | string | null
+  diaVencimento?: number | string | null
+  email?: string
+  accessLink?: string
+  senhaInicial?: string | null
+  /** rascunho = modal pré-salvar; confirmado = resposta da API após persistir */
+  fase?: 'rascunho' | 'confirmado'
+}): string {
+  const origem = params.origem === 'connect' ? 'connect' : 'terceiro'
+  const nome = String(params.nomeSaudacao || 'cliente').trim() || 'cliente'
+  const sistema = String(params.sistemaCliente || 'Sistema').trim() || 'Sistema'
+  const valorFmt = formatarValorMensagem(params.valorPlano)
+  const dia =
+    params.diaVencimento != null && String(params.diaVencimento).trim() !== ''
+      ? String(params.diaVencimento).trim()
+      : null
+  const fase = params.fase || 'rascunho'
+  const criarAcesso = params.criarAcesso === true
+
+  if (origem === 'terceiro') {
+    return [
+      `Olá, ${nome}!`,
+      '',
+      'Segue o resumo do seu cadastro comercial:',
+      `Sistema: ${sistema}`,
+      `Valor mensal: ${valorFmt}`,
+      dia ? `Dia de vencimento: ${dia}` : null,
+      '',
+      'Em caso de dúvidas, estamos à disposição.',
+    ]
+      .filter((l) => l != null)
+      .join('\n')
+  }
+
+  // Connect próprio
+  if (criarAcesso) {
+    if (fase === 'confirmado' && params.senhaInicial) {
+      return [
+        `Olá, ${nome}!`,
+        '',
+        `Seu acesso ao ${sistema} foi criado com sucesso.`,
+        '',
+        `Login: ${params.email || ''}`,
+        `Senha provisória: ${params.senhaInicial}`,
+        '',
+        `Acesse: ${params.accessLink || ''}`.trim(),
+        '',
+        'Entre com esses dados e depois altere sua senha no painel.',
+        '',
+        '— Connect Sistema',
+      ].join('\n')
+    }
+    return [
+      `Olá, ${nome}!`,
+      '',
+      'Segue o resumo do seu cadastro no Connect:',
+      `Sistema: ${sistema}`,
+      `Valor mensal: ${valorFmt}`,
+      dia ? `Dia de vencimento: ${dia}` : null,
+      params.email ? `E-mail de login: ${params.email}` : null,
+      '',
+      'O acesso ao painel Connect será liberado conforme o cadastro.',
+      '',
+      '— Connect Sistema',
+    ]
+      .filter((l) => l != null)
+      .join('\n')
+  }
+
+  // Connect sem login
+  return [
+    `Olá, ${nome}!`,
+    '',
+    'Segue o resumo do seu cadastro comercial no Connect:',
+    `Sistema: ${sistema}`,
+    `Valor mensal: ${valorFmt}`,
+    dia ? `Dia de vencimento: ${dia}` : null,
+    '',
+    'Neste momento o cadastro é comercial; o acesso de login ao sistema não está sendo criado agora.',
+    '',
+    '— Connect Sistema',
+  ]
+    .filter((l) => l != null)
+    .join('\n')
+}
+
 export function montarConviteClienteAdmin(params: {
   mode: ModoCriacaoClienteAdmin
   nomeSaudacao: string
@@ -59,46 +161,54 @@ export function montarConviteClienteAdmin(params: {
   vencimento: string
   accessLink: string
   senhaInicial?: string | null
+  origem?: OrigemSistemaAdminLocal
+  criarAcesso?: boolean
+  diaVencimento?: number | string | null
 }): string {
-  const { mode, nomeSaudacao, email, sistemaCliente, accessLink, senhaInicial } = params
+  const origem = params.origem === 'terceiro' ? 'terceiro' : 'connect'
+  const criarAcesso =
+    params.criarAcesso != null
+      ? params.criarAcesso === true
+      : params.mode === 'created' || params.mode === 'existing'
 
-  if (mode === 'admin_only') {
-    return [
-      `Olá, ${nomeSaudacao}!`,
-      '',
-      `Seu cadastro comercial do ${sistemaCliente} foi registrado.`,
-      '',
-      'Este vínculo ainda não inclui login no Connect.',
-      '',
-      '— Connect Sistema',
-    ].join('\n')
+  if (params.mode === 'admin_only' || origem === 'terceiro' || !criarAcesso) {
+    return montarMensagemWhatsappCadastroCliente({
+      origem,
+      criarAcesso: origem === 'connect' && criarAcesso,
+      nomeSaudacao: params.nomeSaudacao,
+      sistemaCliente: params.sistemaCliente,
+      valorPlano: params.valorPlano,
+      diaVencimento: params.diaVencimento,
+      email: params.email,
+      accessLink: params.accessLink,
+      senhaInicial: params.senhaInicial,
+      fase: 'confirmado',
+    })
   }
 
-  if (mode === 'created') {
-    return [
-      `Olá, ${nomeSaudacao}!`,
-      '',
-      `Seu acesso ao ${sistemaCliente} foi criado com sucesso.`,
-      '',
-      `Login: ${email}`,
-      `Senha provisória: ${senhaInicial || ''}`,
-      '',
-      `Acesse: ${accessLink}`,
-      '',
-      'Entre com esses dados e depois altere sua senha no painel.',
-      '',
-      '— Connect Sistema',
-    ].join('\n')
+  if (params.mode === 'created') {
+    return montarMensagemWhatsappCadastroCliente({
+      origem: 'connect',
+      criarAcesso: true,
+      nomeSaudacao: params.nomeSaudacao,
+      sistemaCliente: params.sistemaCliente,
+      valorPlano: params.valorPlano,
+      diaVencimento: params.diaVencimento,
+      email: params.email,
+      accessLink: params.accessLink,
+      senhaInicial: params.senhaInicial,
+      fase: 'confirmado',
+    })
   }
 
   return [
-    `Olá, ${nomeSaudacao}!`,
+    `Olá, ${params.nomeSaudacao}!`,
     '',
-    `Seu cadastro no ${sistemaCliente} já existia e foi atualizado.`,
+    `Seu cadastro no ${params.sistemaCliente} já existia e foi atualizado.`,
     '',
-    `Login: ${email}`,
+    `Login: ${params.email}`,
     '',
-    `Acesse: ${accessLink}`,
+    `Acesse: ${params.accessLink}`,
     '',
     'Se você não lembrar a senha, use a opção "Esqueci minha senha" na tela de login.',
     '',

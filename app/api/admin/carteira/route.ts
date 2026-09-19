@@ -590,6 +590,9 @@ export async function POST(req: Request) {
       vencimento: dataVencimento,
       accessLink: accessLink || siteUrl(),
       senhaInicial: mode === 'created' ? senhaInicial : null,
+      origem,
+      criarAcesso: acessoConnect,
+      diaVencimento,
     })
 
     const whatsappUrl = telefone

@@ -36,7 +36,10 @@ import {
   type FaixaSemUso,
   type StatusUsoSessao,
 } from '@/lib/sessao-uso'
-import { resolverCriarAcesso } from '@/lib/admin-criar-acesso'
+import {
+  montarMensagemWhatsappCadastroCliente,
+  resolverCriarAcesso,
+} from '@/lib/admin-criar-acesso'
 
 type FiltroStatus = 'todos' | 'trial' | 'ativo' | 'bloqueado' | 'vencidos' | 'risco'
 type StatusInicialNovo = 'ativo' | 'trial' | 'bloqueado'
@@ -1382,6 +1385,28 @@ export default function AdminSaasMasterPage() {
     }
   }
 
+  const mensagemWhatsappNovoCliente = useMemo(() => {
+    if (inviteText) return inviteText
+    const sistemaSel = catalogoSistemas.find((s) => s.id === novoCliente.sistema_id)
+    const origemRaw = sistemaSel?.origem
+    const origem = origemRaw === 'connect' ? 'connect' : origemRaw === 'terceiro' ? 'terceiro' : 'connect'
+    const criarAcesso =
+      origem === 'terceiro' ? false : resolverCriarAcesso(novoCliente.criar_acesso)
+    return montarMensagemWhatsappCadastroCliente({
+      origem,
+      criarAcesso,
+      nomeSaudacao: novoCliente.nome_empresa.trim() || novoCliente.email.trim() || 'cliente',
+      sistemaCliente: sistemaSel?.nome || novoCliente.sistema_cliente || 'Sistema',
+      valorPlano: novoCliente.valor_plano,
+      diaVencimento: novoCliente.dia_vencimento || null,
+      email: novoCliente.email.trim() || undefined,
+      fase: 'rascunho',
+    })
+  }, [inviteText, catalogoSistemas, novoCliente])
+
+  const telefoneWhatsappNovoCliente = whatsappDestino(invitePhone || novoCliente.telefone)
+  const podeEnviarWhatsappNovoCliente = Boolean(telefoneWhatsappNovoCliente)
+
   // ADMIN.3.1 — KPIs por vínculos comerciais (MRR só ativo; RECEBIDO só pago/em_dia)
   const resumo = useMemo(() => {
     const metricas = calcularMetricasCicloComercial({
@@ -2200,16 +2225,47 @@ export default function AdminSaasMasterPage() {
             </div>
           ) : null}
 
-          {inviteText ? (
-            <div style={styles.inviteBox}>
-              <div style={styles.inviteTitle}>Texto pronto para WhatsApp</div>
-              <textarea readOnly value={inviteText} style={{ ...styles.inviteTextarea, minHeight: 140 }} />
-              <div style={styles.inviteButtons}>
-                <button style={styles.whatsButton} onClick={() => void copiarTexto(inviteText, 'Texto copiado com sucesso.')}>Copiar texto</button>
-                <button style={styles.copyButton} onClick={() => abrirWhatsappUrl(montarUrlWhatsapp(whatsappDestino(invitePhone || novoCliente.telefone), inviteText))}>Enviar WhatsApp</button>
-              </div>
+          <div style={styles.inviteBox}>
+            <div style={styles.inviteTitle}>Mensagem para o cliente</div>
+            <textarea readOnly value={mensagemWhatsappNovoCliente} style={{ ...styles.inviteTextarea, minHeight: 140 }} />
+            <div style={styles.inviteButtons}>
+              <button
+                style={styles.whatsButton}
+                onClick={() => void copiarTexto(mensagemWhatsappNovoCliente, 'Texto copiado com sucesso.')}
+              >
+                Copiar texto
+              </button>
+              <button
+                style={{
+                  ...styles.copyButton,
+                  opacity: podeEnviarWhatsappNovoCliente ? 1 : 0.45,
+                  cursor: podeEnviarWhatsappNovoCliente ? 'pointer' : 'not-allowed',
+                }}
+                disabled={!podeEnviarWhatsappNovoCliente}
+                title={
+                  podeEnviarWhatsappNovoCliente
+                    ? undefined
+                    : 'Informe o telefone / WhatsApp do cliente para enviar.'
+                }
+                onClick={() => {
+                  if (!podeEnviarWhatsappNovoCliente) {
+                    alert('Informe o telefone / WhatsApp do cliente para enviar a mensagem.')
+                    return
+                  }
+                  abrirWhatsappUrl(
+                    montarUrlWhatsapp(telefoneWhatsappNovoCliente, mensagemWhatsappNovoCliente),
+                  )
+                }}
+              >
+                Enviar WhatsApp
+              </button>
             </div>
-          ) : null}
+            {!podeEnviarWhatsappNovoCliente ? (
+              <div style={{ marginTop: 8, fontSize: 12, color: 'rgba(255,255,255,0.65)' }}>
+                Informe o telefone para habilitar o envio no WhatsApp. Copiar texto permanece disponível.
+              </div>
+            ) : null}
+          </div>
 
           <div style={styles.modalActions}>
             <button style={styles.cancelButton} onClick={() => { setModalOpen(false); setInviteLink(''); setInviteText(''); setInvitePhone('') }} disabled={savingNew}>Fechar</button>
