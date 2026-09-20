@@ -30,7 +30,6 @@ import {
   corStatusPagamentoComercial,
   podeAcionarMarcarPago,
   deveBloquearReentradaAcaoComercial,
-  feedbackAposMarcarPago,
 } from '@/lib/admin-ciclo-comercial'
 import {
   LABEL_EXCLUIR_CLIENTE_CARTEIRA,
@@ -39,6 +38,15 @@ import {
   type AcaoMenuCarteiraId,
   type ItemMenuCarteira,
 } from '@/lib/admin-menu-acoes'
+import {
+  feedbackAposPatchComercial,
+  feedbackAposRefreshComercial,
+  interpretarExcecaoPatchComercial,
+  interpretarRespostaPatchComercial,
+  mensagemSucessoAcaoComercial,
+  resolverFeedbackAcaoComercialCompleta,
+  type AcaoComercialEscrita,
+} from '@/lib/admin-acao-comercial-ux'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
@@ -342,7 +350,10 @@ export default function AdminSaasMasterPage() {
   const [desktopActionMenuAnimIn, setDesktopActionMenuAnimIn] = useState(false)
   const [acaoProcessandoId, setAcaoProcessandoId] = useState<string | null>(null)
   const acaoProcessandoRef = useRef<string | null>(null)
-  const [feedbackAdmin, setFeedbackAdmin] = useState<{ tipo: 'sucesso' | 'erro'; mensagem: string } | null>(null)
+  const [feedbackAdmin, setFeedbackAdmin] = useState<{
+    tipo: 'sucesso' | 'erro' | 'aviso'
+    mensagem: string
+  } | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState<EditForm | null>(null)
@@ -565,7 +576,7 @@ export default function AdminSaasMasterPage() {
   }
 
   function executarAcaoMenuCarteira(cliente: PerfilAdmin, acaoId: AcaoMenuCarteiraId) {
-    if (acaoProcessandoId === cliente.id && acaoId !== 'marcar_pago') return
+    if (acaoProcessandoId === cliente.id) return
     switch (acaoId) {
       case 'editar':
         setDesktopActionMenu(null)
@@ -623,7 +634,7 @@ export default function AdminSaasMasterPage() {
     return base
   }
 
-  function mostrarFeedbackAdmin(tipo: 'sucesso' | 'erro', mensagem: string) {
+  function mostrarFeedbackAdmin(tipo: 'sucesso' | 'erro' | 'aviso', mensagem: string) {
     setFeedbackAdmin({ tipo, mensagem })
   }
 
@@ -641,11 +652,15 @@ export default function AdminSaasMasterPage() {
     setAcaoProcessandoId(null)
   }
 
-  async function acaoComercialCarteira(
+  /**
+   * ADMIN.3.14 — PATCH comercial SEM refresh misturado.
+   * Caller faz refresh em bloco separado após escrita confirmada.
+   */
+  async function patchAcaoComercialCarteira(
     cliente: PerfilAdmin,
     acao: 'renovar' | 'marcar_pago' | 'bloquear' | 'desbloquear' | 'atualizar',
     extra?: Record<string, unknown> & { vinculo_id?: string },
-  ) {
+  ): Promise<{ ok: true; payload: unknown }> {
     const adminId = cliente.admin_cliente_id || (cliente.fonte === 'admin' ? cliente.id : null)
     const vinculoId = extra?.vinculo_id || vinculoPrincipal(cliente)?.vinculo_id
     if (!adminId || !vinculoId) {
@@ -656,18 +671,104 @@ export default function AdminSaasMasterPage() {
     if (!accessToken) throw new Error('Sessão inválida. Faça login novamente.')
 
     const { vinculo_id: _ignored, ...rest } = extra || {}
-    const response = await fetch(`/api/admin/carteira/${encodeURIComponent(adminId)}/sistemas`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ vinculo_id: vinculoId, acao, ...rest }),
-    })
+    let response: Response
+    try {
+      response = await fetch(`/api/admin/carteira/${encodeURIComponent(adminId)}/sistemas`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ vinculo_id: vinculoId, acao, ...rest }),
+      })
+    } catch (error: unknown) {
+      const resultado = interpretarExcecaoPatchComercial(error)
+      if (resultado.kind === 'sem_resposta') {
+        throw Object.assign(new Error('Failed to fetch'), { __semResposta: true })
+      }
+      throw error instanceof Error ? error : new Error('Não foi possível concluir a ação comercial.')
+    }
+
     const payload = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(payload?.error || 'Não foi possível concluir a ação comercial.')
-    await refreshClientes()
-    return payload
+    const interpretado = interpretarRespostaPatchComercial({
+      ok: response.ok,
+      status: response.status,
+      errorMessage: (payload as { error?: string })?.error,
+      payload,
+    })
+    if (interpretado.kind !== 'ok') {
+      throw new Error(interpretado.kind === 'http_error' ? interpretado.mensagem : 'Não foi possível concluir a ação comercial.')
+    }
+    return { ok: true, payload }
+  }
+
+  /** Compat: ações que ainda esperam patch+refresh (ex.: atualizar na edição). */
+  async function acaoComercialCarteira(
+    cliente: PerfilAdmin,
+    acao: 'renovar' | 'marcar_pago' | 'bloquear' | 'desbloquear' | 'atualizar',
+    extra?: Record<string, unknown> & { vinculo_id?: string },
+  ) {
+    const result = await patchAcaoComercialCarteira(cliente, acao, extra)
+    try {
+      await refreshClientes()
+    } catch {
+      // refresh separado — não mascara escrita OK em callers legados
+    }
+    return result.payload
+  }
+
+  async function executarAcaoComercialComFeedback(
+    cliente: PerfilAdmin,
+    acao: AcaoComercialEscrita,
+  ) {
+    if (!iniciarAcaoCliente(cliente.id)) return
+
+    try {
+      let resultadoPatch
+      try {
+        const { payload } = await patchAcaoComercialCarteira(cliente, acao)
+        resultadoPatch = interpretarRespostaPatchComercial({
+          ok: true,
+          status: 200,
+          payload,
+        })
+      } catch (error: unknown) {
+        if (
+          (error as { __semResposta?: boolean })?.__semResposta ||
+          (error instanceof Error && /failed to fetch/i.test(error.message))
+        ) {
+          resultadoPatch = interpretarExcecaoPatchComercial(new TypeError('Failed to fetch'))
+        } else {
+          resultadoPatch = interpretarExcecaoPatchComercial(error)
+        }
+      }
+
+      const aposPatch = feedbackAposPatchComercial({ acao, resultado: resultadoPatch })
+      if (!aposPatch.escritaConfirmada) {
+        mostrarFeedbackAdmin(aposPatch.tipo, aposPatch.mensagem)
+        return
+      }
+
+      let refreshOk = true
+      try {
+        await refreshClientes()
+      } catch {
+        refreshOk = false
+      }
+
+      const finalFb =
+        feedbackAposRefreshComercial({
+          escritaConfirmada: true,
+          refreshOk,
+          mensagemSucesso: mensagemSucessoAcaoComercial(acao),
+        }) || aposPatch
+
+      mostrarFeedbackAdmin(finalFb.tipo, finalFb.mensagem)
+      setDesktopActionMenu(null)
+      setAcaoClienteMobile(null)
+    } finally {
+      finalizarAcaoCliente()
+    }
   }
 
   function clienteObs(cliente: PerfilAdmin) {
@@ -955,12 +1056,12 @@ export default function AdminSaasMasterPage() {
   }
 
   async function ativar(dias: number, cliente: PerfilAdmin) {
+    if (cliente.fonte === 'admin') {
+      await executarAcaoComercialComFeedback(cliente, 'desbloquear')
+      return
+    }
+    if (!iniciarAcaoCliente(cliente.id)) return
     try {
-      setAcaoProcessandoId(cliente.id)
-      if (cliente.fonte === 'admin') {
-        await acaoComercialCarteira(cliente, 'desbloquear')
-        return
-      }
       await atualizarCliente(cliente.id, {
         status: 'ativo',
         ativo: true,
@@ -969,10 +1070,15 @@ export default function AdminSaasMasterPage() {
         status_pagamento: 'em_dia',
         ultimo_pagamento: hojeISO(),
       })
+      await refreshClientes()
+      mostrarFeedbackAdmin('sucesso', mensagemSucessoAcaoComercial('desbloquear'))
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Falha ao ativar.')
+      mostrarFeedbackAdmin(
+        'erro',
+        error instanceof Error ? error.message : 'Não foi possível concluir a ação comercial.',
+      )
     } finally {
-      setAcaoProcessandoId(null)
+      finalizarAcaoCliente()
     }
   }
 
@@ -983,34 +1089,38 @@ export default function AdminSaasMasterPage() {
       clienteId: cliente.id,
     })
     if (!podeAcionarMarcarPago({ statusPagamento: statusPag, processando })) return
+    if (cliente.fonte === 'admin') {
+      await executarAcaoComercialComFeedback(cliente, 'marcar_pago')
+      return
+    }
     if (!iniciarAcaoCliente(cliente.id)) return
 
     try {
-      if (cliente.fonte === 'admin') {
-        await acaoComercialCarteira(cliente, 'marcar_pago')
-      } else {
-        await atualizarCliente(cliente.id, {
-          status: 'ativo',
-          ativo: true,
-          plano_tier: 'starter',
-          vencimento: dataMaisDias(30),
-          status_pagamento: 'pago',
-          ultimo_pagamento: hojeISO(),
-        })
+      await atualizarCliente(cliente.id, {
+        status: 'ativo',
+        ativo: true,
+        plano_tier: 'starter',
+        vencimento: dataMaisDias(30),
+        status_pagamento: 'pago',
+        ultimo_pagamento: hojeISO(),
+      })
+      let refreshOk = true
+      try {
+        await refreshClientes()
+      } catch {
+        refreshOk = false
       }
-      const fb = feedbackAposMarcarPago({ ok: true })
-      if (fb.refresh) {
-        // refresh já feito em acaoComercialCarteira; legado precisa refresh local
-        if (cliente.fonte !== 'admin') await refreshClientes()
-      }
-      mostrarFeedbackAdmin(fb.tipo, fb.mensagem)
+      const finalFb = resolverFeedbackAcaoComercialCompleta({
+        acao: 'marcar_pago',
+        resultadoPatch: { kind: 'ok' },
+        refreshOk,
+      })
+      mostrarFeedbackAdmin(finalFb.tipo, finalFb.mensagem)
       setDesktopActionMenu(null)
       setAcaoClienteMobile(null)
     } catch (error: unknown) {
-      const fb = feedbackAposMarcarPago({
-        ok: false,
-        erro: error instanceof Error ? error.message : 'Falha ao marcar pagamento.',
-      })
+      const resultado = interpretarExcecaoPatchComercial(error)
+      const fb = feedbackAposPatchComercial({ acao: 'marcar_pago', resultado })
       mostrarFeedbackAdmin(fb.tipo, fb.mensagem)
     } finally {
       finalizarAcaoCliente()
@@ -1019,17 +1129,7 @@ export default function AdminSaasMasterPage() {
 
   function abrirRenovacaoManual(cliente: PerfilAdmin) {
     if (cliente.fonte === 'admin') {
-      void (async () => {
-        try {
-          setAcaoProcessandoId(cliente.id)
-          await acaoComercialCarteira(cliente, 'renovar')
-          alert('Vínculo renovado: próximo vencimento avançado pelo dia comercial.')
-        } catch (error: unknown) {
-          alert(error instanceof Error ? error.message : 'Falha ao renovar.')
-        } finally {
-          setAcaoProcessandoId(null)
-        }
-      })()
+      void executarAcaoComercialComFeedback(cliente, 'renovar')
       return
     }
     setRenovarCliente(cliente)
@@ -1089,21 +1189,35 @@ export default function AdminSaasMasterPage() {
   }
 
   async function bloquear(cliente: PerfilAdmin) {
+    if (cliente.fonte === 'admin') {
+      await executarAcaoComercialComFeedback(cliente, 'bloquear')
+      return
+    }
+    if (!iniciarAcaoCliente(cliente.id)) return
     try {
-      setAcaoProcessandoId(cliente.id)
-      if (cliente.fonte === 'admin') {
-        await acaoComercialCarteira(cliente, 'bloquear')
-        return
-      }
       await atualizarCliente(cliente.id, {
         status: 'bloqueado',
         ativo: false,
         status_pagamento: 'bloqueado',
       })
+      let refreshOk = true
+      try {
+        await refreshClientes()
+      } catch {
+        refreshOk = false
+      }
+      const finalFb = resolverFeedbackAcaoComercialCompleta({
+        acao: 'bloquear',
+        resultadoPatch: { kind: 'ok' },
+        refreshOk,
+      })
+      mostrarFeedbackAdmin(finalFb.tipo, finalFb.mensagem)
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Falha ao bloquear.')
+      const resultado = interpretarExcecaoPatchComercial(error)
+      const fb = feedbackAposPatchComercial({ acao: 'bloquear', resultado })
+      mostrarFeedbackAdmin(fb.tipo, fb.mensagem)
     } finally {
-      setAcaoProcessandoId(null)
+      finalizarAcaoCliente()
     }
   }
 
@@ -1700,7 +1814,12 @@ export default function AdminSaasMasterPage() {
             fontWeight: 800,
             fontSize: 14,
             color: '#fff',
-            background: feedbackAdmin.tipo === 'sucesso' ? 'rgba(22,163,74,0.95)' : 'rgba(220,38,38,0.95)',
+            background:
+              feedbackAdmin.tipo === 'sucesso'
+                ? 'rgba(22,163,74,0.95)'
+                : feedbackAdmin.tipo === 'aviso'
+                  ? 'rgba(180,120,20,0.95)'
+                  : 'rgba(220,38,38,0.95)',
             border: '1px solid rgba(255,255,255,0.2)',
             boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
           }}

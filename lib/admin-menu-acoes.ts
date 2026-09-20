@@ -127,7 +127,7 @@ export function resolverAcoesMenuCarteira(params: {
   if (status === 'ativo' && !permanente) {
     itens.push({
       id: 'renovar',
-      label: 'Renovar ciclo',
+      label: processando ? 'Processando…' : 'Renovar ciclo',
       disabled: processando,
     })
   }
@@ -137,13 +137,13 @@ export function resolverAcoesMenuCarteira(params: {
     if (bloqueado) {
       itens.push({
         id: 'desbloquear',
-        label: 'Desbloquear / Ativar',
+        label: processando ? 'Processando…' : 'Desbloquear / Ativar',
         disabled: processando,
       })
     } else if (status === 'ativo' || status === 'trial' || !status) {
       itens.push({
         id: 'bloquear',
-        label: 'Bloquear',
+        label: processando ? 'Processando…' : 'Bloquear',
         disabled: processando,
         variant: 'danger',
       })
