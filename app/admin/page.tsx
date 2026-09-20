@@ -29,11 +29,16 @@ import {
   labelStatusPagamentoComercial,
   corStatusPagamentoComercial,
   podeAcionarMarcarPago,
-  labelAcaoMarcarPago,
   deveBloquearReentradaAcaoComercial,
   feedbackAposMarcarPago,
-  pagamentoJaConfirmado,
 } from '@/lib/admin-ciclo-comercial'
+import {
+  LABEL_EXCLUIR_CLIENTE_CARTEIRA,
+  TEXTO_CONFIRMACAO_EXCLUIR_CARTEIRA,
+  resolverAcoesMenuCarteira,
+  type AcaoMenuCarteiraId,
+  type ItemMenuCarteira,
+} from '@/lib/admin-menu-acoes'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
@@ -82,6 +87,8 @@ type PerfilAdmin = {
     dia_vencimento?: number | null
     status_pagamento?: string | null
     acesso_connect?: boolean
+    auth_user_id?: string | null
+    perfil_id?: string | null
     legado_texto?: boolean
   }>
 }
@@ -541,6 +548,81 @@ export default function AdminSaasMasterPage() {
     return vinculoPrincipal(cliente)?.status_pagamento || cliente.status_pagamento || null
   }
 
+  /** ADMIN.3.11 — ações contextuais. Opera sobre vinculoPrincipal (TODO multissistema). */
+  function acoesMenuDoCliente(cliente: PerfilAdmin): ItemMenuCarteira[] {
+    const v = vinculoPrincipal(cliente)
+    return resolverAcoesMenuCarteira({
+      origem: v?.origem || (cliente.fonte === 'admin' ? 'terceiro' : 'connect'),
+      statusVinculo: v?.status || cliente.status,
+      statusPagamento: v?.status_pagamento || cliente.status_pagamento,
+      acessoConnect: Boolean(v?.acesso_connect),
+      perfilId: v?.perfil_id || null,
+      authUserId: v?.auth_user_id || cliente.auth_user_id_reset || null,
+      podeResetSenha: cliente.pode_reset_senha,
+      processando: acaoProcessandoId === cliente.id,
+      permanente: isPermanent(cliente),
+    })
+  }
+
+  function executarAcaoMenuCarteira(cliente: PerfilAdmin, acaoId: AcaoMenuCarteiraId) {
+    if (acaoProcessandoId === cliente.id && acaoId !== 'marcar_pago') return
+    switch (acaoId) {
+      case 'editar':
+        setDesktopActionMenu(null)
+        setAcaoClienteMobile(null)
+        abrirEdicao(cliente)
+        break
+      case 'reset_senha':
+        setDesktopActionMenu(null)
+        setAcaoClienteMobile(null)
+        void resetarSenhaCliente(cliente)
+        break
+      case 'marcar_pago':
+        void marcarComoPago(cliente)
+        break
+      case 'renovar':
+        setDesktopActionMenu(null)
+        setAcaoClienteMobile(null)
+        abrirRenovacaoManual(cliente)
+        break
+      case 'bloquear':
+        if (confirm('Bloquear este vínculo comercial?')) {
+          setDesktopActionMenu(null)
+          setAcaoClienteMobile(null)
+          void bloquear(cliente)
+        }
+        break
+      case 'desbloquear':
+        setDesktopActionMenu(null)
+        setAcaoClienteMobile(null)
+        void ativar(30, cliente)
+        break
+      case 'oferta_upgrade':
+        setDesktopActionMenu(null)
+        setAcaoClienteMobile(null)
+        mensagemUpgrade(cliente)
+        break
+      case 'backups':
+        setDesktopActionMenu(null)
+        setAcaoClienteMobile(null)
+        setBackupModalCliente(cliente)
+        break
+      case 'excluir':
+        setDesktopActionMenu(null)
+        setAcaoClienteMobile(null)
+        void excluirCliente(cliente)
+        break
+      default:
+        break
+    }
+  }
+
+  function estiloBotaoMenu(item: ItemMenuCarteira, base: CSSProperties): CSSProperties {
+    if (item.variant === 'danger') return { ...base, ...(styles.menuDanger as CSSProperties) }
+    if (item.variant === 'delete') return { ...base, ...(styles.menuDelete as CSSProperties) }
+    return base
+  }
+
   function mostrarFeedbackAdmin(tipo: 'sucesso' | 'erro', mensagem: string) {
     setFeedbackAdmin({ tipo, mensagem })
   }
@@ -695,6 +777,8 @@ export default function AdminSaasMasterPage() {
                 dia_vencimento: s.dia_vencimento != null ? Number(s.dia_vencimento) : null,
                 status_pagamento: s.status_pagamento ? String(s.status_pagamento) : null,
                 acesso_connect: Boolean(s.acesso_connect),
+                auth_user_id: s.auth_user_id ? String(s.auth_user_id) : null,
+                perfil_id: s.perfil_id ? String(s.perfil_id) : null,
                 legado_texto: Boolean(s.legado_texto),
               })),
             } satisfies PerfilAdmin
@@ -1025,10 +1109,12 @@ export default function AdminSaasMasterPage() {
 
   async function excluirCliente(cliente: PerfilAdmin) {
     const nome = cliente.nome_empresa || cliente.email || 'este cliente'
+    // TODO(multissistema): futuramente oferecer "Remover apenas este sistema"
+    // sem apagar admin_cliente / demais vínculos. Hoje DELETE é da carteira inteira.
     const confirmar =
       cliente.fonte === 'admin'
         ? confirm(
-            `Remover ${nome} da carteira comercial?\n\nO acesso de login do cliente NÃO será apagado — apenas o cadastro comercial.`,
+            `Excluir ${nome} da carteira?\n\n${TEXTO_CONFIRMACAO_EXCLUIR_CARTEIRA}`,
           )
         : confirm(
             `Excluir definitivamente ${nome}?\n\nEssa ação remove o cliente do painel admin e também tenta remover o acesso de login.`,
@@ -2124,130 +2210,17 @@ export default function AdminSaasMasterPage() {
                     ×
                   </button>
                 </div>
-                <button
-                  style={styles.menuItem}
-                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
-                  onClick={() => {
-                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
-                    setDesktopActionMenu(null)
-                    abrirEdicao(desktopActionMenu.cliente)
-                  }}
-                >
-                  Editar cliente
-                </button>
-                <button
-                  style={styles.menuItem}
-                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id || !clientePodeReset(desktopActionMenu.cliente)}
-                  title={!clientePodeReset(desktopActionMenu.cliente) ? 'Sem login Connect' : undefined}
-                  onClick={() => {
-                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
-                    setDesktopActionMenu(null)
-                    void resetarSenhaCliente(desktopActionMenu.cliente)
-                  }}
-                >
-                  {clientePodeReset(desktopActionMenu.cliente) ? 'Resetar senha / WhatsApp' : 'Sem login Connect'}
-                </button>
-                <button
-                  style={styles.menuItem}
-                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
-                  onClick={() => {
-                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
-                    setDesktopActionMenu(null)
-                    void trial7(desktopActionMenu.cliente)
-                  }}
-                >
-                  Trial 7 dias
-                </button>
-                <button
-                  style={styles.menuItem}
-                  disabled={
-                    !podeAcionarMarcarPago({
-                      statusPagamento: statusPagamentoCliente(desktopActionMenu.cliente),
-                      processando: acaoProcessandoId === desktopActionMenu.cliente.id,
-                    }) || isPermanent(desktopActionMenu.cliente)
-                  }
-                  title={
-                    pagamentoJaConfirmado(statusPagamentoCliente(desktopActionMenu.cliente))
-                      ? 'Pagamento já confirmado'
-                      : undefined
-                  }
-                  onClick={() => {
-                    void marcarComoPago(desktopActionMenu.cliente)
-                  }}
-                >
-                  {labelAcaoMarcarPago({
-                    statusPagamento: statusPagamentoCliente(desktopActionMenu.cliente),
-                    processando: acaoProcessandoId === desktopActionMenu.cliente.id,
-                  })}
-                </button>
-                <button
-                  style={styles.menuItem}
-                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)}
-                  onClick={() => {
-                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
-                    setDesktopActionMenu(null)
-                    void ativar(30, desktopActionMenu.cliente)
-                  }}
-                >
-                  Desbloquear / Ativar
-                </button>
-                <button
-                  style={styles.menuItem}
-                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)}
-                  onClick={() => {
-                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
-                    setDesktopActionMenu(null)
-                    abrirRenovacaoManual(desktopActionMenu.cliente)
-                  }}
-                >
-                  Renovar ciclo
-                </button>
-                <button
-                  style={styles.menuItem}
-                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
-                  onClick={() => {
-                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
-                    setDesktopActionMenu(null)
-                    mensagemUpgrade(desktopActionMenu.cliente)
-                  }}
-                >
-                  Oferta upgrade
-                </button>
-                <button
-                  style={styles.menuItem}
-                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
-                  onClick={() => {
-                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
-                    setDesktopActionMenu(null)
-                    setBackupModalCliente(desktopActionMenu.cliente)
-                  }}
-                >
-                  Backups do cliente
-                </button>
-                <button
-                  style={styles.menuDanger}
-                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)}
-                  onClick={() => {
-                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
-                    if (confirm('Bloquear este vínculo comercial?')) {
-                      setDesktopActionMenu(null)
-                      void bloquear(desktopActionMenu.cliente)
-                    }
-                  }}
-                >
-                  Bloquear
-                </button>
-                <button
-                  style={styles.menuDelete}
-                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
-                  onClick={() => {
-                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
-                    setDesktopActionMenu(null)
-                    void excluirCliente(desktopActionMenu.cliente)
-                  }}
-                >
-                  Excluir cliente
-                </button>
+                {acoesMenuDoCliente(desktopActionMenu.cliente).map((item) => (
+                  <button
+                    key={item.id}
+                    style={estiloBotaoMenu(item, styles.menuItem)}
+                    disabled={item.disabled}
+                    title={item.title}
+                    onClick={() => executarAcaoMenuCarteira(desktopActionMenu.cliente, item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>,
             document.body
@@ -2284,18 +2257,7 @@ export default function AdminSaasMasterPage() {
 
             <div style={styles.mobileActionScroll}>
               <div style={styles.mobileActionGroup}>
-                <div style={styles.mobileActionGroupTitle}>Ações principais</div>
-                <button
-                  style={styles.mobileActionBtn}
-                  disabled={acaoProcessandoId === acaoClienteMobile.id}
-                  onClick={() => {
-                    if (acaoProcessandoId === acaoClienteMobile.id) return
-                    setAcaoClienteMobile(null)
-                    abrirEdicao(acaoClienteMobile)
-                  }}
-                >
-                  Editar cliente
-                </button>
+                <div style={styles.mobileActionGroupTitle}>Ações</div>
                 <button
                   style={styles.mobileActionBtn}
                   disabled={acaoProcessandoId === acaoClienteMobile.id}
@@ -2307,72 +2269,25 @@ export default function AdminSaasMasterPage() {
                 >
                   Cobrar WhatsApp
                 </button>
-                <button
-                  style={styles.mobileActionBtn}
-                  disabled={acaoProcessandoId === acaoClienteMobile.id || isPermanent(acaoClienteMobile)}
-                  onClick={() => {
-                    if (acaoProcessandoId === acaoClienteMobile.id) return
-                    setAcaoClienteMobile(null)
-                    abrirRenovacaoManual(acaoClienteMobile)
-                  }}
-                >
-                  Renovar ciclo
-                </button>
-                <button
-                  style={styles.mobileActionBtn}
-                  disabled={
-                    !podeAcionarMarcarPago({
-                      statusPagamento: statusPagamentoCliente(acaoClienteMobile),
-                      processando: acaoProcessandoId === acaoClienteMobile.id,
-                    }) || isPermanent(acaoClienteMobile)
-                  }
-                  onClick={() => {
-                    void marcarComoPago(acaoClienteMobile)
-                  }}
-                >
-                  {labelAcaoMarcarPago({
-                    statusPagamento: statusPagamentoCliente(acaoClienteMobile),
-                    processando: acaoProcessandoId === acaoClienteMobile.id,
-                  })}
-                </button>
-              </div>
-
-              <div style={styles.mobileActionGroup}>
-                <div style={styles.mobileActionGroupTitle}>Acesso</div>
-                <button
-                  style={styles.mobileActionBtn}
-                  disabled={acaoProcessandoId === acaoClienteMobile.id || !clientePodeReset(acaoClienteMobile)}
-                  onClick={() => { setAcaoClienteMobile(null); void resetarSenhaCliente(acaoClienteMobile) }}
-                >
-                  {clientePodeReset(acaoClienteMobile) ? 'Resetar senha / WhatsApp' : 'Sem login Connect'}
-                </button>
-                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); void trial7(acaoClienteMobile) }}>Trial 7 dias</button>
-                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); void ativar(30, acaoClienteMobile) }}>Desbloquear / Ativar</button>
-              </div>
-
-              <div style={styles.mobileActionGroup}>
-                <div style={styles.mobileActionGroupTitle}>Comercial</div>
-                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); mensagemUpgrade(acaoClienteMobile) }}>Oferta upgrade</button>
-                <button style={styles.mobileActionBtn} onClick={() => { setBackupModalCliente(acaoClienteMobile); setAcaoClienteMobile(null) }}>Backups do cliente</button>
-              </div>
-
-              <div style={styles.mobileActionDangerWrap}>
-                <button
-                  style={styles.mobileActionDanger}
-                  disabled={isPermanent(acaoClienteMobile)}
-                  onClick={() => {
-                    const alvo = acaoClienteMobile
-                    if (confirm('Bloquear este vínculo comercial?')) {
-                      setAcaoClienteMobile(null)
-                      void bloquear(alvo)
-                    }
-                  }}
-                >
-                  Bloquear
-                </button>
-                <button style={styles.mobileActionDelete} onClick={() => { setAcaoClienteMobile(null); void excluirCliente(acaoClienteMobile) }}>
-                  Excluir cliente
-                </button>
+                {acoesMenuDoCliente(acaoClienteMobile).map((item) => {
+                  const baseStyle =
+                    item.variant === 'danger'
+                      ? styles.mobileActionDanger
+                      : item.variant === 'delete'
+                        ? styles.mobileActionDelete
+                        : styles.mobileActionBtn
+                  return (
+                    <button
+                      key={item.id}
+                      style={baseStyle}
+                      disabled={item.disabled}
+                      title={item.title}
+                      onClick={() => executarAcaoMenuCarteira(acaoClienteMobile, item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           </div>
@@ -2381,7 +2296,11 @@ export default function AdminSaasMasterPage() {
 
       {backupModalCliente ? (
         <AdminBackupsModal
-          clienteId={backupModalCliente.id}
+          clienteId={
+            backupModalCliente.auth_user_id_reset ||
+            vinculoPrincipal(backupModalCliente)?.auth_user_id ||
+            backupModalCliente.id
+          }
           clienteNome={backupModalCliente.nome_empresa || backupModalCliente.email || 'Cliente'}
           onClose={() => setBackupModalCliente(null)}
         />
