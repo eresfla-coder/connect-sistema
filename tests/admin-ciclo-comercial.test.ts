@@ -16,10 +16,16 @@ import {
   CODIGO_CONNECT_SYNC_FAILED,
   CODIGO_CONNECT_SYNC_INCONSISTENT,
   decidirResultadoSyncConnect,
+  deveBloquearReentradaAcaoComercial,
   deveDesativarAdminClientePorBloqueioVinculo,
   deveSincronizarPerfilConnect,
+  feedbackAposMarcarPago,
+  labelAcaoMarcarPago,
+  labelStatusPagamentoComercial,
   montarMensagemCobrancaPorOrigem,
   montarSnapshotVinculoComercial,
+  MSG_SUCESSO_MARCAR_PAGO,
+  podeAcionarMarcarPago,
   validarDiaVencimento,
   vinculoEntraNoMrr,
   vinculoEntraNoRecebido,
@@ -152,6 +158,9 @@ describe('ADMIN.3.1 — ciclo comercial carteira', () => {
     assert.equal(incluiAssinaturaConnect, false)
     assert.equal(mensagem.includes('/assinatura'), false)
     assert.equal(mensagem.includes('Mercado Pago'), false)
+    assert.doesNotMatch(mensagem, /Connect \(carteira comercial\)/i)
+    assert.doesNotMatch(mensagem, /\bConnect\b/)
+    assert.match(mensagem, /confirma o pagamento por aqui/)
   })
 
   it('15) Connect Cobrar pode incluir /assinatura', () => {
@@ -460,5 +469,97 @@ describe('ADMIN.3.3 — correção gaps ciclo comercial', () => {
     })
     assert.equal(m.mrr, 49.9)
     assert.equal(m.bloqueados, 1)
+  })
+})
+
+describe('ADMIN.3.8 — feedback UX + cobrança terceiro', () => {
+  it('1) pendente → Pendente', () => {
+    assert.equal(labelStatusPagamentoComercial('pendente'), 'Pendente')
+  })
+
+  it('2) em_dia → Em dia', () => {
+    assert.equal(labelStatusPagamentoComercial('em_dia'), 'Em dia')
+  })
+
+  it('3) pago → Pago', () => {
+    assert.equal(labelStatusPagamentoComercial('pago'), 'Pago')
+  })
+
+  it('4) trial → Trial', () => {
+    assert.equal(labelStatusPagamentoComercial('trial'), 'Trial')
+  })
+
+  it('5) bloqueado → Bloqueado', () => {
+    assert.equal(labelStatusPagamentoComercial('bloqueado'), 'Bloqueado')
+  })
+
+  it('6) sucesso marcar_pago produz feedback de sucesso', () => {
+    const fb = feedbackAposMarcarPago({ ok: true })
+    assert.equal(fb.tipo, 'sucesso')
+    assert.equal(fb.mensagem, MSG_SUCESSO_MARCAR_PAGO)
+    assert.equal(fb.refresh, true)
+  })
+
+  it('7) erro não produz falso sucesso', () => {
+    const fb = feedbackAposMarcarPago({ ok: false, erro: 'Falha X' })
+    assert.equal(fb.tipo, 'erro')
+    assert.match(fb.mensagem, /Falha X/)
+    assert.equal(fb.refresh, false)
+  })
+
+  it('8) ação em processamento bloqueia reentrada', () => {
+    assert.equal(
+      deveBloquearReentradaAcaoComercial({ processandoId: 'c1', clienteId: 'c1' }),
+      true,
+    )
+    assert.equal(
+      podeAcionarMarcarPago({ statusPagamento: 'pendente', processando: true }),
+      false,
+    )
+    assert.equal(
+      deveBloquearReentradaAcaoComercial({ processandoId: 'c1', clienteId: 'c2' }),
+      false,
+    )
+  })
+
+  it('9) já em_dia não incentiva novo Marcar pago', () => {
+    assert.equal(podeAcionarMarcarPago({ statusPagamento: 'em_dia' }), false)
+    assert.equal(podeAcionarMarcarPago({ statusPagamento: 'pago' }), false)
+    assert.equal(labelAcaoMarcarPago({ statusPagamento: 'em_dia' }), 'Já está em dia')
+    assert.equal(podeAcionarMarcarPago({ statusPagamento: 'pendente' }), true)
+  })
+
+  it('10–12) terceiro cobrança sem Connect /assinatura / Mercado Pago', () => {
+    const { mensagem } = montarMensagemCobrancaPorOrigem({
+      origem: 'terceiro',
+      nome: 'X',
+      sistema: 'INFOSTART',
+      valor: 100,
+      vencimento: '2026-09-25',
+      siteUrl: 'https://example.com',
+    })
+    assert.doesNotMatch(mensagem, /Connect \(carteira comercial\)/i)
+    assert.doesNotMatch(mensagem, /\/assinatura/)
+    assert.doesNotMatch(mensagem, /Mercado Pago/i)
+    assert.doesNotMatch(mensagem, /\bConnect\b/)
+  })
+
+  it('13) Connect mantém comportamento próprio', () => {
+    const { mensagem, incluiAssinaturaConnect } = montarMensagemCobrancaPorOrigem({
+      origem: 'connect',
+      nome: 'Y',
+      sistema: 'Connect Sistema',
+      valor: 49.9,
+      vencimento: '2026-09-25',
+      siteUrl: 'https://example.com',
+    })
+    assert.equal(incluiAssinaturaConnect, true)
+    assert.match(mensagem, /\/assinatura/)
+    assert.match(mensagem, /— Connect Sistema/)
+  })
+
+  it('14) refresh ocorre após sucesso', () => {
+    assert.equal(feedbackAposMarcarPago({ ok: true }).refresh, true)
+    assert.equal(feedbackAposMarcarPago({ ok: false }).refresh, false)
   })
 })

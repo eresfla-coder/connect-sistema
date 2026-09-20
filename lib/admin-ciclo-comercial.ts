@@ -355,6 +355,73 @@ export function vinculoEntraNoRecebido(v: ItemVinculoMetricas): boolean {
   return ['em_dia', 'pago'].includes(String(v.status_pagamento || '').toLowerCase())
 }
 
+/** ADMIN.3.8 — labels UX de status_pagamento (não altera regras comerciais). */
+export const MSG_SUCESSO_MARCAR_PAGO = 'Pagamento marcado como em dia.'
+
+export function labelStatusPagamentoComercial(status?: string | null): string {
+  const s = String(status || '').toLowerCase().trim()
+  if (s === 'em_dia') return 'Em dia'
+  if (s === 'pago') return 'Pago'
+  if (s === 'trial') return 'Trial'
+  if (s === 'bloqueado') return 'Bloqueado'
+  if (s === 'pendente') return 'Pendente'
+  if (!s) return '—'
+  return String(status)
+}
+
+export function corStatusPagamentoComercial(status?: string | null): string {
+  const s = String(status || '').toLowerCase().trim()
+  if (s === 'em_dia' || s === 'pago') return '#22c55e'
+  if (s === 'pendente') return '#facc15'
+  if (s === 'trial') return '#60a5fa'
+  if (s === 'bloqueado') return '#ef4444'
+  return '#94a3b8'
+}
+
+export function pagamentoJaConfirmado(status?: string | null): boolean {
+  return ['em_dia', 'pago'].includes(String(status || '').toLowerCase().trim())
+}
+
+/** Frontend: não incentivar novo Marcar pago se já confirmado ou em processamento. */
+export function podeAcionarMarcarPago(params: {
+  statusPagamento?: string | null
+  processando?: boolean
+}): boolean {
+  if (params.processando) return false
+  if (pagamentoJaConfirmado(params.statusPagamento)) return false
+  return true
+}
+
+export function labelAcaoMarcarPago(params: {
+  statusPagamento?: string | null
+  processando?: boolean
+}): string {
+  if (params.processando) return 'Processando…'
+  if (pagamentoJaConfirmado(params.statusPagamento)) return 'Já está em dia'
+  return 'Marcar pago'
+}
+
+export function deveBloquearReentradaAcaoComercial(params: {
+  processandoId?: string | null
+  clienteId: string
+}): boolean {
+  return Boolean(params.processandoId && params.processandoId === params.clienteId)
+}
+
+export function feedbackAposMarcarPago(params: {
+  ok: boolean
+  erro?: string | null
+}): { tipo: 'sucesso' | 'erro'; mensagem: string; refresh: boolean } {
+  if (params.ok) {
+    return { tipo: 'sucesso', mensagem: MSG_SUCESSO_MARCAR_PAGO, refresh: true }
+  }
+  return {
+    tipo: 'erro',
+    mensagem: String(params.erro || 'Falha ao marcar pagamento.'),
+    refresh: false,
+  }
+}
+
 export function calcularMetricasCicloComercial(params: {
   clientes: Array<{ data_criacao?: string | null; vinculos: ItemVinculoMetricas[] }>
   hoje?: string
@@ -427,8 +494,6 @@ export function montarMensagemCobrancaPorOrigem(params: {
       params.status ? `Status: ${params.status}` : '',
       '',
       'Quando puder, me confirma o pagamento por aqui.',
-      '',
-      '— Connect (carteira comercial)',
     ]
       .filter(Boolean)
       .join('\n')

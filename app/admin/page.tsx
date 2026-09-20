@@ -26,6 +26,13 @@ import {
 import {
   montarMensagemCobrancaPorOrigem,
   calcularMetricasCicloComercial,
+  labelStatusPagamentoComercial,
+  corStatusPagamentoComercial,
+  podeAcionarMarcarPago,
+  labelAcaoMarcarPago,
+  deveBloquearReentradaAcaoComercial,
+  feedbackAposMarcarPago,
+  pagamentoJaConfirmado,
 } from '@/lib/admin-ciclo-comercial'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
@@ -327,6 +334,8 @@ export default function AdminSaasMasterPage() {
   const desktopActionMenuRef = useRef<HTMLDivElement | null>(null)
   const [desktopActionMenuAnimIn, setDesktopActionMenuAnimIn] = useState(false)
   const [acaoProcessandoId, setAcaoProcessandoId] = useState<string | null>(null)
+  const acaoProcessandoRef = useRef<string | null>(null)
+  const [feedbackAdmin, setFeedbackAdmin] = useState<{ tipo: 'sucesso' | 'erro'; mensagem: string } | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState<EditForm | null>(null)
@@ -365,6 +374,12 @@ export default function AdminSaasMasterPage() {
     setMetaLocal(readMeta())
     void iniciarAdmin()
   }, [])
+
+  useEffect(() => {
+    if (!feedbackAdmin) return
+    const t = window.setTimeout(() => setFeedbackAdmin(null), 5000)
+    return () => window.clearTimeout(t)
+  }, [feedbackAdmin])
 
   async function iniciarAdmin() {
     console.log('[ADMIN_PAGE_START]')
@@ -520,6 +535,28 @@ export default function AdminSaasMasterPage() {
 
   function vinculoPrincipal(cliente: PerfilAdmin) {
     return cliente.sistemasResumo?.[0] || null
+  }
+
+  function statusPagamentoCliente(cliente: PerfilAdmin) {
+    return vinculoPrincipal(cliente)?.status_pagamento || cliente.status_pagamento || null
+  }
+
+  function mostrarFeedbackAdmin(tipo: 'sucesso' | 'erro', mensagem: string) {
+    setFeedbackAdmin({ tipo, mensagem })
+  }
+
+  function iniciarAcaoCliente(clienteId: string): boolean {
+    if (deveBloquearReentradaAcaoComercial({ processandoId: acaoProcessandoRef.current, clienteId })) {
+      return false
+    }
+    acaoProcessandoRef.current = clienteId
+    setAcaoProcessandoId(clienteId)
+    return true
+  }
+
+  function finalizarAcaoCliente() {
+    acaoProcessandoRef.current = null
+    setAcaoProcessandoId(null)
   }
 
   async function acaoComercialCarteira(
@@ -856,24 +893,43 @@ export default function AdminSaasMasterPage() {
   }
 
   async function marcarComoPago(cliente: PerfilAdmin) {
+    const statusPag = statusPagamentoCliente(cliente)
+    const processando = deveBloquearReentradaAcaoComercial({
+      processandoId: acaoProcessandoRef.current,
+      clienteId: cliente.id,
+    })
+    if (!podeAcionarMarcarPago({ statusPagamento: statusPag, processando })) return
+    if (!iniciarAcaoCliente(cliente.id)) return
+
     try {
-      setAcaoProcessandoId(cliente.id)
       if (cliente.fonte === 'admin') {
         await acaoComercialCarteira(cliente, 'marcar_pago')
-        return
+      } else {
+        await atualizarCliente(cliente.id, {
+          status: 'ativo',
+          ativo: true,
+          plano_tier: 'starter',
+          vencimento: dataMaisDias(30),
+          status_pagamento: 'pago',
+          ultimo_pagamento: hojeISO(),
+        })
       }
-      await atualizarCliente(cliente.id, {
-        status: 'ativo',
-        ativo: true,
-        plano_tier: 'starter',
-        vencimento: dataMaisDias(30),
-        status_pagamento: 'pago',
-        ultimo_pagamento: hojeISO(),
-      })
+      const fb = feedbackAposMarcarPago({ ok: true })
+      if (fb.refresh) {
+        // refresh já feito em acaoComercialCarteira; legado precisa refresh local
+        if (cliente.fonte !== 'admin') await refreshClientes()
+      }
+      mostrarFeedbackAdmin(fb.tipo, fb.mensagem)
+      setDesktopActionMenu(null)
+      setAcaoClienteMobile(null)
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Falha ao marcar pagamento.')
+      const fb = feedbackAposMarcarPago({
+        ok: false,
+        erro: error instanceof Error ? error.message : 'Falha ao marcar pagamento.',
+      })
+      mostrarFeedbackAdmin(fb.tipo, fb.mensagem)
     } finally {
-      setAcaoProcessandoId(null)
+      finalizarAcaoCliente()
     }
   }
 
@@ -1543,6 +1599,29 @@ export default function AdminSaasMasterPage() {
 
   return (
     <div style={{ ...styles.page, ...(isMobileAdmin ? styles.pageMobile : {}) }}>
+      {feedbackAdmin ? (
+        <div
+          role="status"
+          style={{
+            position: 'fixed',
+            top: 16,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 9999,
+            maxWidth: 'min(520px, calc(100vw - 24px))',
+            padding: '12px 16px',
+            borderRadius: 12,
+            fontWeight: 800,
+            fontSize: 14,
+            color: '#fff',
+            background: feedbackAdmin.tipo === 'sucesso' ? 'rgba(22,163,74,0.95)' : 'rgba(220,38,38,0.95)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
+          }}
+        >
+          {feedbackAdmin.mensagem}
+        </div>
+      ) : null}
       <div style={{ ...styles.container, ...(isMobileAdmin ? styles.containerMobile : {}) }}>
         <section style={{ ...styles.heroMaster, ...(isMobileAdmin ? styles.heroMasterMobile : {}) }}>
           <div style={styles.heroContent}>
@@ -1738,6 +1817,11 @@ export default function AdminSaasMasterPage() {
                     </div>
 
                     <Badge label={cliente.status || '-'} color={statusColor(cliente.status)} />
+                    <Info
+                      label="Pagamento"
+                      value={labelStatusPagamentoComercial(statusPagamentoCliente(cliente))}
+                      color={corStatusPagamentoComercial(statusPagamentoCliente(cliente))}
+                    />
                     <Info label="Plano" value={plan.nome} color={plan.cor} />
                     <Info label="Limite" value={plan.limite} color="#dbeafe" />
                     <Info label="Vencimento" value={cliente.vencimento || '-'} color={prazoColor(cliente)} />
@@ -1753,20 +1837,32 @@ export default function AdminSaasMasterPage() {
                       <button style={styles.primarySmall} onClick={() => cobrarWhatsapp(cliente)}>Cobrar</button>
                       {isMobileAdmin ? (
                         <button
-                          style={styles.actionSummary}
+                          style={{
+                            ...styles.actionSummary,
+                            opacity: acaoProcessandoId === cliente.id ? 0.55 : 1,
+                            cursor: acaoProcessandoId === cliente.id ? 'not-allowed' : 'pointer',
+                          }}
+                          disabled={acaoProcessandoId === cliente.id}
                           onClick={(e) => {
                             e.stopPropagation()
+                            if (acaoProcessandoId === cliente.id) return
                             setAcaoClienteMobile(cliente)
                           }}
                         >
-                          Ações
+                          {acaoProcessandoId === cliente.id ? 'Processando…' : 'Ações'}
                         </button>
                       ) : (
                         <div style={styles.menuWrap} data-action-menu>
                           <button
-                            style={styles.actionSummary}
+                            style={{
+                              ...styles.actionSummary,
+                              opacity: acaoProcessandoId === cliente.id ? 0.55 : 1,
+                              cursor: acaoProcessandoId === cliente.id ? 'not-allowed' : 'pointer',
+                            }}
+                            disabled={acaoProcessandoId === cliente.id}
                             onClick={(e) => {
                               e.stopPropagation()
+                              if (acaoProcessandoId === cliente.id) return
                               const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
                               setDesktopActionMenu((atual) =>
                                 atual?.cliente.id === cliente.id
@@ -1788,7 +1884,7 @@ export default function AdminSaasMasterPage() {
                               )
                             }}
                           >
-                            Ações
+                            {acaoProcessandoId === cliente.id ? 'Processando…' : 'Ações'}
                           </button>
                         </div>
                       )}
@@ -1995,7 +2091,13 @@ export default function AdminSaasMasterPage() {
 
       {desktopActionMenu && typeof document !== 'undefined'
         ? createPortal(
-            <div style={styles.desktopActionBackdrop} onClick={() => setDesktopActionMenu(null)}>
+            <div
+              style={styles.desktopActionBackdrop}
+              onClick={() => {
+                if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                setDesktopActionMenu(null)
+              }}
+            >
               <div
                 ref={desktopActionMenuRef}
                 style={{
@@ -2011,25 +2113,141 @@ export default function AdminSaasMasterPage() {
               >
                 <div style={styles.menuHeader}>
                   <span>Ações rápidas</span>
-                  <button style={styles.menuClose} onClick={() => setDesktopActionMenu(null)}>×</button>
+                  <button
+                    style={styles.menuClose}
+                    disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
+                    onClick={() => {
+                      if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                      setDesktopActionMenu(null)
+                    }}
+                  >
+                    ×
+                  </button>
                 </div>
-                <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); abrirEdicao(desktopActionMenu.cliente) }}>Editar cliente</button>
+                <button
+                  style={styles.menuItem}
+                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
+                  onClick={() => {
+                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                    setDesktopActionMenu(null)
+                    abrirEdicao(desktopActionMenu.cliente)
+                  }}
+                >
+                  Editar cliente
+                </button>
                 <button
                   style={styles.menuItem}
                   disabled={acaoProcessandoId === desktopActionMenu.cliente.id || !clientePodeReset(desktopActionMenu.cliente)}
                   title={!clientePodeReset(desktopActionMenu.cliente) ? 'Sem login Connect' : undefined}
-                  onClick={() => { setDesktopActionMenu(null); void resetarSenhaCliente(desktopActionMenu.cliente) }}
+                  onClick={() => {
+                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                    setDesktopActionMenu(null)
+                    void resetarSenhaCliente(desktopActionMenu.cliente)
+                  }}
                 >
                   {clientePodeReset(desktopActionMenu.cliente) ? 'Resetar senha / WhatsApp' : 'Sem login Connect'}
                 </button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); void trial7(desktopActionMenu.cliente) }}>Trial 7 dias</button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); void marcarComoPago(desktopActionMenu.cliente) }}>Marcar pago</button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); void ativar(30, desktopActionMenu.cliente) }}>Desbloquear / Ativar</button>
-                <button style={styles.menuItem} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { setDesktopActionMenu(null); abrirRenovacaoManual(desktopActionMenu.cliente) }}>Renovar ciclo</button>
-                <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); mensagemUpgrade(desktopActionMenu.cliente) }}>Oferta upgrade</button>
-                <button style={styles.menuItem} onClick={() => { setDesktopActionMenu(null); setBackupModalCliente(desktopActionMenu.cliente) }}>Backups do cliente</button>
-                <button style={styles.menuDanger} disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)} onClick={() => { if (confirm('Bloquear este vínculo comercial?')) { setDesktopActionMenu(null); void bloquear(desktopActionMenu.cliente) } }}>Bloquear</button>
-                <button style={styles.menuDelete} disabled={acaoProcessandoId === desktopActionMenu.cliente.id} onClick={() => { setDesktopActionMenu(null); void excluirCliente(desktopActionMenu.cliente) }}>Excluir cliente</button>
+                <button
+                  style={styles.menuItem}
+                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
+                  onClick={() => {
+                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                    setDesktopActionMenu(null)
+                    void trial7(desktopActionMenu.cliente)
+                  }}
+                >
+                  Trial 7 dias
+                </button>
+                <button
+                  style={styles.menuItem}
+                  disabled={
+                    !podeAcionarMarcarPago({
+                      statusPagamento: statusPagamentoCliente(desktopActionMenu.cliente),
+                      processando: acaoProcessandoId === desktopActionMenu.cliente.id,
+                    }) || isPermanent(desktopActionMenu.cliente)
+                  }
+                  title={
+                    pagamentoJaConfirmado(statusPagamentoCliente(desktopActionMenu.cliente))
+                      ? 'Pagamento já confirmado'
+                      : undefined
+                  }
+                  onClick={() => {
+                    void marcarComoPago(desktopActionMenu.cliente)
+                  }}
+                >
+                  {labelAcaoMarcarPago({
+                    statusPagamento: statusPagamentoCliente(desktopActionMenu.cliente),
+                    processando: acaoProcessandoId === desktopActionMenu.cliente.id,
+                  })}
+                </button>
+                <button
+                  style={styles.menuItem}
+                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)}
+                  onClick={() => {
+                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                    setDesktopActionMenu(null)
+                    void ativar(30, desktopActionMenu.cliente)
+                  }}
+                >
+                  Desbloquear / Ativar
+                </button>
+                <button
+                  style={styles.menuItem}
+                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)}
+                  onClick={() => {
+                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                    setDesktopActionMenu(null)
+                    abrirRenovacaoManual(desktopActionMenu.cliente)
+                  }}
+                >
+                  Renovar ciclo
+                </button>
+                <button
+                  style={styles.menuItem}
+                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
+                  onClick={() => {
+                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                    setDesktopActionMenu(null)
+                    mensagemUpgrade(desktopActionMenu.cliente)
+                  }}
+                >
+                  Oferta upgrade
+                </button>
+                <button
+                  style={styles.menuItem}
+                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
+                  onClick={() => {
+                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                    setDesktopActionMenu(null)
+                    setBackupModalCliente(desktopActionMenu.cliente)
+                  }}
+                >
+                  Backups do cliente
+                </button>
+                <button
+                  style={styles.menuDanger}
+                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id || isPermanent(desktopActionMenu.cliente)}
+                  onClick={() => {
+                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                    if (confirm('Bloquear este vínculo comercial?')) {
+                      setDesktopActionMenu(null)
+                      void bloquear(desktopActionMenu.cliente)
+                    }
+                  }}
+                >
+                  Bloquear
+                </button>
+                <button
+                  style={styles.menuDelete}
+                  disabled={acaoProcessandoId === desktopActionMenu.cliente.id}
+                  onClick={() => {
+                    if (acaoProcessandoId === desktopActionMenu.cliente.id) return
+                    setDesktopActionMenu(null)
+                    void excluirCliente(desktopActionMenu.cliente)
+                  }}
+                >
+                  Excluir cliente
+                </button>
               </div>
             </div>,
             document.body
@@ -2037,7 +2255,13 @@ export default function AdminSaasMasterPage() {
         : null}
 
       {isMobileAdmin && acaoClienteMobile ? (
-        <div style={styles.mobileActionOverlay} onClick={() => setAcaoClienteMobile(null)}>
+        <div
+          style={styles.mobileActionOverlay}
+          onClick={() => {
+            if (acaoProcessandoId === acaoClienteMobile.id) return
+            setAcaoClienteMobile(null)
+          }}
+        >
           <div style={styles.mobileActionSheet} onClick={(event) => event.stopPropagation()}>
             <div style={styles.mobileActionSheetHeader}>
               <div>
@@ -2046,16 +2270,71 @@ export default function AdminSaasMasterPage() {
                   {acaoClienteMobile.nome_empresa || acaoClienteMobile.email || 'Cliente'}
                 </div>
               </div>
-              <button style={styles.mobileActionClose} onClick={() => setAcaoClienteMobile(null)}>✕</button>
+              <button
+                style={styles.mobileActionClose}
+                disabled={acaoProcessandoId === acaoClienteMobile.id}
+                onClick={() => {
+                  if (acaoProcessandoId === acaoClienteMobile.id) return
+                  setAcaoClienteMobile(null)
+                }}
+              >
+                ✕
+              </button>
             </div>
 
             <div style={styles.mobileActionScroll}>
               <div style={styles.mobileActionGroup}>
                 <div style={styles.mobileActionGroupTitle}>Ações principais</div>
-                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); abrirEdicao(acaoClienteMobile) }}>Editar cliente</button>
-                <button style={styles.mobileActionBtn} onClick={() => { setAcaoClienteMobile(null); cobrarWhatsapp(acaoClienteMobile) }}>Cobrar WhatsApp</button>
-                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); abrirRenovacaoManual(acaoClienteMobile) }}>Renovar ciclo</button>
-                <button style={styles.mobileActionBtn} disabled={isPermanent(acaoClienteMobile)} onClick={() => { setAcaoClienteMobile(null); void marcarComoPago(acaoClienteMobile) }}>Marcar pago</button>
+                <button
+                  style={styles.mobileActionBtn}
+                  disabled={acaoProcessandoId === acaoClienteMobile.id}
+                  onClick={() => {
+                    if (acaoProcessandoId === acaoClienteMobile.id) return
+                    setAcaoClienteMobile(null)
+                    abrirEdicao(acaoClienteMobile)
+                  }}
+                >
+                  Editar cliente
+                </button>
+                <button
+                  style={styles.mobileActionBtn}
+                  disabled={acaoProcessandoId === acaoClienteMobile.id}
+                  onClick={() => {
+                    if (acaoProcessandoId === acaoClienteMobile.id) return
+                    setAcaoClienteMobile(null)
+                    cobrarWhatsapp(acaoClienteMobile)
+                  }}
+                >
+                  Cobrar WhatsApp
+                </button>
+                <button
+                  style={styles.mobileActionBtn}
+                  disabled={acaoProcessandoId === acaoClienteMobile.id || isPermanent(acaoClienteMobile)}
+                  onClick={() => {
+                    if (acaoProcessandoId === acaoClienteMobile.id) return
+                    setAcaoClienteMobile(null)
+                    abrirRenovacaoManual(acaoClienteMobile)
+                  }}
+                >
+                  Renovar ciclo
+                </button>
+                <button
+                  style={styles.mobileActionBtn}
+                  disabled={
+                    !podeAcionarMarcarPago({
+                      statusPagamento: statusPagamentoCliente(acaoClienteMobile),
+                      processando: acaoProcessandoId === acaoClienteMobile.id,
+                    }) || isPermanent(acaoClienteMobile)
+                  }
+                  onClick={() => {
+                    void marcarComoPago(acaoClienteMobile)
+                  }}
+                >
+                  {labelAcaoMarcarPago({
+                    statusPagamento: statusPagamentoCliente(acaoClienteMobile),
+                    processando: acaoProcessandoId === acaoClienteMobile.id,
+                  })}
+                </button>
               </div>
 
               <div style={styles.mobileActionGroup}>
