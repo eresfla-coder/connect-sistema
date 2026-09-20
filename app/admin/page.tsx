@@ -1198,7 +1198,6 @@ export default function AdminSaasMasterPage() {
       await atualizarCliente(cliente.id, {
         status: 'bloqueado',
         ativo: false,
-        status_pagamento: 'bloqueado',
       })
       let refreshOk = true
       try {

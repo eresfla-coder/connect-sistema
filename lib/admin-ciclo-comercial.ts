@@ -170,9 +170,10 @@ export function camposIniciaisVinculoComercial(params: {
     if (!data && dia != null) {
       data = calcularPrimeiroVencimentoAtivo({ hoje, diaVencimento: dia })
     }
+    // ADMIN.3.19 — operacional bloqueado; financeiro = pendente (sem inventar pagamento).
     return {
       status: 'bloqueado',
-      status_pagamento: 'bloqueado',
+      status_pagamento: 'pendente',
       inicio: hoje,
       fim_trial: null,
       data_vencimento: data,
@@ -293,18 +294,62 @@ export function aplicarMarcarPagoComercial(params: {
   }
 }
 
+/**
+ * ADMIN.3.19 — bloqueio operacional apenas.
+ * NÃO escreve status_pagamento (preserva em_dia/pendente/trial/pago).
+ */
 export function aplicarBloqueioVinculo(): {
   status: 'bloqueado'
-  status_pagamento: 'bloqueado'
 } {
-  return { status: 'bloqueado', status_pagamento: 'bloqueado' }
+  return { status: 'bloqueado' }
 }
 
+/**
+ * ADMIN.3.19 — desbloqueio operacional apenas.
+ * NÃO reseta status_pagamento para pendente.
+ */
 export function aplicarDesbloqueioVinculo(): {
   status: 'ativo'
-  status_pagamento: 'pendente'
 } {
-  return { status: 'ativo', status_pagamento: 'pendente' }
+  return { status: 'ativo' }
+}
+
+/**
+ * Edição de status operacional no PATCH `atualizar`.
+ * Bloquear/desbloquear via status NÃO apaga o financeiro existente.
+ */
+export function camposUpdateStatusOperacional(params: {
+  statusNovo: string
+  statusPagamentoAtual?: string | null
+}): { status: StatusInicialComercial; status_pagamento?: StatusPagamentoComercial } {
+  const st = normalizarStatusInicial(params.statusNovo)
+  if (st === 'trial') {
+    return { status: 'trial', status_pagamento: 'trial' }
+  }
+  if (st === 'ativo' && !params.statusPagamentoAtual) {
+    return { status: 'ativo', status_pagamento: 'pendente' }
+  }
+  // bloqueado (e ativo com pagamento já definido): não toca status_pagamento
+  return { status: st }
+}
+
+/** Aplica patch de bloqueio/desbloqueio sobre um estado, preservando financeiro/ciclo. */
+export function aplicarAcaoOperacionalSobreEstado(
+  estado: {
+    status?: string | null
+    status_pagamento?: string | null
+    ultimo_pagamento?: string | null
+    data_vencimento?: string | null
+    dia_vencimento?: number | null
+    valor?: number | null
+  },
+  acao: 'bloquear' | 'desbloquear',
+) {
+  const patch = acao === 'bloquear' ? aplicarBloqueioVinculo() : aplicarDesbloqueioVinculo()
+  return {
+    ...estado,
+    ...patch,
+  }
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   validarCriarAcessoComOrigem,
 } from '../lib/admin-carteira.ts'
 import {
+  aplicarAcaoOperacionalSobreEstado,
   aplicarBloqueioVinculo,
   aplicarMarcarPagoComercial,
   aplicarRenovacaoComercial,
@@ -13,6 +14,7 @@ import {
   calcularPrimeiroVencimentoAtivo,
   calcularProximoVencimentoMensal,
   camposIniciaisVinculoComercial,
+  camposUpdateStatusOperacional,
   CODIGO_CONNECT_SYNC_FAILED,
   CODIGO_CONNECT_SYNC_INCONSISTENT,
   decidirResultadoSyncConnect,
@@ -25,12 +27,14 @@ import {
   montarMensagemCobrancaPorOrigem,
   montarSnapshotVinculoComercial,
   MSG_SUCESSO_MARCAR_PAGO,
+  payloadSyncPerfilConnect,
   podeAcionarMarcarPago,
   validarDiaVencimento,
   vinculoEntraNoMrr,
   vinculoEntraNoRecebido,
 } from '../lib/admin-ciclo-comercial.ts'
 import { deveChamarCreateUserAuthParaOrigem } from '../lib/admin-criar-acesso.ts'
+import { menuTemAcao, resolverAcoesMenuCarteira } from '../lib/admin-menu-acoes.ts'
 
 describe('ADMIN.3.1 — ciclo comercial carteira', () => {
   it('1) Ativo dia 25 em 18/09 → 25/09', () => {
@@ -180,12 +184,14 @@ describe('ADMIN.3.1 — ciclo comercial carteira', () => {
     assert.equal(deveDesativarAdminClientePorBloqueioVinculo(), false)
     const b = aplicarBloqueioVinculo()
     assert.equal(b.status, 'bloqueado')
+    assert.equal('status_pagamento' in b, false)
     const cliente = camposIniciaisVinculoComercial({
       statusInicial: 'bloqueado',
       hoje: '2026-09-18',
       diaVencimento: 10,
     })
     assert.equal(cliente.admin_cliente_ativo, true)
+    assert.equal(cliente.status_pagamento, 'pendente')
   })
 
   it('17) edição identifica cliente_sistema via vinculo_id (contrato API)', () => {
@@ -561,5 +567,187 @@ describe('ADMIN.3.8 — feedback UX + cobrança terceiro', () => {
   it('14) refresh ocorre após sucesso', () => {
     assert.equal(feedbackAposMarcarPago({ ok: true }).refresh, true)
     assert.equal(feedbackAposMarcarPago({ ok: false }).refresh, false)
+  })
+})
+
+describe('ADMIN.3.19 — separar bloqueio operacional de status financeiro', () => {
+  it('1) bloquear ativo+em_dia → bloqueado+em_dia', () => {
+    const apos = aplicarAcaoOperacionalSobreEstado(
+      {
+        status: 'ativo',
+        status_pagamento: 'em_dia',
+        ultimo_pagamento: '2026-09-19',
+        data_vencimento: '2026-10-25',
+        dia_vencimento: 25,
+        valor: 100,
+      },
+      'bloquear',
+    )
+    assert.equal(apos.status, 'bloqueado')
+    assert.equal(apos.status_pagamento, 'em_dia')
+  })
+
+  it('2) bloquear ativo+pendente → bloqueado+pendente', () => {
+    const apos = aplicarAcaoOperacionalSobreEstado(
+      { status: 'ativo', status_pagamento: 'pendente', valor: 100 },
+      'bloquear',
+    )
+    assert.equal(apos.status, 'bloqueado')
+    assert.equal(apos.status_pagamento, 'pendente')
+  })
+
+  it('3) bloquear trial preserva estado financeiro coerente', () => {
+    const apos = aplicarAcaoOperacionalSobreEstado(
+      { status: 'trial', status_pagamento: 'trial', data_vencimento: '2026-09-25', valor: 0 },
+      'bloquear',
+    )
+    assert.equal(apos.status, 'bloqueado')
+    assert.equal(apos.status_pagamento, 'trial')
+  })
+
+  it('4) desbloquear bloqueado+em_dia → ativo+em_dia', () => {
+    const apos = aplicarAcaoOperacionalSobreEstado(
+      { status: 'bloqueado', status_pagamento: 'em_dia', ultimo_pagamento: '2026-09-19' },
+      'desbloquear',
+    )
+    assert.equal(apos.status, 'ativo')
+    assert.equal(apos.status_pagamento, 'em_dia')
+  })
+
+  it('5) desbloquear bloqueado+pendente → ativo+pendente', () => {
+    const apos = aplicarAcaoOperacionalSobreEstado(
+      { status: 'bloqueado', status_pagamento: 'pendente' },
+      'desbloquear',
+    )
+    assert.equal(apos.status, 'ativo')
+    assert.equal(apos.status_pagamento, 'pendente')
+  })
+
+  it('6–9) ultimo_pagamento, vencimento e valor preservados no bloqueio/desbloqueio', () => {
+    const base = {
+      status: 'ativo' as const,
+      status_pagamento: 'em_dia',
+      ultimo_pagamento: '2026-09-19',
+      data_vencimento: '2026-10-25',
+      dia_vencimento: 25,
+      valor: 100,
+    }
+    const bloq = aplicarAcaoOperacionalSobreEstado(base, 'bloquear')
+    assert.equal(bloq.ultimo_pagamento, '2026-09-19')
+    assert.equal(bloq.data_vencimento, '2026-10-25')
+    assert.equal(bloq.dia_vencimento, 25)
+    assert.equal(bloq.valor, 100)
+    const desbloq = aplicarAcaoOperacionalSobreEstado(bloq, 'desbloquear')
+    assert.equal(desbloq.ultimo_pagamento, '2026-09-19')
+    assert.equal(desbloq.data_vencimento, '2026-10-25')
+    assert.equal(desbloq.dia_vencimento, 25)
+    assert.equal(desbloq.valor, 100)
+    assert.equal(desbloq.status_pagamento, 'em_dia')
+  })
+
+  it('10) edição para bloqueado preserva status_pagamento', () => {
+    const u = camposUpdateStatusOperacional({
+      statusNovo: 'bloqueado',
+      statusPagamentoAtual: 'em_dia',
+    })
+    assert.equal(u.status, 'bloqueado')
+    assert.equal('status_pagamento' in u, false)
+  })
+
+  it('11) cadastro inicial bloqueado não gera pagamento=bloqueado', () => {
+    const c = camposIniciaisVinculoComercial({
+      statusInicial: 'bloqueado',
+      hoje: '2026-09-20',
+      diaVencimento: 25,
+    })
+    assert.equal(c.status, 'bloqueado')
+    assert.equal(c.status_pagamento, 'pendente')
+    assert.notEqual(c.status_pagamento, 'bloqueado')
+  })
+
+  it('12) legado pagamento=bloqueado continua renderizável', () => {
+    assert.equal(labelStatusPagamentoComercial('bloqueado'), 'Bloqueado')
+  })
+
+  it('13–15) MRR exclui bloqueado; Recebido inclui bloqueado+em_dia; Bloqueados usa status', () => {
+    const m = calcularMetricasCicloComercial({
+      clientes: [
+        {
+          vinculos: [{ status: 'ativo', status_pagamento: 'em_dia', valor: 49.9, data_vencimento: '2026-10-10' }],
+        },
+        {
+          vinculos: [
+            {
+              status: 'bloqueado',
+              status_pagamento: 'em_dia',
+              valor: 100,
+              data_vencimento: '2026-10-25',
+            },
+          ],
+        },
+      ],
+      hoje: '2026-09-20',
+    })
+    assert.equal(m.mrr, 49.9)
+    assert.equal(m.recebido, 149.9)
+    assert.equal(m.bloqueados, 1)
+    assert.equal(vinculoEntraNoMrr({ status: 'bloqueado', valor: 100 }), false)
+    assert.equal(vinculoEntraNoRecebido({ status_pagamento: 'em_dia' }), true)
+  })
+
+  it('16) Connect continua bloqueando operacionalmente', () => {
+    const payload = payloadSyncPerfilConnect({
+      status: 'bloqueado',
+      dataVencimento: '2026-10-25',
+      statusPagamento: 'em_dia',
+      ultimoPagamento: '2026-09-19',
+      valor: 49.9,
+    })
+    assert.equal(payload.status, 'bloqueado')
+    assert.equal(payload.ativo, false)
+    assert.equal(payload.status_pagamento, 'em_dia')
+    assert.equal(
+      deveSincronizarPerfilConnect({ origem: 'connect', acessoConnect: true, perfilId: 'p1' }),
+      true,
+    )
+  })
+
+  it('17) terceiro não toca Auth/perfis', () => {
+    assert.equal(
+      deveSincronizarPerfilConnect({ origem: 'terceiro', acessoConnect: false, perfilId: null }),
+      false,
+    )
+    assert.equal(deveCriarAuthConnect({ origem: 'terceiro', criarAcesso: false }), false)
+  })
+
+  it('18) matriz ADMIN.3.11 preservada (bloqueado por status)', () => {
+    const itens = resolverAcoesMenuCarteira({
+      origem: 'terceiro',
+      statusVinculo: 'bloqueado',
+      statusPagamento: 'em_dia',
+    })
+    assert.equal(menuTemAcao(itens, 'desbloquear'), true)
+    assert.equal(menuTemAcao(itens, 'bloquear'), false)
+    assert.equal(menuTemAcao(itens, 'reset_senha'), false)
+    assert.equal(menuTemAcao(itens, 'backups'), false)
+  })
+
+  it('20) renovação continua preservando pagamento', () => {
+    const estado = {
+      data_vencimento: '2026-09-25',
+      status: 'ativo',
+      status_pagamento: 'em_dia',
+      ultimo_pagamento: '2026-09-19',
+    }
+    const updates = aplicarRenovacaoComercial({
+      dataVencimentoAtual: estado.data_vencimento,
+      diaVencimento: 25,
+      hoje: '2026-09-20',
+    })
+    assert.equal('status_pagamento' in updates, false)
+    assert.equal('ultimo_pagamento' in updates, false)
+    const apos = { ...estado, ...updates }
+    assert.equal(apos.status_pagamento, 'em_dia')
+    assert.equal(apos.ultimo_pagamento, '2026-09-19')
   })
 })

@@ -12,6 +12,7 @@ import {
   aplicarMarcarPagoComercial,
   aplicarRenovacaoComercial,
   camposIniciaisVinculoComercial,
+  camposUpdateStatusOperacional,
   CODIGO_CONNECT_SYNC_FAILED,
   CODIGO_CONNECT_SYNC_INCONSISTENT,
   dataCalendarioLocal,
@@ -366,10 +367,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
           if (!['trial', 'ativo', 'bloqueado'].includes(st)) {
             return NextResponse.json({ ok: false, code: 'ADMIN_VALIDATION', error: 'Status inválido.' }, { status: 400 })
           }
-          updates.status = st
-          if (st === 'bloqueado') updates.status_pagamento = 'bloqueado'
-          if (st === 'trial') updates.status_pagamento = 'trial'
-          if (st === 'ativo' && !vinculo.status_pagamento) updates.status_pagamento = 'pendente'
+          Object.assign(
+            updates,
+            camposUpdateStatusOperacional({
+              statusNovo: st,
+              statusPagamentoAtual: vinculo.status_pagamento
+                ? String(vinculo.status_pagamento)
+                : null,
+            }),
+          )
         }
         if (body.valor != null) updates.valor = parseValor(body.valor)
         if (body.dia_vencimento != null) {
