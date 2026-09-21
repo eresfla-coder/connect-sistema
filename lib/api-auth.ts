@@ -1,11 +1,12 @@
 /**
  * Guards server para APIs autenticadas.
  * requireAdminFromRequest: ADMIN_EMAILS (env) ou role no perfil — ver access-server.
+ * requireMasterAdminFromRequest: SOMENTE e-mail ∈ ADMIN_EMAILS (Modo Suporte).
  * @see docs/AUTENTICACAO-V1.md
  */
 import { NextRequest } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { isUsuarioAdminServer } from '@/lib/access-server'
+import { isAdminMasterServer, isUsuarioAdminServer } from '@/lib/access-server'
 
 export function getBearerToken(request: NextRequest | Request) {
   const header = request.headers.get('authorization') || ''
@@ -38,4 +39,17 @@ export async function requireAdminFromRequest(request: NextRequest | Request) {
   if (isUsuarioAdminServer({ email, perfil })) return user
 
   throw new Error('Acesso negado.')
+}
+
+/**
+ * ADMIN.4.2 — Master only (lista ADMIN_EMAILS / CONNECT_ADMIN_EMAILS).
+ * NÃO aceita somente perfis.role=admin. Não altera requireAdminFromRequest.
+ */
+export async function requireMasterAdminFromRequest(request: NextRequest | Request) {
+  const { user } = await getUserFromRequest(request)
+  const email = String(user.email || '').trim().toLowerCase()
+  if (!isAdminMasterServer(email)) {
+    throw new Error('Acesso negado.')
+  }
+  return user
 }
