@@ -5,6 +5,11 @@
 
 import { createHash, randomBytes } from 'node:crypto'
 
+/**
+ * ADMIN.4.2.7 — UI mínima controlada por env (`isAdminSupportUiEnabled` em admin-support-ui).
+ * Mantido `false` como default de compile-time; a UI usa o gate fail-closed
+ * (ENABLED=true + UI_ENV=preview).
+ */
 export const ADMIN_SUPPORT_UI_ENABLED = false
 
 /** Cookie httpOnly com token bruto (não é hash nem JWT). */

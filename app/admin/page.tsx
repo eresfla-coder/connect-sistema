@@ -15,6 +15,7 @@ import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetrica
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
 import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
 import AdminSistemasPanel from '@/components/admin/AdminSistemasPanel'
+import AdminModoSuportePanel from '@/components/admin/AdminModoSuportePanel'
 import {
   labelOrigemSistemaBadge,
   labelSistemaContratadoSelect,
@@ -1892,6 +1893,8 @@ export default function AdminSaasMasterPage() {
           <KpiCard titulo="Novos" valor={String(resumo.novos30)} detalhe="clientes em 30 dias" cor="#38bdf8" icone="📈" />
           </div>
         </section>
+
+        <AdminModoSuportePanel clientes={clientes} isMobile={isMobileAdmin} />
 
         {isMobileAdmin ? (
           <button type="button" style={styles.mobileMenuButton} onClick={() => setMobileDrawerOpen((open) => !open)}>
