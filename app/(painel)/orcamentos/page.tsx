@@ -33,6 +33,14 @@ import {
   calcularTotalFinalOrcamento,
   parseDescontoInputEditor,
 } from '@/lib/orcamento-desconto'
+import {
+  APROVACOES_SYNC_FANOUT_MAX,
+  APROVACOES_SYNC_INITIAL_DELAY_MS,
+  APROVACOES_SYNC_INTERVAL_MS,
+  type AprovacoesSyncMotivo,
+  devePularSyncAprovacoes,
+  selecionarOrcamentosParaSyncAprovacao,
+} from '@/lib/aprovacoes-publicas-sync'
 type TipoPessoaCliente = 'PF' | 'PJ'
 
 type Cliente = {
@@ -1319,8 +1327,15 @@ export default function OrcamentoPage() {
   const [orcamentosSalvos, setOrcamentosSalvos] = useState<OrcamentoSalvo[]>([])
   const [editandoOrcamentoId, setEditandoOrcamentoId] = useState<number | null>(null)
   const [orcamentoMenuAberto, setOrcamentoMenuAberto] = useState<OrcamentoSalvo | null>(null)
+  const orcamentosSalvosRef = useRef<OrcamentoSalvo[]>([])
+  orcamentosSalvosRef.current = orcamentosSalvos
   const syncAprovacaoPublicaRodandoRef = useRef(false)
   const ultimaSyncAprovacaoPublicaRef = useRef(0)
+  /** Cursor round-robin do fan-out de aprovações (somente memória de sessão/página). */
+  const syncAprovacaoCursorRef = useRef(0)
+  const sincronizarAprovacoesPublicasRef = useRef<(motivo?: AprovacoesSyncMotivo) => Promise<void>>(
+    async () => {},
+  )
   const osAprovacaoRodandoRef = useRef(false)
   const osAprovacaoCriadasRef = useRef<Set<string>>(new Set())
   const syncOrcamentosRodandoRef = useRef(false)
@@ -2295,28 +2310,33 @@ export default function OrcamentoPage() {
   }
 
 
-  async function sincronizarAprovacoesPublicas(forcar = false) {
-    if (syncAprovacaoPublicaRodandoRef.current) return
+  async function sincronizarAprovacoesPublicas(motivo: AprovacoesSyncMotivo = 'interval') {
+    const listaBase = [...orcamentosSalvosRef.current]
     const agora = Date.now()
-    if (!forcar && agora - ultimaSyncAprovacaoPublicaRef.current < 10000) return
-    if (!orcamentosSalvos.length) return
-    if (typeof document !== 'undefined' && document.visibilityState !== 'visible' && !forcar) return
+    const visivel = typeof document === 'undefined' || document.visibilityState === 'visible'
+    const gate = devePularSyncAprovacoes({
+      motivo,
+      agoraMs: agora,
+      ultimaSyncMs: ultimaSyncAprovacaoPublicaRef.current,
+      rodando: syncAprovacaoPublicaRodandoRef.current,
+      visivel,
+      temItens: listaBase.length > 0,
+    })
+    if (gate.pular) return
 
     syncAprovacaoPublicaRodandoRef.current = true
     ultimaSyncAprovacaoPublicaRef.current = agora
 
     try {
-      const listaBase = [...orcamentosSalvos]
       let alterou = false
+      const { selecionados: candidatos, nextCursorOffset } = selecionarOrcamentosParaSyncAprovacao(
+        listaBase,
+        APROVACOES_SYNC_FANOUT_MAX,
+        syncAprovacaoCursorRef.current,
+      )
+      syncAprovacaoCursorRef.current = nextCursorOffset
       const atualizados = await Promise.all(
-        listaBase
-          .filter((orcamento) => {
-            const status = String(orcamento?.status || '').toLowerCase()
-            return !status.includes('aprov') && !status.includes('cancel') && !status.includes('recus')
-          })
-          .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))
-          .slice(0, 18)
-          .map(async (orcamento) => {
+        candidatos.map(async (orcamento) => {
           try {
             const { data: sessao } = await supabase.auth.getSession()
             const headers: Record<string, string> = { cache: 'no-store' }
@@ -2411,35 +2431,41 @@ export default function OrcamentoPage() {
       syncAprovacaoPublicaRodandoRef.current = false
     }
   }
+  sincronizarAprovacoesPublicasRef.current = sincronizarAprovacoesPublicas
 
+  // Sync inicial ao ter orçamentos (não espera o intervalo de 5 min).
   useEffect(() => {
     if (!orcamentosSalvos.length) return
-    const timer = window.setTimeout(() => sincronizarAprovacoesPublicas(true), 1200)
+    const timer = window.setTimeout(() => {
+      void sincronizarAprovacoesPublicasRef.current('initial')
+    }, APROVACOES_SYNC_INITIAL_DELAY_MS)
     return () => window.clearTimeout(timer)
   }, [orcamentosSalvos.length])
 
+  // Uma única instância de interval/focus/visibility por montagem (lista via ref).
   useEffect(() => {
-    if (!orcamentosSalvos.length) return
-
-    const rodarSync = () => sincronizarAprovacoesPublicas(true)
-    const aoVoltarParaAba = () => {
-      if (document.visibilityState === 'visible') rodarSync()
+    const aoFocus = () => {
+      void sincronizarAprovacoesPublicasRef.current('ui-event')
+    }
+    const aoVisibility = () => {
+      if (document.visibilityState !== 'visible') return
+      void sincronizarAprovacoesPublicasRef.current('ui-event')
     }
 
-    window.addEventListener('focus', rodarSync)
-    document.addEventListener('visibilitychange', aoVoltarParaAba)
+    window.addEventListener('focus', aoFocus)
+    document.addEventListener('visibilitychange', aoVisibility)
 
     const interval = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
-      sincronizarAprovacoesPublicas(false)
-    }, 60000)
+      void sincronizarAprovacoesPublicasRef.current('interval')
+    }, APROVACOES_SYNC_INTERVAL_MS)
 
     return () => {
-      window.removeEventListener('focus', rodarSync)
-      document.removeEventListener('visibilitychange', aoVoltarParaAba)
+      window.removeEventListener('focus', aoFocus)
+      document.removeEventListener('visibilitychange', aoVisibility)
       window.clearInterval(interval)
     }
-  }, [orcamentosSalvos])
+  }, [])
 
   function tocarSomBalcao(tipo: 'ok' | 'erro' = 'ok') {
     try {
