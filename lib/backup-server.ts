@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { CONNECT_CLOUD_KEYS } from '@/lib/connect-cloud-storage'
 import { CONNECT_BACKUP_VERSION, MAX_BACKUPS_PER_USER, type ConnectBackupPayload } from '@/lib/backup-connect'
 import { withTimeout } from '@/lib/fetch-with-timeout'
+import { orcamentoBackupParaRestoreRow } from '@/lib/orcamento-backup-restore'
 
 const CONTRATOS_KEY = 'connect_contratos'
 
@@ -12,7 +13,8 @@ export const BACKUP_PAGE_SIZE = 100
 export const RESTORE_BATCH_SIZE = 25
 export const BACKUP_OPERATION_TIMEOUT_MS = 8000
 
-const ORC_COLS = 'local_id,payload,updated_at,created_at,user_id'
+/** Inclui resumo normalizado (ADMIN.4.3.7) — backups novos exportam status/total/cliente/aprovado. */
+const ORC_COLS = 'local_id,payload,updated_at,created_at,user_id,status,total,cliente,aprovado'
 const OS_COLS = 'local_id,payload,updated_at,created_at,user_id'
 const CLI_COLS = 'id,user_id,nome,telefone,email,documento,ativo,payload,updated_at,created_at'
 const CFG_COLS =
@@ -74,23 +76,32 @@ async function upsertEmLotes(
   if (!itens.length) return
 
   const supabase = getSupabaseAdmin()
-  const rows = itens
-    .map((item) => {
-      const local_id = String(item.local_id || item.id || '')
-      if (!local_id) return null
-      return {
-        user_id: userId,
-        local_id,
-        payload: item.payload ?? item,
-        updated_at: new Date().toISOString(),
-      }
-    })
-    .filter(Boolean) as Array<{
-    user_id: string
-    local_id: string
-    payload: unknown
-    updated_at: string
-  }>
+  const agora = new Date().toISOString()
+
+  // orcamentos: contrato normalizado { user_id, local_id, status, total, cliente, aprovado, payload }
+  // Tenant SEMPRE = userId autorizado (arquivo NÃO controla user_id efetivo).
+  const rows =
+    tabela === 'orcamentos'
+      ? (itens
+          .map((item) => orcamentoBackupParaRestoreRow(item, userId, agora))
+          .filter(Boolean) as NonNullable<ReturnType<typeof orcamentoBackupParaRestoreRow>>[])
+      : (itens
+          .map((item) => {
+            const local_id = String(item.local_id || item.id || '')
+            if (!local_id) return null
+            return {
+              user_id: userId,
+              local_id,
+              payload: item.payload ?? item,
+              updated_at: agora,
+            }
+          })
+          .filter(Boolean) as Array<{
+          user_id: string
+          local_id: string
+          payload: unknown
+          updated_at: string
+        }>)
 
   for (let i = 0; i < rows.length; i += RESTORE_BATCH_SIZE) {
     verificarTempo()
