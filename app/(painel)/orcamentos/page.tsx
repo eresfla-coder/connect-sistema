@@ -33,6 +33,7 @@ import {
   calcularTotalFinalOrcamento,
   parseDescontoInputEditor,
 } from '@/lib/orcamento-desconto'
+import { orcamentoParaUpsertSupabase as mapearOrcamentoParaUpsertSupabase } from '@/lib/orcamento-supabase-upsert'
 import {
   APROVACOES_SYNC_FANOUT_MAX,
   APROVACOES_SYNC_INITIAL_DELAY_MS,
@@ -1051,31 +1052,9 @@ type OrcamentoRow = {
   payload?: Partial<OrcamentoSalvo> | Record<string, unknown>
 }
 
-type OrcamentoSupabaseUpsert = {
-  user_id: string
-  local_id: string
-  aprovado: boolean
-  payload: Record<string, unknown>
-}
-
-function serializarPayloadOrcamento(orcamento: OrcamentoSalvo): Record<string, unknown> {
-  try {
-    return JSON.parse(JSON.stringify(orcamento)) as Record<string, unknown>
-  } catch {
-    return { ...orcamento } as unknown as Record<string, unknown>
-  }
-}
-
-function orcamentoParaUpsertSupabase(orc: OrcamentoSalvo, userId: string): OrcamentoSupabaseUpsert {
-  const orcNormalizado = aplicarStatusResolvido(orc)
-  const status = normalizarStatus(orcNormalizado.status)
-
-  return {
-    user_id: userId,
-    local_id: String(orc.id),
-    aprovado: status === 'Aprovado' || status === 'Convertido' || orcNormalizado.aprovado === true,
-    payload: serializarPayloadOrcamento(orcNormalizado),
-  }
+function orcamentoParaUpsertSupabase(orc: OrcamentoSalvo, userId: string) {
+  // Mesma pré-condição de antes: status sticky resolvido antes de serializar o payload.
+  return mapearOrcamentoParaUpsertSupabase(aplicarStatusResolvido(orc), userId)
 }
 
 function orcamentoDeRowSupabase(row: OrcamentoRow, local?: OrcamentoSalvo | null): OrcamentoSalvo {
