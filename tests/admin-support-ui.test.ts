@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import {
   isAdminSupportUiEnabled,
+  isAdminSupportUiEnabledFromValues,
   isVinculoElegivelSuporteUi,
   isVinculoTerceiroSuporteUi,
   listarCandidatosSuporteUi,
@@ -19,108 +20,60 @@ import { ADMIN_SUPPORT_UI_ENABLED } from '../lib/admin-support.ts'
 const root = process.cwd()
 const read = (rel: string) => readFileSync(join(root, rel), 'utf8')
 
-describe('ADMIN.4.2.8a feature gate fail-closed', () => {
+describe('ADMIN.4.2.8a/d feature gate fail-closed', () => {
   it('A) {} => false', () => {
-    assert.equal(isAdminSupportUiEnabled({}), false)
+    assert.equal(isAdminSupportUiEnabledFromValues(), false)
+    assert.equal(isAdminSupportUiEnabledFromValues(undefined, undefined), false)
   })
 
   it('B) ENABLED=true + ENV ausente => false', () => {
-    assert.equal(
-      isAdminSupportUiEnabled({ NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED: 'true' }),
-      false,
-    )
+    assert.equal(isAdminSupportUiEnabledFromValues('true', undefined), false)
   })
 
   it('C) ENABLED ausente + ENV=preview => false', () => {
-    assert.equal(
-      isAdminSupportUiEnabled({ NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV: 'preview' }),
-      false,
-    )
+    assert.equal(isAdminSupportUiEnabledFromValues(undefined, 'preview'), false)
   })
 
   it('D) ENABLED=true + ENV=preview => true', () => {
-    assert.equal(
-      isAdminSupportUiEnabled({
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED: 'true',
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV: 'preview',
-      }),
-      true,
-    )
+    assert.equal(isAdminSupportUiEnabledFromValues('true', 'preview'), true)
   })
 
   it('E) ENABLED=true + ENV=production => false', () => {
-    assert.equal(
-      isAdminSupportUiEnabled({
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED: 'true',
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV: 'production',
-      }),
-      false,
-    )
+    assert.equal(isAdminSupportUiEnabledFromValues('true', 'production'), false)
   })
 
   it('F) ENABLED=true + ENV="" => false', () => {
-    assert.equal(
-      isAdminSupportUiEnabled({
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED: 'true',
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV: '',
-      }),
-      false,
-    )
+    assert.equal(isAdminSupportUiEnabledFromValues('true', ''), false)
   })
 
   it('G) ENABLED=false + ENV=preview => false', () => {
-    assert.equal(
-      isAdminSupportUiEnabled({
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED: 'false',
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV: 'preview',
-      }),
-      false,
-    )
+    assert.equal(isAdminSupportUiEnabledFromValues('false', 'preview'), false)
   })
 
   it('H) ENABLED=true + ENV=development => false', () => {
-    assert.equal(
-      isAdminSupportUiEnabled({
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED: 'true',
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV: 'development',
-      }),
-      false,
-    )
+    assert.equal(isAdminSupportUiEnabledFromValues('true', 'development'), false)
   })
 
   it('I) whitespace/case: " true " + " PREVIEW " => true', () => {
-    assert.equal(
-      isAdminSupportUiEnabled({
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED: ' true ',
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV: ' PREVIEW ',
-      }),
-      true,
-    )
+    assert.equal(isAdminSupportUiEnabledFromValues(' true ', ' PREVIEW '), true)
   })
 
   it('J) valor desconhecido => false', () => {
-    assert.equal(
-      isAdminSupportUiEnabled({
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED: 'true',
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV: 'staging',
-      }),
-      false,
-    )
-    assert.equal(
-      isAdminSupportUiEnabled({
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED: 'yes',
-        NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV: 'preview',
-      }),
-      false,
-    )
+    assert.equal(isAdminSupportUiEnabledFromValues('true', 'staging'), false)
+    assert.equal(isAdminSupportUiEnabledFromValues('yes', 'preview'), false)
   })
 
-  it('não usa env de runtime do host no gate; compile-time default permanece false', () => {
+  it('4.2.8d: runtime usa referências estáticas process.env.NEXT_PUBLIC_*', () => {
     const uiLib = read('lib/admin-support-ui.ts')
+    assert.ok(uiLib.includes('process.env.NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED'))
+    assert.ok(uiLib.includes('process.env.NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV'))
+    // Acesso indireto proibido (não confundir com substring de process.env.*)
+    assert.equal(/(?<!process\.)env\.NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED/.test(uiLib), false)
+    assert.equal(/(?<!process\.)env\.NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV/.test(uiLib), false)
     assert.equal(/\bVERCEL_ENV\b/.test(uiLib), false)
     assert.equal(uiLib.includes('NEXT_PUBLIC_VERCEL_ENV'), false)
-    assert.ok(uiLib.includes('NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV'))
     assert.equal(ADMIN_SUPPORT_UI_ENABLED, false)
+    assert.equal(typeof isAdminSupportUiEnabled(), 'boolean')
   })
 })
 

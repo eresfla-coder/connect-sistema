@@ -16,28 +16,38 @@ export type AdminSupportUiEnv = {
 }
 
 /**
- * Feature gate fail-closed (client-safe).
- * UI ON somente quando AMBAS as vars públicas forem exatamente:
- *   NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED=true
- *   NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV=preview
+ * Avalia o gate fail-closed a partir de valores já obtidos.
+ * UI ON somente quando AMBAS forem exatamente true + preview
  * (após trim + lowercase).
- *
- * Não lê env de runtime do host no browser (indisponível/não confiável).
  *
  * LIMITAÇÃO: se Production receber deliberadamente AMBAS as vars
  * (enabled=true + env=preview), o client não detecta Production.
  * Autorização real permanece server-side (Master + elegibilidade).
  */
-export function isAdminSupportUiEnabled(
-  env: AdminSupportUiEnv | NodeJS.ProcessEnv = process.env,
+export function isAdminSupportUiEnabledFromValues(
+  enabled?: string | null,
+  uiEnv?: string | null,
 ): boolean {
-  const enabled = String(env.NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED || '')
-    .trim()
-    .toLowerCase()
-  const uiEnv = String(env.NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV || '')
-    .trim()
-    .toLowerCase()
-  return enabled === 'true' && uiEnv === 'preview'
+  return (
+    String(enabled || '')
+      .trim()
+      .toLowerCase() === 'true' &&
+    String(uiEnv || '')
+      .trim()
+      .toLowerCase() === 'preview'
+  )
+}
+
+/**
+ * Runtime do client — leituras ESTÁTICAS de process.env.NEXT_PUBLIC_*
+ * para o Next.js embutir os valores no bundle do browser.
+ * Não passar process.env como objeto / acesso indireto.
+ */
+export function isAdminSupportUiEnabled(): boolean {
+  return isAdminSupportUiEnabledFromValues(
+    process.env.NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED,
+    process.env.NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV,
+  )
 }
 
 export type VinculoSuporteUiLite = {
