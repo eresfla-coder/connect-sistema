@@ -1,20 +1,27 @@
 'use client'
 
 /**
- * ADMIN.4.2.7 — UI mínima Master: lifecycle iniciar / status / encerrar.
- * Sem gateway de dados do cliente. Sem impersonation.
+ * ADMIN.4.2.7 / 4.3.3 — UI mínima Master: lifecycle + Ver Orçamentos (gateway read-only).
+ * Sem impersonation. Sem painel do cliente. Lista só em memória.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { supabase } from '@/lib/supabase-browser'
 import {
   ADMIN_SUPPORT_UI_DURACOES,
   ADMIN_SUPPORT_UI_MOTIVO_MIN,
+  deveAplicarResultadoGatewayOrcamentos,
+  deveMostrarCtaVerOrcamentosSuporte,
+  formatarCampoOrcamentoSuporteUi,
   isAdminSupportUiEnabled,
   listarCandidatosSuporteUi,
+  mapearListaOrcamentosGatewayUi,
+  mensagemErroGatewayOrcamentosUi,
   montarPayloadIniciarSuporte,
+  montarUrlGatewayOrcamentosSuporte,
   sanitizarStatusSuporteParaUi,
+  type AdminSupportOrcamentoResumoUi,
   type CandidatoSuporteUi,
   type ClienteSuporteUiLite,
 } from '@/lib/admin-support-ui'
@@ -59,29 +66,75 @@ export default function AdminModoSuportePanel({ clientes, isMobile }: Props) {
   const [confirmEncerrar, setConfirmEncerrar] = useState(false)
   const [locked, setLocked] = useState(false)
 
+  const [orcamentos, setOrcamentos] = useState<AdminSupportOrcamentoResumoUi[]>([])
+  const [orcamentosVisivel, setOrcamentosVisivel] = useState(false)
+  const [orcamentosLoading, setOrcamentosLoading] = useState(false)
+  const [orcamentosErro, setOrcamentosErro] = useState('')
+
+  const mountedRef = useRef(true)
+  const orcamentosGenRef = useRef(0)
+  const orcamentosAbortRef = useRef<AbortController | null>(null)
+  const faseRef = useRef<FaseUi>(fase)
+  const ativoRef = useRef<StatusAtivo | null>(ativo)
+
+  faseRef.current = fase
+  ativoRef.current = ativo
+
   const selecionado: CandidatoSuporteUi | null = useMemo(() => {
     return candidatos.find((c) => `${c.admin_cliente_id}:${c.vinculo_id}` === selecionadoKey) || null
   }, [candidatos, selecionadoKey])
 
-  const aplicarStatus = useCallback((raw: Record<string, unknown>) => {
-    const s = sanitizarStatusSuporteParaUi(raw)
-    if (!s) return
-    if (s.active) {
-      setAtivo({
-        support_session_id: s.support_session_id,
-        clienteNome: s.cliente?.nome || 'Cliente',
-        sistemaNome: s.sistema?.nome || 'Sistema',
-        modo: s.modo || 'read_only',
-        iniciado_em: s.iniciado_em,
-        expira_em: s.expira_em,
-      })
-      setFase('ativo')
-      setInfo('')
-    } else {
-      setAtivo(null)
-      setFase((prev) => (prev === 'encerrado' ? prev : 'disponivel'))
+  const limparOrcamentosMemoria = useCallback(() => {
+    orcamentosGenRef.current += 1
+    try {
+      orcamentosAbortRef.current?.abort()
+    } catch {
+      /* ignore */
+    }
+    orcamentosAbortRef.current = null
+    setOrcamentos([])
+    setOrcamentosVisivel(false)
+    setOrcamentosLoading(false)
+    setOrcamentosErro('')
+  }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      orcamentosGenRef.current += 1
+      try {
+        orcamentosAbortRef.current?.abort()
+      } catch {
+        /* ignore */
+      }
+      orcamentosAbortRef.current = null
     }
   }, [])
+
+  const aplicarStatus = useCallback(
+    (raw: Record<string, unknown>) => {
+      const s = sanitizarStatusSuporteParaUi(raw)
+      if (!s) return
+      if (s.active) {
+        setAtivo({
+          support_session_id: s.support_session_id,
+          clienteNome: s.cliente?.nome || 'Cliente',
+          sistemaNome: s.sistema?.nome || 'Sistema',
+          modo: s.modo || 'read_only',
+          iniciado_em: s.iniciado_em,
+          expira_em: s.expira_em,
+        })
+        setFase('ativo')
+        setInfo('')
+      } else {
+        limparOrcamentosMemoria()
+        setAtivo(null)
+        setFase((prev) => (prev === 'encerrado' ? prev : 'disponivel'))
+      }
+    },
+    [limparOrcamentosMemoria],
+  )
 
   const carregarStatus = useCallback(async () => {
     try {
@@ -89,19 +142,129 @@ export default function AdminModoSuportePanel({ clientes, isMobile }: Props) {
       const res = await fetch('/api/admin/suporte/status', {
         headers: { Authorization: `Bearer ${token}` },
         credentials: 'include',
+        cache: 'no-store',
       })
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
+        if (!mountedRef.current) return
         setErro(String(payload.error || 'Falha ao consultar status de suporte.'))
         setFase('erro')
         return
       }
+      if (!mountedRef.current) return
       aplicarStatus(payload)
     } catch (e: unknown) {
+      if (!mountedRef.current) return
       setErro(e instanceof Error ? e.message : 'Erro ao consultar suporte.')
       setFase('erro')
     }
   }, [aplicarStatus])
+
+  const carregarOrcamentosGateway = useCallback(async () => {
+    if (locked || orcamentosLoading) return
+    if (faseRef.current !== 'ativo' || !ativoRef.current) return
+
+    const sessionIdEsperado = ativoRef.current.support_session_id
+    if (!sessionIdEsperado) return
+
+    // Aborta request anterior (double-click / reentrada)
+    try {
+      orcamentosAbortRef.current?.abort()
+    } catch {
+      /* ignore */
+    }
+    const ac = new AbortController()
+    orcamentosAbortRef.current = ac
+    const requestGen = ++orcamentosGenRef.current
+
+    setOrcamentosLoading(true)
+    setOrcamentosErro('')
+    setErro('')
+
+    try {
+      const token = await bearerMaster()
+      if (
+        !deveAplicarResultadoGatewayOrcamentos({
+          requestGen,
+          latestGen: orcamentosGenRef.current,
+          stillMounted: mountedRef.current,
+          faseAtiva: faseRef.current === 'ativo',
+          sessionIdEsperado,
+          sessionIdAtual: ativoRef.current?.support_session_id || null,
+        })
+      ) {
+        return
+      }
+
+      const url = montarUrlGatewayOrcamentosSuporte({ limit: 20, offset: 0 })
+      const res = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { Authorization: `Bearer ${token}` },
+        signal: ac.signal,
+      })
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
+
+      if (
+        !deveAplicarResultadoGatewayOrcamentos({
+          requestGen,
+          latestGen: orcamentosGenRef.current,
+          stillMounted: mountedRef.current,
+          faseAtiva: faseRef.current === 'ativo',
+          sessionIdEsperado,
+          sessionIdAtual: ativoRef.current?.support_session_id || null,
+        })
+      ) {
+        return
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        limparOrcamentosMemoria()
+        const msg = mensagemErroGatewayOrcamentosUi(res.status)
+        setOrcamentosErro(msg)
+        setErro(msg)
+        await carregarStatus()
+        return
+      }
+
+      if (!res.ok || body.ok === false) {
+        limparOrcamentosMemoria()
+        setOrcamentosErro(mensagemErroGatewayOrcamentosUi(res.status))
+        return
+      }
+
+      if (
+        !deveAplicarResultadoGatewayOrcamentos({
+          requestGen,
+          latestGen: orcamentosGenRef.current,
+          stillMounted: mountedRef.current,
+          faseAtiva: faseRef.current === 'ativo',
+          sessionIdEsperado,
+          sessionIdAtual: ativoRef.current?.support_session_id || null,
+        })
+      ) {
+        return
+      }
+
+      const lista = mapearListaOrcamentosGatewayUi(body)
+      setOrcamentos(lista)
+      setOrcamentosVisivel(true)
+      setOrcamentosLoading(false)
+    } catch (e: unknown) {
+      if (ac.signal.aborted) return
+      if (!mountedRef.current) return
+      if (requestGen !== orcamentosGenRef.current) return
+      limparOrcamentosMemoria()
+      setOrcamentosErro(mensagemErroGatewayOrcamentosUi(null))
+      void e
+    } finally {
+      if (orcamentosAbortRef.current === ac) orcamentosAbortRef.current = null
+      if (mountedRef.current && requestGen === orcamentosGenRef.current) {
+        setOrcamentosLoading(false)
+      }
+    }
+  }, [locked, orcamentosLoading, limparOrcamentosMemoria, carregarStatus])
 
   useEffect(() => {
     if (!enabled) return
@@ -117,6 +280,7 @@ export default function AdminModoSuportePanel({ clientes, isMobile }: Props) {
     setFase('iniciando')
     setErro('')
     setInfo('')
+    limparOrcamentosMemoria()
     try {
       const payload = montarPayloadIniciarSuporte({
         admin_cliente_id: selecionado.admin_cliente_id,
@@ -128,6 +292,7 @@ export default function AdminModoSuportePanel({ clientes, isMobile }: Props) {
       const res = await fetch('/api/admin/suporte/iniciar', {
         method: 'POST',
         credentials: 'include',
+        cache: 'no-store',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -138,6 +303,7 @@ export default function AdminModoSuportePanel({ clientes, isMobile }: Props) {
       if (!res.ok || body.ok === false) {
         throw new Error(String(body.error || `Falha ao iniciar (${res.status})`))
       }
+      if (!mountedRef.current) return
       setAtivo({
         support_session_id: body.support_session_id ? String(body.support_session_id) : null,
         clienteNome:
@@ -156,10 +322,11 @@ export default function AdminModoSuportePanel({ clientes, isMobile }: Props) {
       setInfo('Sessão de suporte iniciada (somente leitura). Lifecycle apenas — sem painel do cliente.')
       setMotivo('')
     } catch (e: unknown) {
+      if (!mountedRef.current) return
       setFase('erro')
       setErro(e instanceof Error ? e.message : 'Erro ao iniciar suporte.')
     } finally {
-      setLocked(false)
+      if (mountedRef.current) setLocked(false)
     }
   }
 
@@ -169,27 +336,35 @@ export default function AdminModoSuportePanel({ clientes, isMobile }: Props) {
     setLocked(true)
     setFase('encerrando')
     setErro('')
+    limparOrcamentosMemoria()
     try {
       const token = await bearerMaster()
       const res = await fetch('/api/admin/suporte/encerrar', {
         method: 'POST',
         credentials: 'include',
+        cache: 'no-store',
         headers: { Authorization: `Bearer ${token}` },
       })
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok || body.ok === false) {
         throw new Error(String(body.error || `Falha ao encerrar (${res.status})`))
       }
+      if (!mountedRef.current) return
+      limparOrcamentosMemoria()
       setAtivo(null)
       setFase('encerrado')
       setInfo('Suporte encerrado com segurança.')
     } catch (e: unknown) {
+      if (!mountedRef.current) return
+      limparOrcamentosMemoria()
       setFase('erro')
       setErro(e instanceof Error ? e.message : 'Erro ao encerrar suporte.')
     } finally {
-      setLocked(false)
+      if (mountedRef.current) setLocked(false)
     }
   }
+
+  const mostrarCtaOrcamentos = deveMostrarCtaVerOrcamentosSuporte(fase === 'ativo' && !!ativo)
 
   const box: CSSProperties = {
     marginTop: 18,
@@ -257,6 +432,89 @@ export default function AdminModoSuportePanel({ clientes, isMobile }: Props) {
               <b style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{ativo.support_session_id}</b>
             </div>
           ) : null}
+
+          {mostrarCtaOrcamentos ? (
+            <div style={{ marginTop: 10, display: 'grid', gap: 10 }} data-testid="admin-modo-suporte-orcamentos">
+              <button
+                type="button"
+                style={btnGhost}
+                disabled={locked || orcamentosLoading}
+                onClick={() => void carregarOrcamentosGateway()}
+                data-testid="admin-modo-suporte-ver-orcamentos"
+              >
+                {orcamentosLoading ? 'Carregando...' : 'Ver Orçamentos'}
+              </button>
+
+              {orcamentosErro ? (
+                <div
+                  style={{
+                    ...msgStyle,
+                    marginBottom: 0,
+                    background: 'rgba(220,38,38,0.2)',
+                    borderColor: 'rgba(248,113,113,0.45)',
+                  }}
+                >
+                  {orcamentosErro}
+                </div>
+              ) : null}
+
+              {orcamentosVisivel ? (
+                <div data-testid="admin-modo-suporte-orcamentos-lista">
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 800,
+                      color: '#86efac',
+                      letterSpacing: '.06em',
+                      marginBottom: 8,
+                    }}
+                  >
+                    Orçamentos — somente leitura
+                  </div>
+                  <p style={{ margin: '0 0 8px', fontSize: 12, color: 'rgba(226,232,240,0.65)' }}>
+                    Cliente da sessão: <strong>{ativo.clienteNome}</strong>. Campos vazios na coluna aparecem como —.
+                  </p>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={tableStyle}>
+                      <thead>
+                        <tr>
+                          <th style={th}>local_id</th>
+                          <th style={th}>cliente</th>
+                          <th style={th}>status</th>
+                          <th style={th}>total</th>
+                          <th style={th}>aprovado</th>
+                          <th style={th}>updated_at</th>
+                          <th style={th}>created_at</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orcamentos.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} style={{ ...td, color: 'rgba(226,232,240,0.6)' }}>
+                              Nenhum orçamento retornado.
+                            </td>
+                          </tr>
+                        ) : (
+                          orcamentos.map((row, idx) => (
+                            <tr key={`${row.local_id}-${idx}`}>
+                              <td style={td}>{formatarCampoOrcamentoSuporteUi(row.local_id)}</td>
+                              <td style={td}>{formatarCampoOrcamentoSuporteUi(row.cliente_nome)}</td>
+                              <td style={td}>{formatarCampoOrcamentoSuporteUi(row.status)}</td>
+                              <td style={td}>{formatarCampoOrcamentoSuporteUi(row.total)}</td>
+                              <td style={td}>{formatarCampoOrcamentoSuporteUi(row.aprovado)}</td>
+                              <td style={td}>{formatarCampoOrcamentoSuporteUi(row.updated_at)}</td>
+                              <td style={td}>{formatarCampoOrcamentoSuporteUi(row.created_at)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {!confirmEncerrar ? (
             <button
               type="button"
@@ -321,6 +579,7 @@ export default function AdminModoSuportePanel({ clientes, isMobile }: Props) {
                               }}
                               disabled={locked || fase === 'iniciando'}
                               onClick={() => {
+                                limparOrcamentosMemoria()
                                 setSelecionadoKey(key)
                                 setConfirmIniciar(false)
                                 setErro('')

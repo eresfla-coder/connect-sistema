@@ -207,3 +207,125 @@ export function sanitizarStatusSuporteParaUi(raw: Record<string, unknown> | null
     error: raw.error ? String(raw.error) : null,
   }
 }
+
+/** ADMIN.4.3.3 — gateway piloto read-only (URL fixa; tenant só da support session). */
+export const ADMIN_SUPPORT_ORCAMENTOS_GATEWAY_PATH = '/api/admin/suporte/dados/orcamentos'
+
+export const ADMIN_SUPPORT_ORCAMENTOS_TENANT_KEYS_PROIBIDOS = [
+  'user_id',
+  'perfil_id',
+  'empresa_id',
+  'cliente_id',
+  'vinculo_id',
+  'auth_user_id',
+  'target_auth_user_id',
+  'target_perfil_id',
+  'admin_cliente_id',
+  'admin_cliente_sistema_id',
+] as const
+
+export type AdminSupportOrcamentoResumoUi = {
+  local_id: string
+  cliente_nome: string | null
+  status: string
+  total: number | null
+  aprovado: boolean
+  updated_at: string | null
+  created_at: string | null
+}
+
+export function deveMostrarCtaVerOrcamentosSuporte(active: boolean): boolean {
+  return active === true
+}
+
+/** Primeiro smoke: somente limit/offset — sem tenant params. */
+export function montarUrlGatewayOrcamentosSuporte(opts?: {
+  limit?: number
+  offset?: number
+}): string {
+  const limit = Number.isInteger(opts?.limit) && (opts?.limit as number) > 0 ? (opts!.limit as number) : 20
+  const offset = Number.isInteger(opts?.offset) && (opts?.offset as number) >= 0 ? (opts!.offset as number) : 0
+  return `${ADMIN_SUPPORT_ORCAMENTOS_GATEWAY_PATH}?limit=${limit}&offset=${offset}`
+}
+
+export function urlGatewayOrcamentosTemTenantProibido(url: string): boolean {
+  try {
+    const u = new URL(url, 'https://local.invalid')
+    for (const key of ADMIN_SUPPORT_ORCAMENTOS_TENANT_KEYS_PROIBIDOS) {
+      if (u.searchParams.has(key)) return true
+    }
+    return false
+  } catch {
+    return true
+  }
+}
+
+export function formatarCampoOrcamentoSuporteUi(valor: unknown): string {
+  if (valor == null) return '—'
+  if (typeof valor === 'string' && !valor.trim()) return '—'
+  if (typeof valor === 'boolean') return valor ? 'sim' : 'não'
+  if (typeof valor === 'number') return Number.isFinite(valor) ? String(valor) : '—'
+  const s = String(valor).trim()
+  return s || '—'
+}
+
+/**
+ * ADMIN.4.3.3a — guarda pós-await: resposta stale NÃO pode repopular state
+ * após encerrar / inactive / unmount / nova sessão.
+ */
+export function deveAplicarResultadoGatewayOrcamentos(opts: {
+  requestGen: number
+  latestGen: number
+  stillMounted: boolean
+  faseAtiva: boolean
+  sessionIdEsperado: string | null
+  sessionIdAtual: string | null
+}): boolean {
+  if (!opts.stillMounted) return false
+  if (opts.requestGen !== opts.latestGen) return false
+  if (!opts.faseAtiva) return false
+  const esperado = opts.sessionIdEsperado ? String(opts.sessionIdEsperado) : ''
+  const atual = opts.sessionIdAtual ? String(opts.sessionIdAtual) : ''
+  if (!esperado || !atual || esperado !== atual) return false
+  return true
+}
+
+export function mensagemErroGatewayOrcamentosUi(statusHttp: number | null): string {
+  if (statusHttp === 401 || statusHttp === 403) {
+    return 'Sessão de suporte indisponível ou expirada.'
+  }
+  if (statusHttp != null && statusHttp >= 500) {
+    return 'Não foi possível listar orçamentos.'
+  }
+  return 'Não foi possível listar orçamentos.'
+}
+
+/** Mapeia data[] do gateway campo a campo — sem spread de row/payload. */
+export function mapearListaOrcamentosGatewayUi(body: unknown): AdminSupportOrcamentoResumoUi[] {
+  if (!body || typeof body !== 'object') return []
+  const data = (body as { data?: unknown }).data
+  if (!Array.isArray(data)) return []
+  const out: AdminSupportOrcamentoResumoUi[] = []
+  for (const item of data) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const row = item as Record<string, unknown>
+    let total: number | null = null
+    if (row.total != null && row.total !== '') {
+      const n = Number(row.total)
+      total = Number.isFinite(n) ? n : null
+    }
+    out.push({
+      local_id: row.local_id != null ? String(row.local_id) : '—',
+      cliente_nome:
+        row.cliente_nome != null && String(row.cliente_nome).trim()
+          ? String(row.cliente_nome).trim()
+          : null,
+      status: row.status != null ? String(row.status) : 'Pendente',
+      total,
+      aprovado: Boolean(row.aprovado),
+      updated_at: row.updated_at != null ? String(row.updated_at) : null,
+      created_at: row.created_at != null ? String(row.created_at) : null,
+    })
+  }
+  return out
+}

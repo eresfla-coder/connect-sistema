@@ -201,7 +201,7 @@ describe('ADMIN.4.2.7 source contracts UI', () => {
     assert.equal(uiLib.includes('sessoes_ativas'), false)
   })
 
-  it('O) nenhuma chamada a dados operacionais', () => {
+  it('O) nenhuma chamada a dados operacionais do painel (gateway suporte permitido)', () => {
     for (const bad of [
       '/api/orcamentos',
       'from(\'orcamentos\')',
@@ -213,6 +213,7 @@ describe('ADMIN.4.2.7 source contracts UI', () => {
     }
     assert.ok(panel.includes('/api/admin/suporte/iniciar'))
     assert.ok(panel.includes('/api/admin/suporte/encerrar'))
+    assert.ok(panel.includes('montarUrlGatewayOrcamentosSuporte'))
   })
 
   it('wire no /admin + Auth V1 getSession', () => {

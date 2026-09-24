@@ -490,9 +490,11 @@ describe('ADMIN.4.3.2a gateway — cache / read-only / secrets (AG–AR)', () =>
     assert.equal(route.includes('marcarSessaoExpirada'), false)
   })
 
-  it('UI não alterada nesta rodada (sem Ver Orçamentos)', () => {
-    assert.equal(panel.includes('Ver Orçamentos'), false)
-    assert.equal(panel.includes('/api/admin/suporte/dados/orcamentos'), false)
+  it('UI: Ver Orçamentos fica no painel ativo (ADMIN.4.3.3); gateway não embute UI', () => {
+    assert.equal(gw.includes('Ver Orçamentos'), false)
+    assert.equal(route.includes('Ver Orçamentos'), false)
+    assert.ok(panel.includes('Ver Orçamentos'))
+    assert.ok(panel.includes('/api/admin/suporte/dados/orcamentos') || panel.includes('montarUrlGatewayOrcamentosSuporte'))
   })
 
   it('validation order: Master antes de listar; listar só após contexto', () => {
