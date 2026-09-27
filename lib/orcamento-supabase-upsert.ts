@@ -1,6 +1,7 @@
 /**
  * Mapper de persistência Supabase para public.orcamentos.
  * ADMIN.4.3.6 — colunas resumo (status/total/cliente) + payload intacto.
+ * ADMIN.4.3.10 — payload sem envelope de publicação (CAMPOS_PUBLICACAO_NAO_PERSISTIDOS).
  *
  * NÃO recalcula totais (desconto/frete/m²). NÃO reestrutura payload.
  * A resolução sticky de status permanece no painel (aplicarStatusResolvido);
@@ -34,14 +35,39 @@ export function normalizarStatusOrcamentoUpsert(status?: string): StatusOrcament
   return 'Pendente'
 }
 
+/**
+ * Envelope de publicação injetado em public_documents
+ * (enriquecerPayloadDocumentoPublico / garantirPublicacaoOrcamento).
+ * Não pertence a OrcamentoSalvo: branding (pode conter logo base64,
+ * resolvido pela configuração canônica da empresa) e metadados do link.
+ * Somente primeiro nível — homônimos em cliente/itens são dados do documento.
+ */
+export const CAMPOS_PUBLICACAO_NAO_PERSISTIDOS = [
+  'cfg',
+  'config',
+  'empresa_logo',
+  'empresa_logo_og',
+  'empresa_nome',
+  'empresa_telefone',
+  'empresa_email',
+  'empresa_endereco',
+  'token',
+  'user_id',
+  'owner_user_id',
+] as const
+
+/** Cópia do orçamento para `payload`, sem envelope de publicação. Não muta a entrada. */
 export function serializarPayloadOrcamento(
   orcamento: OrcamentoSalvoUpsertInput,
 ): Record<string, unknown> {
+  let copia: Record<string, unknown>
   try {
-    return JSON.parse(JSON.stringify(orcamento)) as Record<string, unknown>
+    copia = JSON.parse(JSON.stringify(orcamento)) as Record<string, unknown>
   } catch {
-    return { ...orcamento } as Record<string, unknown>
+    copia = { ...orcamento } as Record<string, unknown>
   }
+  for (const campo of CAMPOS_PUBLICACAO_NAO_PERSISTIDOS) delete copia[campo]
+  return copia
 }
 
 /** Nome do cliente para coluna `cliente` — nunca "undefined"/"null" textuais. */

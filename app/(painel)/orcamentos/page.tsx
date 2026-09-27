@@ -40,7 +40,10 @@ import {
   APROVACOES_SYNC_INTERVAL_MS,
   type AprovacoesSyncMotivo,
   devePularSyncAprovacoes,
+  extrairPatchAprovacaoPublica,
+  selecionarOrcamentosParaPersistirAposSync,
   selecionarOrcamentosParaSyncAprovacao,
+  syncAprovacaoExigePersistencia,
 } from '@/lib/aprovacoes-publicas-sync'
 type TipoPessoaCliente = 'PF' | 'PJ'
 
@@ -2308,6 +2311,7 @@ export default function OrcamentoPage() {
 
     try {
       let alterou = false
+      const idsAlterados = new Set<string>()
       const { selecionados: candidatos, nextCursorOffset } = selecionarOrcamentosParaSyncAprovacao(
         listaBase,
         APROVACOES_SYNC_FANOUT_MAX,
@@ -2328,40 +2332,34 @@ export default function OrcamentoPage() {
             )
             if (!resp.ok) return orcamento
             const json = await resp.json()
-            const publico = json?.payload
-            const statusPublico = normalizarStatus(publico?.status)
-            const aprovacaoPublica = publico?.aprovacaoDigital
+            const patchAprovacao = extrairPatchAprovacaoPublica(json?.payload)
+            const statusPublico = normalizarStatus(patchAprovacao.status)
+            const aprovacaoPublica = patchAprovacao.aprovacaoDigital
             const temAprovacaoPublica = statusPublico === 'Aprovado' || statusPublico === 'Cancelado' || aprovacaoPublica?.status === 'aprovado' || aprovacaoPublica?.status === 'recusado'
             if (!temAprovacaoPublica) return orcamento
 
             const atualizado = aplicarStatusResolvido(
               {
                 ...orcamento,
-                ...(publico && typeof publico === 'object' ? (publico as Partial<OrcamentoSalvo>) : {}),
+                ...(patchAprovacao as Partial<OrcamentoSalvo>),
                 id: orcamento.id,
-                atualizadoEm: Number((publico as any)?.atualizadoEm || Date.now()),
+                atualizadoEm: patchAprovacao.atualizadoEm ?? orcamento.atualizadoEm,
               },
               orcamento,
-              publico && typeof publico === 'object' ? (publico as Record<string, unknown>) : null,
+              patchAprovacao as Record<string, unknown>,
             )
+            const aprovadoEmResolvido = atualizado.aprovadoEm || patchAprovacao.aprovadoEm || aprovacaoPublica?.data
 
-            if (
-              orcamento.status === atualizado.status &&
-              Boolean(orcamento.aprovado) === Boolean(atualizado.aprovado) &&
-              JSON.stringify((orcamento as any).aprovacaoDigital || {}) ===
-                JSON.stringify(atualizado.aprovacaoDigital || {})
-            ) {
+            if (!syncAprovacaoExigePersistencia(orcamento, { ...atualizado, aprovadoEm: aprovadoEmResolvido })) {
               return orcamento
             }
 
             alterou = true
+            idsAlterados.add(String(orcamento.id))
             return {
               ...atualizado,
-              aprovadoEm:
-                atualizado.aprovadoEm ||
-                (publico as any)?.aprovadoEm ||
-                aprovacaoPublica?.data ||
-                new Date().toLocaleString('pt-BR'),
+              atualizadoEm: Number(patchAprovacao.atualizadoEm || Date.now()),
+              aprovadoEm: aprovadoEmResolvido || new Date().toLocaleString('pt-BR'),
             }
           } catch (error) {
             console.error('[orcamentos] erro ao buscar aprovação pública:', error)
@@ -2381,9 +2379,7 @@ export default function OrcamentoPage() {
 
         const userIdSync = await obterUserIdOrcamentos(3)
         if (userIdSync) {
-          const aprovadosAlterados = listaFinal.filter(
-            (item) => item.status === 'Aprovado' || item.status === 'Convertido' || item.aprovado === true,
-          )
+          const aprovadosAlterados = selecionarOrcamentosParaPersistirAposSync(listaFinal, idsAlterados)
           for (const orcamento of aprovadosAlterados) {
             await persistirOrcamentoSupabase(orcamento, userIdSync)
           }
