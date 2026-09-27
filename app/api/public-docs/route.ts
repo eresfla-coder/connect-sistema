@@ -3,6 +3,11 @@ import { configRowSupabaseToPublica, mergeConfigPublicacao } from '@/lib/documen
 import { camposEmpresaNoPayload, enriquecerPayloadDocumentoPublico, timestampVersaoPublica } from '@/lib/empresaPublica'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { withTimeout } from '@/lib/fetch-with-timeout'
+import {
+  PUBLIC_DOCS_APROVACAO_VIEW_COLS,
+  deveUsarViewAprovacao,
+  montarRespostaViewAprovacao,
+} from '@/lib/public-docs-aprovacao-view'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -178,15 +183,16 @@ function mesclarPayloadAprovacaoPublica(
   }
 }
 
-async function buscarDocumentoOwner(
+async function buscarDocumentoOwner<Cols extends string = '*'>(
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
   documentType: string,
   documentId: string,
   userId: string,
+  cols: Cols = '*' as Cols,
 ) {
   const base = await supabaseAdmin
     .from('public_documents')
-    .select('*')
+    .select(cols)
     .eq('user_id', userId)
     .eq('document_id', documentId)
     .eq('document_type', documentType)
@@ -199,7 +205,7 @@ async function buscarDocumentoOwner(
   if (documentType === 'ordem_servico') {
     return supabaseAdmin
       .from('public_documents')
-      .select('*')
+      .select(cols)
       .eq('user_id', userId)
       .eq('documento_id', documentId)
       .in('tipo', ['ordem_servico', 'os'])
@@ -210,7 +216,7 @@ async function buscarDocumentoOwner(
 
   return supabaseAdmin
     .from('public_documents')
-    .select('*')
+    .select(cols)
     .eq('user_id', userId)
     .eq('tipo', documentType)
     .eq('documento_id', documentId)
@@ -358,6 +364,30 @@ export async function GET(req: NextRequest) {
     }
 
     if (documentType === 'orcamento' && documentId) {
+      if (deveUsarViewAprovacao({ view: url.searchParams.get('view'), documentType, token, userIdOwner })) {
+        const { data, error } = await buscarDocumentoOwner(
+          supabaseAdmin,
+          'orcamento',
+          documentId,
+          userIdOwner,
+          PUBLIC_DOCS_APROVACAO_VIEW_COLS,
+        )
+
+        if (error) {
+          console.error('[PUBLIC_DOCS_GET]', error)
+          return erroApi(error)
+        }
+
+        if (!data) {
+          return NextResponse.json(
+            { success: false, error: 'Documento não encontrado.' },
+            { status: 404 }
+          )
+        }
+
+        return NextResponse.json(montarRespostaViewAprovacao(data))
+      }
+
       let result
 
       if (token && tokenFormatoValido(token)) {

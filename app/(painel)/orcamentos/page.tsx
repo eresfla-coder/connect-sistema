@@ -2327,7 +2327,7 @@ export default function OrcamentoPage() {
               headers.Authorization = `Bearer ${sessao.session.access_token}`
             }
             const resp = await fetch(
-              `/api/public-docs?document_type=orcamento&document_id=${encodeURIComponent(String(orcamento.id))}&t=${Date.now()}`,
+              `/api/public-docs?document_type=orcamento&document_id=${encodeURIComponent(String(orcamento.id))}&view=aprovacao&t=${Date.now()}`,
               { cache: 'no-store', headers },
             )
             if (!resp.ok) return orcamento
