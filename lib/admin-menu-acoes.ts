@@ -12,6 +12,7 @@ import {
   pagamentoJaConfirmado,
   podeAcionarMarcarPago,
 } from './admin-ciclo-comercial.ts'
+import { vinculoSuporteDoCliente, type VinculoSuporteUiLite } from './admin-support-ui.ts'
 
 export type OrigemMenuCarteira = 'connect' | 'terceiro'
 
@@ -24,6 +25,7 @@ export type AcaoMenuCarteiraId =
   | 'desbloquear'
   | 'oferta_upgrade'
   | 'backups'
+  | 'modo_suporte'
   | 'excluir'
 
 export type ItemMenuCarteira = {
@@ -35,6 +37,8 @@ export type ItemMenuCarteira = {
 }
 
 export const LABEL_EXCLUIR_CLIENTE_CARTEIRA = 'Excluir cliente da carteira'
+
+export const LABEL_ENTRAR_MODO_SUPORTE = 'Entrar em modo suporte'
 
 export const TEXTO_CONFIRMACAO_EXCLUIR_CARTEIRA =
   'Esta ação removerá o cliente da carteira comercial e todos os sistemas vinculados a ele. Esta ação não exclui automaticamente o usuário/login do Connect.'
@@ -76,6 +80,11 @@ export function resolverAcoesMenuCarteira(params: {
   podeResetSenha?: boolean
   processando?: boolean
   permanente?: boolean
+  /** Todos os vínculos do cliente; o elegível é escolhido por vinculoSuporteDoCliente. */
+  vinculosSuporte?: VinculoSuporteUiLite[] | null
+  /** Só true após GET /api/admin/suporte/status confirmar Master (fail-closed). */
+  suporteMasterPermitido?: boolean
+  sessaoSuporteAtiva?: boolean
 }): ItemMenuCarteira[] {
   const origem = normalizarOrigemMenu(params.origem)
   const status = normalizarStatusVinculoMenu(params.statusVinculo)
@@ -165,6 +174,17 @@ export function resolverAcoesMenuCarteira(params: {
       id: 'backups',
       label: 'Backups do cliente',
       disabled: processando,
+    })
+  }
+
+  // Modo Suporte: vínculo Connect elegível (qualquer posição) + Master confirmado
+  if (params.suporteMasterPermitido === true && vinculoSuporteDoCliente({ sistemasResumo: params.vinculosSuporte })) {
+    const sessaoAtiva = params.sessaoSuporteAtiva === true
+    itens.push({
+      id: 'modo_suporte',
+      label: LABEL_ENTRAR_MODO_SUPORTE,
+      disabled: processando || sessaoAtiva,
+      title: sessaoAtiva ? 'Encerre a sessão de suporte atual antes de iniciar outra.' : undefined,
     })
   }
 

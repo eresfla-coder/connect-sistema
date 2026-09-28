@@ -300,6 +300,156 @@ export function mensagemErroGatewayOrcamentosUi(statusHttp: number | null): stri
   return 'Não foi possível listar orçamentos.'
 }
 
+/* ------------------------------------------------------------------ */
+/* ADMIN.4.4.2 — integração do Modo Suporte à carteira Admin           */
+/* ------------------------------------------------------------------ */
+
+export const ADMIN_SUPPORT_UI_DURACAO_DEFAULT: AdminSupportUiDuracao = 15
+
+export const CODIGO_SUPPORT_MASTER_ONLY_UI = 'ADMIN_SUPPORT_MASTER_ONLY'
+export const CODIGO_SUPPORT_CONTEXTO_INVALIDO_UI = 'ADMIN_SUPPORT_CONTEXTO_INVALIDO'
+
+export const ADMIN_SUPPORT_STATUS_PATH = '/api/admin/suporte/status'
+export const ADMIN_SUPPORT_INICIAR_PATH = '/api/admin/suporte/iniciar'
+export const ADMIN_SUPPORT_ENCERRAR_PATH = '/api/admin/suporte/encerrar'
+
+/** Único módulo exposto pela área de suporte nesta fase (gateway read-only). */
+export const ADMIN_SUPPORT_MODULOS_DISPONIVEIS = [
+  { id: 'orcamentos', label: 'Orçamentos — Resumo' },
+] as const
+
+export const TEXTO_MODULOS_GRADUAIS_SUPORTE = 'Outros módulos serão disponibilizados gradualmente.'
+
+export const AVISO_SUPORTE_BLOQUEADO =
+  'Este cliente está bloqueado comercialmente. O Modo Suporte não altera o bloqueio.'
+export const AVISO_SUPORTE_VENCIDO =
+  'Este cliente está vencido. O Modo Suporte não altera o vencimento.'
+
+/** Primeiro vínculo elegível (não assume sistemasResumo[0]). */
+export function vinculoSuporteDoCliente<T extends VinculoSuporteUiLite>(
+  cliente: { sistemasResumo?: T[] | null } | null | undefined,
+): T | null {
+  for (const v of cliente?.sistemasResumo || []) {
+    if (isVinculoElegivelSuporteUi(v)) return v
+  }
+  return null
+}
+
+export function motivoSuporteUiValido(motivo: unknown): boolean {
+  const texto = String(motivo ?? '').trim()
+  return texto.length >= ADMIN_SUPPORT_UI_MOTIVO_MIN && texto.length <= ADMIN_SUPPORT_UI_MOTIVO_MAX
+}
+
+export type SituacaoComercialSuporte = {
+  rotulo: string
+  bloqueado: boolean
+  vencido: boolean
+  avisos: string[]
+}
+
+function hojeIsoLocal(): string {
+  const d = new Date()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mm}-${dd}`
+}
+
+/**
+ * Situação comercial exibida no modal/banner (informativa; não bloqueia o suporte).
+ * Vencido segue a regra da carteira: não permanente e vencimento anterior a hoje.
+ */
+export function situacaoComercialSuporte(input: {
+  status?: string | null
+  vencimento?: string | null
+  permanente?: boolean
+  hojeIso?: string
+}): SituacaoComercialSuporte {
+  const status = String(input.status || '').trim().toLowerCase()
+  const bloqueado = status === 'bloqueado'
+  const venc = String(input.vencimento || '').trim().slice(0, 10)
+  const hoje = input.hojeIso || hojeIsoLocal()
+  const vencido = !input.permanente && /^\d{4}-\d{2}-\d{2}$/.test(venc) && venc < hoje
+
+  let rotulo = 'Sem status'
+  if (bloqueado) rotulo = 'Bloqueado'
+  else if (vencido) rotulo = 'Vencido'
+  else if (status === 'trial' || status === 'teste') rotulo = 'Trial'
+  else if (status === 'ativo') rotulo = 'Ativo'
+  else if (status) rotulo = status.charAt(0).toUpperCase() + status.slice(1)
+
+  const avisos: string[] = []
+  if (bloqueado) avisos.push(AVISO_SUPORTE_BLOQUEADO)
+  if (vencido) avisos.push(AVISO_SUPORTE_VENCIDO)
+  return { rotulo, bloqueado, vencido, avisos }
+}
+
+/** Estado UX da sessão ativa (autoridade real: cookie httpOnly + Bearer Master). */
+export type ContextoSuporteUi = {
+  support_session_id: string
+  admin_cliente_id: string
+  vinculo_id: string
+  clienteNome: string
+  sistemaNome: string
+  modo: 'read_only'
+  iniciado_em: string | null
+  expira_em: string | null
+}
+
+/** Resposta de /iniciar ou /status → contexto. Fail-closed se não for read_only. */
+export function contextoSuporteDeResposta(raw: unknown): ContextoSuporteUi | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const s = sanitizarStatusSuporteParaUi(raw as Record<string, unknown>)
+  if (!s || !s.support_session_id) return null
+  if (s.modo !== 'read_only') return null
+  return {
+    support_session_id: s.support_session_id,
+    admin_cliente_id: s.cliente?.id || '',
+    vinculo_id: s.sistema?.vinculo_id || '',
+    clienteNome: s.cliente?.nome || 'Cliente',
+    sistemaNome: s.sistema?.nome || 'Sistema',
+    modo: 'read_only',
+    iniciado_em: s.iniciado_em,
+    expira_em: s.expira_em,
+  }
+}
+
+export type ResultadoStatusSuporteUi =
+  | { tipo: 'ativo'; masterPermitido: true; contexto: ContextoSuporteUi }
+  | { tipo: 'inativo'; masterPermitido: true }
+  | { tipo: 'master_only'; masterPermitido: false }
+  | { tipo: 'erro'; masterPermitido: false }
+
+/** Interpreta GET /api/admin/suporte/status. Qualquer falha esconde a ação (fail-closed). */
+export function interpretarRespostaStatusSuporte(httpStatus: number, body: unknown): ResultadoStatusSuporteUi {
+  const b = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  if (httpStatus === 403 && b.code === CODIGO_SUPPORT_MASTER_ONLY_UI) {
+    return { tipo: 'master_only', masterPermitido: false }
+  }
+  if (httpStatus === 403 && b.code === CODIGO_SUPPORT_CONTEXTO_INVALIDO_UI) {
+    return { tipo: 'inativo', masterPermitido: true }
+  }
+  if (httpStatus < 200 || httpStatus >= 300 || b.ok !== true) {
+    return { tipo: 'erro', masterPermitido: false }
+  }
+  if (b.active === true) {
+    const contexto = contextoSuporteDeResposta(b)
+    if (contexto) return { tipo: 'ativo', masterPermitido: true, contexto }
+  }
+  return { tipo: 'inativo', masterPermitido: true }
+}
+
+/** 401/403 do gateway = sessão indisponível/expirada → limpar contexto local, sem recriar. */
+export function deveLimparContextoSuportePorHttp(httpStatus: number | null): boolean {
+  return httpStatus === 401 || httpStatus === 403
+}
+
+/** Horário de expiração para o banner (visual; autoridade é o servidor). */
+export function formatarExpiracaoSuporteUi(expiraEm: string | null | undefined): string {
+  const ms = expiraEm ? Date.parse(expiraEm) : NaN
+  if (!Number.isFinite(ms)) return '—'
+  return new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
 /** Mapeia data[] do gateway campo a campo — sem spread de row/payload. */
 export function mapearListaOrcamentosGatewayUi(body: unknown): AdminSupportOrcamentoResumoUi[] {
   if (!body || typeof body !== 'object') return []

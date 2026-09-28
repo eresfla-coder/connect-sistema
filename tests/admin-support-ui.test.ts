@@ -217,7 +217,17 @@ describe('ADMIN.4.2.7 source contracts UI', () => {
   })
 
   it('wire no /admin + Auth V1 getSession', () => {
-    assert.ok(page.includes('AdminModoSuportePanel'))
+    // ADMIN.4.4.2: painel experimental substituído por Modal + Banner na carteira
+    assert.equal(page.includes('<AdminModoSuportePanel'), false)
+    assert.equal(page.includes("from '@/components/admin/AdminModoSuportePanel'"), false)
+    assert.ok(page.includes("import AdminModoSuporteBanner from '@/components/admin/AdminModoSuporteBanner'"))
+    assert.ok(page.includes('<AdminModoSuporteBanner'))
+    assert.ok(page.includes("import AdminModoSuporteModal from '@/components/admin/AdminModoSuporteModal'"))
+    assert.ok(page.includes('<AdminModoSuporteModal'))
+    assert.equal(page.includes('isAdminSupportUiEnabled'), false)
+    assert.equal(page.includes('NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED'), false)
+    assert.equal(page.includes('NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENV'), false)
+    assert.ok(panel.length > 0)
     assert.ok(panel.includes("from '@/lib/supabase-browser'"))
     assert.ok(panel.includes('supabase.auth.getSession()'))
     assert.ok(uiLib.includes('NEXT_PUBLIC_ADMIN_SUPPORT_UI_ENABLED'))

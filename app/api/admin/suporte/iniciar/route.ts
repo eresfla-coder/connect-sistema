@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
         nome: result.sistemaNome,
       },
       aviso:
-        'Contexto de suporte criado (read_only). Acesso a dados do cliente será ADMIN.4.3.',
+        'Contexto de suporte criado (read_only). Disponível: Orçamentos — Resumo (somente leitura).',
     })
 
     aplicarCookieSuporte(res, result.tokenBruto, result.session.expira_em)

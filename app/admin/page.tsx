@@ -5,7 +5,7 @@
  * Guard: consultarAcessoPainel antes de carregar; APIs /api/admin/* via requireAdminFromRequest.
  * @see docs/AUTENTICACAO-V1.md
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
@@ -15,7 +15,16 @@ import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetrica
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
 import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
 import AdminSistemasPanel from '@/components/admin/AdminSistemasPanel'
-import AdminModoSuportePanel from '@/components/admin/AdminModoSuportePanel'
+import AdminModoSuporteModal from '@/components/admin/AdminModoSuporteModal'
+import AdminModoSuporteBanner from '@/components/admin/AdminModoSuporteBanner'
+import {
+  ADMIN_SUPPORT_STATUS_PATH,
+  interpretarRespostaStatusSuporte,
+  situacaoComercialSuporte,
+  vinculoSuporteDoCliente,
+  type ContextoSuporteUi,
+  type SituacaoComercialSuporte,
+} from '@/lib/admin-support-ui'
 import {
   labelOrigemSistemaBadge,
   labelSistemaContratadoSelect,
@@ -346,6 +355,9 @@ export default function AdminSaasMasterPage() {
   const [healthItens, setHealthItens] = useState<Array<{ nome: string; status: string; detalhe?: string }>>([])
   const [healthLoading, setHealthLoading] = useState(false)
   const [backupModalCliente, setBackupModalCliente] = useState<PerfilAdmin | null>(null)
+  const [suporteMasterPermitido, setSuporteMasterPermitido] = useState(false)
+  const [suporteContexto, setSuporteContexto] = useState<ContextoSuporteUi | null>(null)
+  const [suporteModalCliente, setSuporteModalCliente] = useState<PerfilAdmin | null>(null)
   const [desktopActionMenu, setDesktopActionMenu] = useState<DesktopActionMenuState | null>(null)
   const desktopActionMenuRef = useRef<HTMLDivElement | null>(null)
   const [desktopActionMenuAnimIn, setDesktopActionMenuAnimIn] = useState(false)
@@ -419,6 +431,7 @@ export default function AdminSaasMasterPage() {
         return
       }
 
+      void verificarStatusSuporte(session.access_token)
       await carregarTudo(session.access_token)
     } catch (error) {
       console.error('[ADMIN_PAGE_START]', error)
@@ -427,6 +440,50 @@ export default function AdminSaasMasterPage() {
       setLoading(false)
     }
   }
+
+  /** Consulta única (sem polling). Role admins recebem MASTER_ONLY e não veem a ação. */
+  const verificarStatusSuporte = useCallback(async (tokenInformado?: string) => {
+    try {
+      const token = tokenInformado || (await supabase.auth.getSession()).data.session?.access_token
+      if (!token) {
+        setSuporteMasterPermitido(false)
+        setSuporteContexto(null)
+        return
+      }
+      const res = await fetch(ADMIN_SUPPORT_STATUS_PATH, {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        cache: 'no-store',
+      })
+      const body = await res.json().catch(() => ({}))
+      const resultado = interpretarRespostaStatusSuporte(res.status, body)
+      setSuporteMasterPermitido(resultado.masterPermitido)
+      setSuporteContexto(resultado.tipo === 'ativo' ? resultado.contexto : null)
+    } catch {
+      setSuporteMasterPermitido(false)
+      setSuporteContexto(null)
+    }
+  }, [])
+
+  const limparContextoSuporte = useCallback(() => {
+    setSuporteContexto(null)
+    setSuporteModalCliente(null)
+  }, [])
+
+  const aoSuporteEncerrado = useCallback(() => {
+    limparContextoSuporte()
+    setFeedbackAdmin({ tipo: 'sucesso', mensagem: 'Modo suporte encerrado.' })
+  }, [limparContextoSuporte])
+
+  const aoSuporteInvalido = useCallback(() => {
+    limparContextoSuporte()
+    setFeedbackAdmin({ tipo: 'aviso', mensagem: 'Sessão de suporte indisponível ou expirada.' })
+    void verificarStatusSuporte()
+  }, [limparContextoSuporte, verificarStatusSuporte])
+
+  const aoSuporteExpiracaoLocal = useCallback(() => {
+    void verificarStatusSuporte()
+  }, [verificarStatusSuporte])
 
   useEffect(() => {
     if (aba !== 'saude') return
@@ -573,7 +630,25 @@ export default function AdminSaasMasterPage() {
       podeResetSenha: cliente.pode_reset_senha,
       processando: acaoProcessandoId === cliente.id,
       permanente: isPermanent(cliente),
+      vinculosSuporte: cliente.sistemasResumo || null,
+      suporteMasterPermitido,
+      sessaoSuporteAtiva: Boolean(suporteContexto),
     })
+  }
+
+  function situacaoSuporteDoVinculo(cliente: PerfilAdmin, vinculoId: string | null | undefined): SituacaoComercialSuporte {
+    const v = cliente.sistemasResumo?.find((s) => s.vinculo_id && s.vinculo_id === vinculoId) || null
+    const vencimento = v?.data_vencimento || cliente.vencimento
+    return situacaoComercialSuporte({
+      status: v?.status || cliente.status,
+      vencimento,
+      permanente: isPermanent({ ...cliente, vencimento, valor_plano: v?.valor ?? cliente.valor_plano }),
+    })
+  }
+
+  function situacaoSuporteDaSessao(contexto: ContextoSuporteUi): SituacaoComercialSuporte | null {
+    const cliente = clientes.find((c) => c.admin_cliente_id && c.admin_cliente_id === contexto.admin_cliente_id)
+    return cliente ? situacaoSuporteDoVinculo(cliente, contexto.vinculo_id) : null
   }
 
   function executarAcaoMenuCarteira(cliente: PerfilAdmin, acaoId: AcaoMenuCarteiraId) {
@@ -618,6 +693,16 @@ export default function AdminSaasMasterPage() {
         setDesktopActionMenu(null)
         setAcaoClienteMobile(null)
         setBackupModalCliente(cliente)
+        break
+      case 'modo_suporte':
+        setDesktopActionMenu(null)
+        setAcaoClienteMobile(null)
+        if (!suporteMasterPermitido || suporteContexto) break
+        if (!cliente.admin_cliente_id || !vinculoSuporteDoCliente(cliente)) {
+          mostrarFeedbackAdmin('erro', 'Cliente sem vínculo Connect elegível para suporte.')
+          break
+        }
+        setSuporteModalCliente(cliente)
         break
       case 'excluir':
         setDesktopActionMenu(null)
@@ -1894,7 +1979,16 @@ export default function AdminSaasMasterPage() {
           </div>
         </section>
 
-        <AdminModoSuportePanel clientes={clientes} isMobile={isMobileAdmin} />
+        {suporteContexto ? (
+          <AdminModoSuporteBanner
+            contexto={suporteContexto}
+            situacao={situacaoSuporteDaSessao(suporteContexto)}
+            isMobile={isMobileAdmin}
+            onEncerrado={aoSuporteEncerrado}
+            onSessaoInvalida={aoSuporteInvalido}
+            onExpiracaoLocal={aoSuporteExpiracaoLocal}
+          />
+        ) : null}
 
         {isMobileAdmin ? (
           <button type="button" style={styles.mobileMenuButton} onClick={() => setMobileDrawerOpen((open) => !open)}>
@@ -2414,6 +2508,29 @@ export default function AdminSaasMasterPage() {
           </div>
         </div>
       ) : null}
+
+      {suporteModalCliente && !suporteContexto
+        ? (() => {
+            const vinculo = vinculoSuporteDoCliente(suporteModalCliente)
+            if (!vinculo?.vinculo_id || !suporteModalCliente.admin_cliente_id) return null
+            return (
+              <AdminModoSuporteModal
+                adminClienteId={suporteModalCliente.admin_cliente_id}
+                vinculoId={vinculo.vinculo_id}
+                clienteNome={suporteModalCliente.nome_empresa || suporteModalCliente.email || 'Cliente'}
+                sistemaNome={vinculo.nome || 'Sistema'}
+                situacao={situacaoSuporteDoVinculo(suporteModalCliente, vinculo.vinculo_id)}
+                isMobile={isMobileAdmin}
+                onCancelar={() => setSuporteModalCliente(null)}
+                onIniciado={(contexto) => {
+                  setSuporteModalCliente(null)
+                  setSuporteContexto(contexto)
+                  mostrarFeedbackAdmin('sucesso', 'Modo suporte iniciado (somente leitura).')
+                }}
+              />
+            )
+          })()
+        : null}
 
       {backupModalCliente ? (
         <AdminBackupsModal
