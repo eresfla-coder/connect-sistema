@@ -8,13 +8,20 @@ import {
   deveUsarViewAprovacao,
   montarRespostaViewAprovacao,
 } from '@/lib/public-docs-aprovacao-view'
+import {
+  ERRO_OWNERSHIP_PUBLICACAO,
+  publicacaoCorrespondeAoPedido,
+  resolverAlvoPublicacaoPost,
+  salvarPublicacaoComOwnership,
+  type ExecutorPublicacao,
+} from '@/lib/public-docs-token-binding'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const TIPOS_PUBLICOS = new Set(['orcamento', 'ordem_servico', 'recibo', 'contrato', 'os'])
 const PUBLIC_DOCS_ROW_COLS =
-  'token,document_type,document_id,documento_id,tipo,user_id,payload,updated_at,created_at'
+  'id,token,document_type,document_id,documento_id,tipo,user_id,payload,updated_at,created_at'
 const PUBLIC_DOCS_POST_BUDGET_MS = 8000
 const PUBLIC_DOCS_QUERY_TIMEOUT_MS = 3000
 const PUBLIC_DOCS_CONFIG_TIMEOUT_MS = 2000
@@ -457,6 +464,7 @@ export async function GET(req: NextRequest) {
             .select('*')
             .in('tipo', ['ordem_servico', 'os'])
             .eq('documento_id', documentoId)
+            .eq('token', token)
         : supabaseAdmin
             .from('public_documents')
             .select('*')
@@ -471,7 +479,7 @@ export async function GET(req: NextRequest) {
       return erroApi(error)
     }
 
-    if (!data) {
+    if (!data || !publicacaoCorrespondeAoPedido(data, { token, tipo, documentoId })) {
       return NextResponse.json(
         { success: false, error: 'Documento não encontrado.' },
         { status: 404 }
@@ -619,6 +627,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Documento pertence a outro usuário.' }, { status: 403 })
     }
 
+    const alvo = resolverAlvoPublicacaoPost({
+      existente,
+      tipoPedido: tipo,
+      documentoIdPedido: documentoId,
+      userIdBearer,
+      tokenConfere,
+      buscaConclusiva: !erroBusca,
+    })
+    if (alvo.ok === false) {
+      return NextResponse.json({ success: false, error: alvo.error }, { status: alvo.status })
+    }
+    const canonicalDocumentType = alvo.tipo
+    const canonicalDocumentId = alvo.documentoId
+
     const payloadParaMerge =
       !userIdBearer && existente?.payload && isAprovacaoPublica
         ? mesclarPayloadAprovacaoPublica(existente.payload as Record<string, unknown>, payloadRecebido as Record<string, unknown>)
@@ -632,14 +654,7 @@ export async function POST(req: NextRequest) {
 
     const userIdToken = userIdBearer
 
-    const userId = String(
-      userIdBearer ||
-      existente?.user_id ||
-      body?.user_id ||
-      payloadRecebido?.user_id ||
-      payloadRecebido?.owner_user_id ||
-      ''
-    ).trim()
+    const userId = alvo.userId
 
     let configEmpresaPublica: ReturnType<typeof mergeConfigPublicacao> | null = mergeConfigPublicacao(
       payloadRecebido?.config,
@@ -681,76 +696,63 @@ export async function POST(req: NextRequest) {
       { token, userId: userId || undefined, v: versao }
     )
 
-    const dadosSalvar = linhaPublicDocument(tipo, documentoId, token, payload, userId ? { user_id: userId } : undefined)
+    const dadosSalvar = linhaPublicDocument(
+      canonicalDocumentType,
+      canonicalDocumentId,
+      token,
+      payload,
+      userId ? { user_id: userId } : undefined,
+    )
     dadosSalvar.updated_at = new Date().toISOString()
 
     if (process.env.NODE_ENV === 'development') {
       console.error('[PUBLIC_DOCS_POST] row', dadosSalvar)
     }
 
-    async function salvarPublicDocument() {
-      if (existente?.token) {
-        return supabaseAdmin
-          .from('public_documents')
-          .update(dadosSalvar)
-          .eq('token', existente.token)
-      }
-
-      const insertResult = await supabaseAdmin.from('public_documents').insert(dadosSalvar)
-
-      if (!insertResult.error) return insertResult
-
-      if (insertResult.error?.code === '23505') {
-        console.warn('[INSERT_PUBLIC_DOCS] Conflito único, tentando update idempotente', { tipo, documentoId })
-
-        if (token) {
-          const porToken = await supabaseAdmin.from('public_documents').update(dadosSalvar).eq('token', token)
-          if (!porToken.error) return porToken
+    const executorPublicacao: ExecutorPublicacao = {
+      inserir: async (linha) => {
+        const { error } = await supabaseAdmin.from('public_documents').insert(linha)
+        return { error }
+      },
+      atualizar: async (linha, filtros) => {
+        let query: any = supabaseAdmin.from('public_documents').update(linha)
+        for (const filtro of filtros) {
+          if (filtro.op === 'eq') query = query.eq(filtro.coluna, filtro.valor)
+          else if (filtro.op === 'in') query = query.in(filtro.coluna, filtro.valor)
+          else query = query.is(filtro.coluna, null)
         }
-
-        const porNovasColunas = await supabaseAdmin
-          .from('public_documents')
-          .update(dadosSalvar)
-          .eq('document_type', tipo)
-          .eq('document_id', documentoId)
-
-        if (!porNovasColunas.error) return porNovasColunas
-
-        if (tipo === 'ordem_servico') {
-          return supabaseAdmin
-            .from('public_documents')
-            .update(dadosSalvar)
-            .in('tipo', ['ordem_servico', 'os'])
-            .eq('documento_id', documentoId)
-        }
-
-        return supabaseAdmin
-          .from('public_documents')
-          .update(dadosSalvar)
-          .eq('tipo', tipo)
-          .eq('documento_id', documentoId)
-      }
-
-      return insertResult
+        const { data, error } = await query.select('token')
+        return { error, linhasAfetadas: Array.isArray(data) ? data.length : 0 }
+      },
     }
 
     verificarTempo()
     const { error: erroSalvar } = await withTimeout(
-      salvarPublicDocument(),
+      salvarPublicacaoComOwnership({
+        existente,
+        linha: dadosSalvar,
+        ownerAutenticado: userIdBearer,
+        tipo: canonicalDocumentType,
+        documentoId: canonicalDocumentId,
+        executor: executorPublicacao,
+      }),
       PUBLIC_DOCS_QUERY_TIMEOUT_MS,
-      () => ({ error: { message: 'timeout ao salvar documento público' } }),
+      () => ({ error: { code: 'TIMEOUT', message: 'timeout ao salvar documento público' } }),
     )
 
     if (erroSalvar) {
       console.error('[SALVAR_PUBLIC_DOCS]', {
         message: erroSalvar.message,
-        tipo,
-        documento_id: documentoId,
+        tipo: canonicalDocumentType,
+        documento_id: canonicalDocumentId,
       })
+      if (erroSalvar.code === ERRO_OWNERSHIP_PUBLICACAO) {
+        return NextResponse.json({ success: false, error: erroSalvar.message }, { status: 409 })
+      }
       return erroApi(erroSalvar)
     }
 
-    if (tipo === 'contrato') {
+    if (canonicalDocumentType === 'contrato' && alvo.podeAtualizarStatusContrato) {
       const assinaturaPayload = (payload as Record<string, unknown>)?.assinatura as Record<string, unknown> | undefined
       const assinado =
         assinaturaPayload?.status === 'assinado' ||
@@ -759,7 +761,7 @@ export async function POST(req: NextRequest) {
         const { error: errContrato } = await supabaseAdmin
           .from('contratos')
           .update({ status: 'Assinado' })
-          .eq('id', documentoId)
+          .eq('id', canonicalDocumentId)
         if (errContrato) {
           console.warn('[PUBLIC_DOCS_POST] contrato status:', errContrato.message)
         }
@@ -769,10 +771,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       token,
-      tipo,
-      document_type: tipo,
-      documentoId,
-      document_id: documentoId,
+      tipo: canonicalDocumentType,
+      document_type: canonicalDocumentType,
+      documentoId: canonicalDocumentId,
+      document_id: canonicalDocumentId,
       user_id: userId || null,
       updated_at: dadosSalvar.updated_at,
       empresa_nome: payload.empresa_nome,

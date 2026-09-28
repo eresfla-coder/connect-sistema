@@ -3,6 +3,7 @@ import { CONNECT_CLOUD_KEYS } from '@/lib/connect-cloud-storage'
 import { CONNECT_BACKUP_VERSION, MAX_BACKUPS_PER_USER, type ConnectBackupPayload } from '@/lib/backup-connect'
 import { withTimeout } from '@/lib/fetch-with-timeout'
 import { orcamentoBackupParaRestoreRow } from '@/lib/orcamento-backup-restore'
+import { configuracaoBackupParaRestoreRow } from '@/lib/configuracao-backup-restore'
 
 const CONTRATOS_KEY = 'connect_contratos'
 
@@ -258,11 +259,10 @@ export async function restaurarBackupNuvem(userId: string, payload: ConnectBacku
 
   if (d.configuracoes && typeof d.configuracoes === 'object' && !Array.isArray(d.configuracoes)) {
     verificarTempo()
-    const cfg = d.configuracoes as Record<string, unknown>
-    await supabase.from('configuracoes_empresa').upsert(
-      { user_id: userId, ...cfg, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id' },
-    )
+    const cfgRow = configuracaoBackupParaRestoreRow(d.configuracoes, userId, new Date().toISOString())
+    if (cfgRow) {
+      await supabase.from('configuracoes_empresa').upsert(cfgRow, { onConflict: 'user_id' })
+    }
   }
 
   if (Array.isArray(d.orcamentos) && d.orcamentos.length) {
