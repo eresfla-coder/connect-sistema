@@ -286,8 +286,9 @@ export async function GET(req: NextRequest) {
 
     if (documentType === 'ordem_servico' && documentId) {
       let result
+      const buscaPorToken = Boolean(token && tokenFormatoValido(token))
 
-      if (token && tokenFormatoValido(token)) {
+      if (buscaPorToken) {
         result = await supabaseAdmin
           .from('public_documents')
           .select('*')
@@ -311,7 +312,11 @@ export async function GET(req: NextRequest) {
         return erroApi(error)
       }
 
-      if (!data) {
+      if (
+        !data ||
+        (buscaPorToken &&
+          !publicacaoCorrespondeAoPedido(data, { token, tipo: 'ordem_servico', documentoId: documentId }))
+      ) {
         return NextResponse.json(
           { success: false, error: 'Documento não encontrado.' },
           { status: 404 }
@@ -360,7 +365,7 @@ export async function GET(req: NextRequest) {
         return erroApi(error)
       }
 
-      if (!data) {
+      if (!data || !publicacaoCorrespondeAoPedido(data, { token, tipo: documentType, documentoId: documentId })) {
         return NextResponse.json(
           { success: false, error: 'Documento não encontrado ou link expirado.' },
           { status: 404 }
@@ -421,7 +426,12 @@ export async function GET(req: NextRequest) {
         return erroApi(error)
       }
 
-      if (!data) {
+      if (
+        !data ||
+        (token &&
+          tokenFormatoValido(token) &&
+          !publicacaoCorrespondeAoPedido(data, { token, tipo: 'orcamento', documentoId: documentId }))
+      ) {
         return NextResponse.json(
           { success: false, error: 'Documento não encontrado.' },
           { status: 404 }
