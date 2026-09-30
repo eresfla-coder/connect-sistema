@@ -703,7 +703,7 @@ export async function POST(req: NextRequest) {
         ...empresaCampos,
       },
       configEmpresaPublica,
-      { token, userId: userId || undefined, v: versao }
+      { token, userId: userId || undefined, v: versao, documentType: canonicalDocumentType }
     )
 
     const dadosSalvar = linhaPublicDocument(

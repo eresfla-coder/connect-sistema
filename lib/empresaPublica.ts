@@ -98,18 +98,111 @@ export function camposEmpresaNoPayload(
 export function enriquecerPayloadDocumentoPublico(
   payloadRecebido: Record<string, unknown>,
   cfg: ConfigEmpresaPublica,
-  opts: { token: string; userId?: string; v?: string | number }
+  opts: { token: string; userId?: string; v?: string | number; documentType?: string }
 ) {
   const empresa = camposEmpresaNoPayload(cfg, opts)
-  return {
-    ...payloadRecebido,
-    ...empresa,
-    config: { ...cfg, ...empresa },
-    cfg: { ...cfg, ...empresa },
-    token: opts.token,
-    user_id: opts.userId || payloadRecebido.user_id || null,
-    owner_user_id: opts.userId || payloadRecebido.owner_user_id || null,
+  return deduplicarImagensPayloadPublico(
+    {
+      ...payloadRecebido,
+      ...empresa,
+      config: { ...cfg, ...empresa },
+      cfg: { ...cfg, ...empresa },
+      token: opts.token,
+      user_id: opts.userId || payloadRecebido.user_id || null,
+      owner_user_id: opts.userId || payloadRecebido.owner_user_id || null,
+    },
+    opts.documentType
+  )
+}
+
+const TIPOS_LOGO_EM_CONFIG = new Set(['orcamento', 'recibo'])
+const TIPOS_LOGO_EM_CFG = new Set(['ordem_servico', 'os'])
+
+function ehImagemBase64(valor: unknown): valor is string {
+  return typeof valor === 'string' && valor.startsWith('data:image')
+}
+
+function ehObjeto(valor: unknown): valor is Record<string, unknown> {
+  return Boolean(valor) && typeof valor === 'object' && !Array.isArray(valor)
+}
+
+/** Remove de `alvo` só as chaves que repetem exatamente uma imagem base64 mantida em outro caminho. */
+function semCopiasBase64(alvo: unknown, chaves: string[], mantidas: Set<string>) {
+  if (!ehObjeto(alvo)) return alvo
+  let copia: Record<string, unknown> | null = null
+  for (const chave of chaves) {
+    const valor = alvo[chave]
+    if (ehImagemBase64(valor) && mantidas.has(valor)) {
+      copia ??= { ...alvo }
+      delete copia[chave]
+    }
   }
+  return copia ?? alvo
+}
+
+/**
+ * Payload final de public_documents: o logo base64 fica em duas representações lidas pelos readers
+ * (empresa_logo para OG/config pública + config.logoUrl; cfg.logoUrl na OS, fallback da página
+ * quando /api/public-docs/config falha; empresaPublica.logoUrl no contrato).
+ * Cópias idênticas em config/cfg e a assinatura repetida em assinaturaDigital são removidas,
+ * inclusive as herdadas do payload anterior. Logos em URL e imagens diferentes permanecem.
+ */
+export function deduplicarImagensPayloadPublico<T extends Record<string, unknown>>(
+  payload: T,
+  documentType?: string
+): T {
+  const tipo = String(documentType || '').trim().toLowerCase()
+  const empresaLogo = payload.empresa_logo
+
+  if (tipo === 'contrato') {
+    const empresaPublica = payload.empresaPublica
+    const mantidas = new Set(
+      [empresaLogo, ehObjeto(empresaPublica) ? empresaPublica.logoUrl : undefined].filter(ehImagemBase64)
+    )
+    const resultado: Record<string, unknown> = {
+      ...payload,
+      config: semCopiasBase64(payload.config, ['logoUrl', 'empresa_logo'], mantidas),
+      cfg: semCopiasBase64(payload.cfg, ['logoUrl', 'empresa_logo'], mantidas),
+    }
+    const assinatura = payload.assinatura
+    const assinaturaDigital = payload.assinaturaDigital
+    if (
+      ehObjeto(assinatura) &&
+      ehObjeto(assinaturaDigital) &&
+      ehImagemBase64(assinatura.dataUrl) &&
+      assinaturaDigital.dataUrl === assinatura.dataUrl
+    ) {
+      const { dataUrl: _repetida, ...metadados } = assinaturaDigital
+      resultado.assinaturaDigital = metadados
+    }
+    return resultado as T
+  }
+
+  if (TIPOS_LOGO_EM_CONFIG.has(tipo)) {
+    const config = payload.config
+    const mantidas = new Set(
+      [empresaLogo, ehObjeto(config) ? config.logoUrl : undefined].filter(ehImagemBase64)
+    )
+    return {
+      ...payload,
+      config: semCopiasBase64(config, ['empresa_logo'], mantidas),
+      cfg: semCopiasBase64(payload.cfg, ['logoUrl', 'empresa_logo'], mantidas),
+    } as T
+  }
+
+  if (TIPOS_LOGO_EM_CFG.has(tipo)) {
+    const cfg = payload.cfg
+    const mantidas = new Set(
+      [empresaLogo, ehObjeto(cfg) ? cfg.logoUrl : undefined].filter(ehImagemBase64)
+    )
+    return {
+      ...payload,
+      config: semCopiasBase64(payload.config, ['logoUrl', 'empresa_logo'], mantidas),
+      cfg: semCopiasBase64(cfg, ['empresa_logo'], mantidas),
+    } as T
+  }
+
+  return payload
 }
 
 export function mergeConfigDocumentoPublico(
