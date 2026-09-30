@@ -690,34 +690,6 @@ export function OrcamentoDocumentoPage({ forcePreview = false }: { forcePreview?
           setConfig({ ...cfgLocal, ...cfgPayload, telefone: telefoneResolvido, logoUrl: logoFinal || cfgLocal.logoUrl })
         }
 
-        const temConfigEmpresaSalva = (() => {
-          try {
-            const raw = localStorage.getItem(CONFIG_KEY)
-            if (!raw) return false
-            const parsed = JSON.parse(raw)
-            return Boolean(parsed?.nomeEmpresa && parsed.nomeEmpresa !== 'LOJA CONNECT')
-          } catch {
-            return false
-          }
-        })()
-
-        if (encontrado && telefoneResolvido && typeof window !== 'undefined' && temConfigEmpresaSalva && !linkPublico) {
-          const tokenAtual = search.get('p') || search.get('token')
-          const cfgAtualizado = mergeConfigPublicacao(cfgLocal, cfgPayload, { telefone: telefoneResolvido })
-          try {
-            fetch('/api/public-docs', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                tipo: 'orcamento',
-                documentoId: String(documentoIdPublico || encontrado.id || id),
-                token: tokenAtual || undefined,
-                payload: { ...encontrado, config: cfgAtualizado, cfg: cfgAtualizado },
-              }),
-            }).catch(() => {})
-          } catch {}
-        }
-
         const qs = new URLSearchParams(window.location.search)
         setIsPreview(forcePreview || qs.get('print') !== '1')
       } catch {
