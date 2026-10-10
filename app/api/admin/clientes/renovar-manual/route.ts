@@ -8,6 +8,7 @@ import {
   type PlanoRenovacaoManual,
 } from '@/lib/renovacaoManual'
 import { PLANOS_CATALOGO } from '@/lib/planosSaaS'
+import { fimDoDiaNegocioIso } from '@/lib/vigencia'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -117,7 +118,7 @@ export async function POST(req: Request) {
       plano: `${tier}_mensal`,
       plano_tier: tier,
       status: 'ativa',
-      data_fim: `${proximaValidade}T23:59:59.999Z`,
+      data_fim: fimDoDiaNegocioIso(proximaValidade),
       data_trial_fim: null,
       proxima_cobranca: proximaValidade,
       trial_dias: 0,

@@ -15,8 +15,9 @@ import {
   camposUpdateStatusOperacional,
   CODIGO_CONNECT_SYNC_FAILED,
   CODIGO_CONNECT_SYNC_INCONSISTENT,
-  dataCalendarioLocal,
   decidirResultadoSyncConnect,
+  desbloqueioAdministrativoExplicito,
+  perfilComBloqueioGravado,
   deveDesativarAdminClientePorBloqueioVinculo,
   deveSincronizarPerfilConnect,
   isUuidAdmin,
@@ -25,7 +26,9 @@ import {
   MSG_CONNECT_SYNC_INCONSISTENT,
   normalizarStatusInicial,
   payloadSyncPerfilConnect,
+  protegerVencimentoPago,
   validarDiaVencimento,
+  type PerfilPeriodoPago,
   type SnapshotVinculoComercial,
 } from '@/lib/admin-ciclo-comercial'
 import { resolverCriarAcesso } from '@/lib/admin-criar-acesso'
@@ -42,6 +45,7 @@ import {
   respostaAdminTablesProbeError,
 } from '@/lib/admin-tables'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { dataNegocio } from '@/lib/vigencia'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -97,27 +101,57 @@ async function syncPerfilConnectSeAplicavel(params: {
   statusPagamento?: string | null
   ultimoPagamento?: string | null
   valor?: number | null
+  /** Vencimento lido antes da ação: o UPDATE só aplica se o perfil não mudou (pagamento concorrente). */
+  vencimentoPerfilLido: string | null
+  perfilExiste: boolean
+  /** Bloqueio gravado no perfil sem desbloqueio explícito: status/ativo do perfil não são tocados. */
+  preservarBloqueio: boolean
 }): Promise<{ precisaSync: false } | { precisaSync: true; syncOk: true } | { precisaSync: true; syncOk: false }> {
   const precisa = deveSincronizarPerfilConnect({
     origem: params.origem,
     acessoConnect: params.acessoConnect,
     perfilId: params.perfilId,
   })
-  if (!precisa) return { precisaSync: false }
+  if (!precisa || !params.perfilExiste) return { precisaSync: false }
 
-  const payload = payloadSyncPerfilConnect({
+  const completo = payloadSyncPerfilConnect({
     status: params.status,
     dataVencimento: params.dataVencimento,
     statusPagamento: params.statusPagamento,
     ultimoPagamento: params.ultimoPagamento,
     valor: params.valor,
   })
-  const { error } = await supabaseAdmin.from('perfis').update(payload).eq('id', params.perfilId!)
+  const { status: _status, ativo: _ativo, ...semAcesso } = completo
+  const payload = params.preservarBloqueio ? semAcesso : completo
+  let query = supabaseAdmin.from('perfis').update(payload).eq('id', params.perfilId!)
+  query = params.vencimentoPerfilLido
+    ? query.eq('vencimento', params.vencimentoPerfilLido)
+    : query.is('vencimento', null)
+  const { data, error } = await query.select('id')
   if (error) {
     logAdminApiError('carteira sistemas sync perfil', error)
     return { precisaSync: true, syncOk: false }
   }
+  if (!Array.isArray(data) || data.length !== 1) {
+    logAdminApiError('carteira sistemas sync perfil', 'perfil alterado durante a ação (concorrência)')
+    return { precisaSync: true, syncOk: false }
+  }
   return { precisaSync: true, syncOk: true }
+}
+
+async function lerPeriodoPagoPerfil(
+  perfilId: string,
+): Promise<{ ok: true; perfil: PerfilPeriodoPago | null } | { ok: false }> {
+  const { data, error } = await supabaseAdmin
+    .from('perfis')
+    .select('id,vencimento,status_pagamento,ultimo_pagamento,status,ativo')
+    .eq('id', perfilId)
+    .maybeSingle()
+  if (error) {
+    logAdminApiError('carteira sistemas leitura perfil', error)
+    return { ok: false }
+  }
+  return { ok: true, perfil: (data as PerfilPeriodoPago | null) ?? null }
 }
 
 async function restaurarVinculoSnapshot(params: {
@@ -207,7 +241,7 @@ export async function POST(req: Request, ctx: Ctx) {
     try {
       campos = camposIniciaisVinculoComercial({
         statusInicial: normalizarStatusInicial(body.status || 'trial'),
-        hoje: dataCalendarioLocal(),
+        hoje: dataNegocio(),
         diaVencimento: body.dia_vencimento != null ? Number(body.dia_vencimento) : null,
         diasTrial: body.dias_trial != null ? Number(body.dias_trial) : 7,
         dataVencimentoOverride: body.data_vencimento || null,
@@ -321,7 +355,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
     // Snapshot ANTES do UPDATE — compensação só deste vínculo
     const snapshot = montarSnapshotVinculoComercial(vinculo as SnapshotVinculoComercial)
 
-    const updates: Record<string, unknown> = {}
+    let updates: Record<string, unknown> = {}
+    const hoje = dataNegocio()
     const diaAtual =
       validarDiaVencimento(body.dia_vencimento != null ? body.dia_vencimento : vinculo.dia_vencimento) ??
       validarDiaVencimento(vinculo.dia_vencimento)
@@ -337,7 +372,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         const r = aplicarRenovacaoComercial({
           dataVencimentoAtual: vinculo.data_vencimento ? String(vinculo.data_vencimento) : null,
           diaVencimento: diaAtual,
-          hoje: dataCalendarioLocal(),
+          hoje,
         })
         // Só ciclo + status operacional. NÃO toca status_pagamento / ultimo_pagamento.
         Object.assign(updates, r)
@@ -352,7 +387,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         const r = aplicarMarcarPagoComercial({
           dataVencimentoAtual: vinculo.data_vencimento ? String(vinculo.data_vencimento) : null,
           diaVencimento: diaAtual,
-          hoje: dataCalendarioLocal(),
+          hoje,
         })
         Object.assign(updates, r)
         if (body.dia_vencimento != null) updates.dia_vencimento = diaAtual
@@ -412,6 +447,50 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return NextResponse.json({ ok: false, code: 'ADMIN_VALIDATION', error: 'Nada para atualizar.' }, { status: 400 })
     }
 
+    const precisaSyncPerfil = deveSincronizarPerfilConnect({ origem, acessoConnect, perfilId })
+    let vencimentoPerfilLido: string | null = null
+    let perfilExiste = false
+    let vencimentoPagoPreservado = false
+    let bloqueioPreservado = false
+    if (precisaSyncPerfil) {
+      const leitura = await lerPeriodoPagoPerfil(perfilId!)
+      if (leitura.ok === false) {
+        return NextResponse.json(
+          { ok: false, code: CODIGO_CONNECT_SYNC_FAILED, error: MSG_CONNECT_SYNC_FAILED },
+          { status: 422 },
+        )
+      }
+      perfilExiste = !!leitura.perfil
+      vencimentoPerfilLido = leitura.perfil?.vencimento ? String(leitura.perfil.vencimento) : null
+      const protegido = protegerVencimentoPago({
+        acao,
+        hoje,
+        updates,
+        vinculoAtual: {
+          status: vinculo.status,
+          data_vencimento: vinculo.data_vencimento,
+          status_pagamento: vinculo.status_pagamento,
+          ultimo_pagamento: vinculo.ultimo_pagamento,
+        },
+        dataVencimentoSolicitada: acao === 'atualizar' ? body.data_vencimento ?? null : null,
+        statusSolicitado: acao === 'atualizar' ? body.status ?? null : null,
+        perfil: leitura.perfil,
+      })
+      updates = protegido.updates
+      vencimentoPagoPreservado = protegido.camposPreservados.includes('data_vencimento')
+
+      bloqueioPreservado =
+        perfilComBloqueioGravado(leitura.perfil) &&
+        !desbloqueioAdministrativoExplicito({
+          acao,
+          statusVinculoAtual: vinculo.status,
+          statusSolicitado: acao === 'atualizar' ? body.status ?? null : null,
+        })
+      if (bloqueioPreservado && 'status' in updates && String(vinculo.status || '').toLowerCase() === 'bloqueado') {
+        updates.status = 'bloqueado'
+      }
+    }
+
     const { data: atualizado, error: upErr } = await supabaseAdmin
       .from('admin_cliente_sistemas')
       .update(updates)
@@ -435,6 +514,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
       statusPagamento: atualizado.status_pagamento ? String(atualizado.status_pagamento) : null,
       ultimoPagamento: atualizado.ultimo_pagamento ? String(atualizado.ultimo_pagamento) : null,
       valor: atualizado.valor != null ? Number(atualizado.valor) : null,
+      vencimentoPerfilLido,
+      perfilExiste,
+      preservarBloqueio: bloqueioPreservado,
     })
 
     if (!sync.precisaSync) {
@@ -445,6 +527,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
         authCreated: false,
         perfilSynced: false,
         adminClienteAtivoPreserved: true,
+        vencimentoPagoPreservado,
+        bloqueioPreservado,
       })
     }
 
@@ -456,6 +540,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
         authCreated: false,
         perfilSynced: true,
         adminClienteAtivoPreserved: true,
+        vencimentoPagoPreservado,
+        bloqueioPreservado,
       })
     }
 

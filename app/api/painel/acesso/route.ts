@@ -17,6 +17,7 @@ import {
 } from '@/lib/access'
 import { isUsuarioAdminServer } from '@/lib/access-server'
 import { fetchWithTimeout } from '@/lib/fetch-with-timeout'
+import { diasAteVencimento } from '@/lib/vigencia'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -120,12 +121,9 @@ export async function GET(request: NextRequest) {
       perfil.plano_tier = 'empresa'
     }
 
-    const vencimento = perfil.vencimento ? new Date(perfil.vencimento) : null
-    const assinaturaVencida =
-      !!vencimento && !Number.isNaN(vencimento.getTime()) && vencimento.getTime() < Date.now()
-    const diasVencidos = assinaturaVencida
-      ? Math.max(1, Math.ceil((Date.now() - vencimento.getTime()) / 86400000))
-      : 0
+    const diasAteFim = diasAteVencimento(perfil.vencimento)
+    const assinaturaVencida = diasAteFim !== null && diasAteFim < 0
+    const diasVencidos = assinaturaVencida ? Math.max(1, -(diasAteFim as number)) : 0
 
     const bloqueado =
       !adminLogado &&

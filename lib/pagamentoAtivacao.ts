@@ -2,12 +2,28 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { montarPayloadAtivacao } from '@/lib/assinaturaServer'
 import { parsePlanoPagamento } from '@/lib/assinaturaAcesso'
 import { chaveCheckout, diasPlano, normalizarTier, resolverCheckout, valorPlano, type PlanoTier, type RecorrenciaPlano } from '@/lib/planosSaaS'
+import { calcularNovoVencimentoPago, dataNegocio, diaVencimento } from '@/lib/vigencia'
+import { perfilComBloqueioGravado, statusVinculoAposPagamento } from '@/lib/admin-ciclo-comercial'
 
-function adicionarDias(base: Date, dias: number) {
-  const data = new Date(base)
-  data.setDate(data.getDate() + dias)
-  return data
+export const CODIGO_ATIVACAO_INCOMPLETA = 'ATIVACAO_INCOMPLETA'
+
+export class AtivacaoIncompletaError extends Error {
+  code = CODIGO_ATIVACAO_INCOMPLETA
+  etapa: string
+  /** true quando o pagamento voltou ao status anterior e um novo processamento é seguro. */
+  retrySeguro: boolean
+
+  constructor(etapa: string, retrySeguro: boolean, causa?: unknown) {
+    super(`Ativação do pagamento incompleta (${etapa}).`)
+    this.etapa = etapa
+    this.retrySeguro = retrySeguro
+    if (causa) console.error('CONNECT_ATIVACAO_INCOMPLETA', { etapa, retrySeguro, causa })
+  }
 }
+
+export type ResultadoSyncVinculo = 'atualizado' | 'sem_vinculo' | 'ambiguo' | 'indisponivel'
+
+const ERROS_TABELA_AUSENTE = new Set(['42P01', 'PGRST205'])
 
 type PagamentoLocal = { id: string; user_id: string; valor: number; status: string; plano?: string | null }
 
@@ -137,32 +153,64 @@ export async function ativarPagamentoAprovado(
   }
 
   const agora = new Date()
-  const { data: perfil } = await supabase.from('perfis').select('id,vencimento').eq('id', pagamento.user_id).maybeSingle()
+  const mp = pagamentoMp || {}
+  const dataAprovacao = String(mp?.date_approved || agora.toISOString())
+  const diaPagamento = diaVencimento(dataAprovacao) || dataNegocio(agora)
 
-  const vencimentoAtual = perfil?.vencimento ? new Date(perfil.vencimento) : null
-  const baseVencimento =
-    vencimentoAtual && !Number.isNaN(vencimentoAtual.getTime()) && vencimentoAtual > agora ? vencimentoAtual : agora
+  const { data: atual, error: atualErr } = await supabase
+    .from('pagamentos')
+    .select('id,user_id,status')
+    .eq('id', pagamento.id)
+    .maybeSingle()
+  if (atualErr || !atual?.id) {
+    throw new AtivacaoIncompletaError('leitura_pagamento', true, atualErr)
+  }
+  if (String(atual.user_id) !== String(pagamento.user_id)) {
+    throw new AtivacaoIncompletaError('usuario_divergente', true)
+  }
+
+  const resultadoBase = { tier, recorrencia, tipoPix }
+
+  if (atual.status === 'pago') {
+    return { ...resultadoBase, novoVencimento: null as string | null, jaProcessado: true, vinculo: null }
+  }
+
+  const { data: perfil, error: perfilErr } = await supabase
+    .from('perfis')
+    .select('id,vencimento,status,ativo')
+    .eq('id', pagamento.user_id)
+    .maybeSingle()
+  if (perfilErr || !perfil?.id) {
+    throw new AtivacaoIncompletaError('leitura_perfil', true, perfilErr)
+  }
+  const bloqueioPreservado = perfilComBloqueioGravado(perfil)
 
   const dias = tipoPix ? 30 : diasPlano(tier, recorrencia)
-  const novoVencimento = adicionarDias(baseVencimento, dias).toISOString()
+  const novoVencimento = calcularNovoVencimentoPago(perfil.vencimento, dias, agora)
 
-  const mp = pagamentoMp || {}
   const payloadAtivacao = montarPayloadAtivacao({
     userId: pagamento.user_id,
     tier,
     recorrencia,
-    vencimentoIso: novoVencimento,
+    vencimentoDia: novoVencimento,
+    ultimoPagamentoDia: diaPagamento,
     gatewayAssinaturaId: String(mp?.id || ''),
     gatewayClienteId: String((mp?.payer as { id?: string })?.id || ''),
     valorPago: Number(mp?.transaction_amount || pagamento.valor || 0),
     renovacaoAutomatica: !tipoPix,
   })
+  if (bloqueioPreservado) {
+    // Pagamento credita o período, mas não remove bloqueio gravado (motivo não é rastreável).
+    const { status: _status, ativo: _ativo, ...semLiberacao } = payloadAtivacao.perfil
+    payloadAtivacao.perfil = semLiberacao as typeof payloadAtivacao.perfil
+  }
 
   const metodoPagamento = tipoPix
     ? 'pix'
     : String(mp?.payment_method_id || mp?.payment_type_id || 'mercado_pago')
 
-  await supabase
+  // Claim atômico (uma linha): só quem troca o status lido por 'pago' aplica o período.
+  const claimQuery = supabase
     .from('pagamentos')
     .update({
       status: 'pago',
@@ -171,12 +219,140 @@ export async function ativarPagamentoAprovado(
       paid_amount: Number(mp?.transaction_amount || pagamento.valor || 0),
       plano: `${tier}_${recorrencia}`,
       recorrencia,
-      data_pagamento: String(mp?.date_approved || agora.toISOString()),
+      data_pagamento: dataAprovacao,
     })
     .eq('id', pagamento.id)
+  const { data: claim, error: claimErr } = await (atual.status == null
+    ? claimQuery.is('status', null)
+    : claimQuery.eq('status', atual.status)
+  ).select('id')
+  if (claimErr) throw new AtivacaoIncompletaError('claim_pagamento', true, claimErr)
+  if (!Array.isArray(claim) || claim.length !== 1) {
+    return { ...resultadoBase, novoVencimento: null as string | null, jaProcessado: true, vinculo: null }
+  }
 
-  await supabase.from('assinaturas').upsert(payloadAtivacao.assinatura, { onConflict: 'user_id' })
-  await supabase.from('perfis').update(payloadAtivacao.perfil).eq('id', pagamento.user_id)
+  const liberarClaim = async () => {
+    const { data, error } = await supabase
+      .from('pagamentos')
+      .update({ status: atual.status ?? null })
+      .eq('id', pagamento.id)
+      .eq('status', 'pago')
+      .select('id')
+    return !error && Array.isArray(data) && data.length === 1
+  }
 
-  return { tier, recorrencia, novoVencimento, tipoPix }
+  const falhar = async (etapa: string, causa?: unknown): Promise<never> => {
+    throw new AtivacaoIncompletaError(etapa, await liberarClaim(), causa)
+  }
+
+  const { data: assinaturaGravada, error: assinaturaErr } = await supabase
+    .from('assinaturas')
+    .upsert(payloadAtivacao.assinatura, { onConflict: 'user_id' })
+    .select('user_id')
+  if (assinaturaErr || !Array.isArray(assinaturaGravada) || assinaturaGravada.length !== 1) {
+    await falhar('assinatura', assinaturaErr)
+  }
+
+  let vinculo: ResultadoSyncVinculo
+  try {
+    vinculo = await sincronizarVinculoAdminPagamento({
+      userId: pagamento.user_id,
+      novoVencimento,
+      diaPagamento,
+      perfilBloqueado: bloqueioPreservado,
+    })
+  } catch (e) {
+    return falhar('vinculo_admin', e)
+  }
+
+  let perfilQuery = supabase.from('perfis').update(payloadAtivacao.perfil).eq('id', pagamento.user_id)
+  perfilQuery = perfil.vencimento
+    ? perfilQuery.eq('vencimento', perfil.vencimento)
+    : perfilQuery.is('vencimento', null)
+  const { data: perfilGravado, error: perfilUpErr } = await perfilQuery.select('id,vencimento')
+  const perfilOk =
+    !perfilUpErr &&
+    Array.isArray(perfilGravado) &&
+    perfilGravado.length === 1 &&
+    diaVencimento(perfilGravado[0]?.vencimento) === novoVencimento
+  if (!perfilOk) {
+    // Resposta perdida ≠ escrita perdida: só libera o claim se o perfil comprovadamente não recebeu o período.
+    const { data: conferencia, error: confErr } = await supabase
+      .from('perfis')
+      .select('id,vencimento')
+      .eq('id', pagamento.user_id)
+      .maybeSingle()
+    if (confErr) throw new AtivacaoIncompletaError('perfil_incerto', false, perfilUpErr || confErr)
+    if (diaVencimento(conferencia?.vencimento) !== novoVencimento) {
+      await falhar('perfil', perfilUpErr || 'perfil alterado durante a ativação')
+    }
+  }
+
+  if (bloqueioPreservado) {
+    console.warn('CONNECT_PAGAMENTO_BLOQUEIO_PRESERVADO', { user: String(pagamento.user_id).slice(0, 8) })
+  }
+  return { ...resultadoBase, novoVencimento, jaProcessado: false, vinculo, bloqueioPreservado }
+}
+
+/**
+ * Atualiza SOMENTE o vínculo Connect inequívoco do usuário (perfil_id + acesso_connect).
+ * Nunca cria vínculo, nunca usa nome/e-mail, nunca toca vínculos de outros sistemas.
+ */
+export async function sincronizarVinculoAdminPagamento(params: {
+  userId: string
+  novoVencimento: string
+  diaPagamento: string
+  perfilBloqueado: boolean
+}): Promise<ResultadoSyncVinculo> {
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase
+    .from('admin_cliente_sistemas')
+    .select('id,perfil_id,acesso_connect,status,sistema:admin_sistemas(origem)')
+    .eq('perfil_id', params.userId)
+    .eq('acesso_connect', true)
+  if (error) {
+    if (ERROS_TABELA_AUSENTE.has(String((error as { code?: string }).code || ''))) return 'indisponivel'
+    throw error
+  }
+
+  const candidatos = (Array.isArray(data) ? data : []).filter((v: Record<string, any>) => {
+    const sistema = Array.isArray(v.sistema) ? v.sistema[0] : v.sistema
+    return (
+      String(v.perfil_id) === String(params.userId) &&
+      v.acesso_connect === true &&
+      String(sistema?.origem || '').toLowerCase() === 'connect'
+    )
+  })
+  if (candidatos.length === 0) return 'sem_vinculo'
+  if (candidatos.length > 1) {
+    console.warn('CONNECT_PAGAMENTO_VINCULO_AMBIGUO', {
+      user: String(params.userId).slice(0, 8),
+      vinculos: candidatos.length,
+    })
+    return 'ambiguo'
+  }
+
+  const alvo = candidatos[0] as { id: string; status?: string | null }
+  const statusNovo = statusVinculoAposPagamento({ statusAtual: alvo.status, perfilBloqueado: params.perfilBloqueado })
+  const { data: gravado, error: upErr } = await supabase
+    .from('admin_cliente_sistemas')
+    .update({
+      data_vencimento: params.novoVencimento,
+      ...(statusNovo ? { status: statusNovo } : {}),
+      status_pagamento: 'em_dia',
+      ultimo_pagamento: params.diaPagamento,
+    })
+    .eq('id', alvo.id)
+    .eq('perfil_id', params.userId)
+    .eq('acesso_connect', true)
+    .select('id,data_vencimento')
+  if (upErr) throw upErr
+  if (
+    !Array.isArray(gravado) ||
+    gravado.length !== 1 ||
+    diaVencimento(gravado[0]?.data_vencimento) !== params.novoVencimento
+  ) {
+    throw new Error('Vínculo administrativo não confirmou a atualização.')
+  }
+  return 'atualizado'
 }

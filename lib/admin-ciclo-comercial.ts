@@ -3,6 +3,9 @@
  * Independente de Auth, perfis e Mercado Pago.
  */
 
+import { normalizarStatus } from './access.ts'
+import { dataNegocio, diaVencimento, maiorDia } from './vigencia.ts'
+
 export type StatusInicialComercial = 'ativo' | 'trial' | 'bloqueado'
 
 export type StatusPagamentoComercial = 'pendente' | 'trial' | 'em_dia' | 'pago' | 'bloqueado'
@@ -142,7 +145,7 @@ export function camposIniciaisVinculoComercial(params: {
   /** Sempre true no cadastro: bloqueio é por vínculo. */
   admin_cliente_ativo: true
 } {
-  const hoje = params.hoje || dataCalendarioLocal()
+  const hoje = params.hoje || dataNegocio()
   const status = params.statusInicial
 
   if (status === 'trial') {
@@ -254,7 +257,7 @@ export function aplicarRenovacaoComercial(params: {
   data_vencimento: string
   status: 'ativo'
 } {
-  const hoje = params.hoje || dataCalendarioLocal()
+  const hoje = params.hoje || dataNegocio()
   const ref =
     params.dataVencimentoAtual && parseDataCalendario(params.dataVencimentoAtual)
       ? String(params.dataVencimentoAtual).slice(0, 10)
@@ -281,7 +284,7 @@ export function aplicarMarcarPagoComercial(params: {
   status_pagamento: 'em_dia'
   ultimo_pagamento: string
 } {
-  const hoje = params.hoje || dataCalendarioLocal()
+  const hoje = params.hoje || dataNegocio()
   return {
     data_vencimento: calcularProximoVencimentoAposPagamento({
       hoje,
@@ -383,7 +386,7 @@ export type MetricasCicloComercial = {
 function diasAte(iso?: string | null, hoje?: string): number | null {
   const p = parseDataCalendario(String(iso || ''))
   if (!p) return null
-  const h = parseDataCalendario(hoje || dataCalendarioLocal())
+  const h = parseDataCalendario(hoje || dataNegocio())
   if (!h) return null
   const a = Date.UTC(p.y, p.m - 1, p.d)
   const b = Date.UTC(h.y, h.m - 1, h.d)
@@ -471,7 +474,7 @@ export function calcularMetricasCicloComercial(params: {
   clientes: Array<{ data_criacao?: string | null; vinculos: ItemVinculoMetricas[] }>
   hoje?: string
 }): MetricasCicloComercial {
-  const hoje = params.hoje || dataCalendarioLocal()
+  const hoje = params.hoje || dataNegocio()
   const totalClientes = params.clientes.length
   let mrr = 0
   let recebido = 0
@@ -661,4 +664,151 @@ export function payloadSyncPerfilConnect(params: {
     ultimo_pagamento: params.ultimoPagamento ? String(params.ultimoPagamento).slice(0, 10) : null,
     ...(params.valor != null ? { valor_plano: Number(params.valor) } : {}),
   }
+}
+
+export type PerfilPeriodoPago = {
+  vencimento?: string | null
+  status_pagamento?: string | null
+  ultimo_pagamento?: string | null
+  status?: string | null
+  ativo?: boolean | null
+}
+
+/**
+ * Bloqueio gravado no perfil (ativo=false ou status normalizado 'bloqueado').
+ * Não existe motivo confiável gravado: /api/painel/acesso normaliza expirado,
+ * cancelado e inativo para 'bloqueado'. Por isso todo bloqueio gravado é tratado
+ * como suspensão administrativa; inadimplência é o vencimento passado sem bloqueio gravado.
+ */
+export function perfilComBloqueioGravado(perfil?: { status?: string | null; ativo?: boolean | null } | null): boolean {
+  if (!perfil) return false
+  return perfil.ativo === false || normalizarStatus(perfil.status) === 'bloqueado'
+}
+
+/** Vínculo suspenso administrativamente: pagamento não remove esse status. */
+export function vinculoComSuspensaoGravada(status?: string | null): boolean {
+  const st = String(status || '').trim().toLowerCase()
+  return st === 'bloqueado' || st === 'cancelado'
+}
+
+/** Status do vínculo após um pagamento confirmado (trial/inadimplente → ativo; suspensão preservada). */
+export function statusVinculoAposPagamento(params: {
+  statusAtual?: string | null
+  perfilBloqueado: boolean
+}): string | null {
+  if (params.perfilBloqueado || vinculoComSuspensaoGravada(params.statusAtual)) {
+    return params.statusAtual != null ? String(params.statusAtual) : null
+  }
+  return 'ativo'
+}
+
+/**
+ * Desbloqueio administrativo explícito: botão "Desbloquear" ou edição que troca
+ * um vínculo exibido como 'bloqueado' por outro status. Qualquer outra ação
+ * (edição comum, renovar, marcar pago, trial antigo) não remove bloqueio gravado.
+ */
+export function desbloqueioAdministrativoExplicito(params: {
+  acao: string
+  statusVinculoAtual?: string | null
+  statusSolicitado?: string | null
+}): boolean {
+  if (params.acao === 'desbloquear') return true
+  if (params.acao !== 'atualizar' || params.statusSolicitado == null) return false
+  return (
+    String(params.statusVinculoAtual || '').trim().toLowerCase() === 'bloqueado' &&
+    normalizarStatusInicial(params.statusSolicitado) !== 'bloqueado'
+  )
+}
+
+/** O selo em_dia/pago vale só até o vencimento; depois é exibido/contado como pendente. */
+export function statusPagamentoEfetivo(params: {
+  statusPagamento?: string | null
+  dataVencimento?: string | null
+  hoje?: string
+}): string | null {
+  const st = params.statusPagamento != null ? String(params.statusPagamento) : null
+  if (!pagamentoJaConfirmado(st)) return st
+  const venc = diaVencimento(params.dataVencimento)
+  if (venc && venc < (params.hoje || dataNegocio())) return 'pendente'
+  return st
+}
+
+export type CamposVinculoProtegidos = {
+  status?: string | null
+  data_vencimento?: string | null
+  status_pagamento?: string | null
+  ultimo_pagamento?: string | null
+}
+
+/**
+ * P0 — impede que uma ação administrativa reduza um período já pago no perfil.
+ *
+ * Alteração deliberada (não protegida): `atualizar` com data_vencimento DIFERENTE
+ * da gravada no vínculo, ou com status DIFERENTE do atual. O formulário de edição
+ * reenvia os valores atuais do vínculo; reenviar o mesmo valor não é alteração.
+ * Bloqueio/desbloqueio continuam valendo: só o período pago é preservado.
+ */
+export function protegerVencimentoPago<T extends Record<string, unknown>>(params: {
+  acao: string
+  hoje: string
+  updates: T
+  vinculoAtual: CamposVinculoProtegidos
+  dataVencimentoSolicitada?: string | null
+  statusSolicitado?: string | null
+  perfil: PerfilPeriodoPago | null
+}): { updates: T; camposPreservados: (keyof CamposVinculoProtegidos)[] } {
+  const updates = { ...params.updates } as Record<string, unknown>
+  const camposPreservados: (keyof CamposVinculoProtegidos)[] = []
+  const perfil = params.perfil
+  const vencPerfil = diaVencimento(perfil?.vencimento)
+  const perfilPago =
+    pagamentoJaConfirmado(perfil?.status_pagamento) && !!vencPerfil && vencPerfil >= params.hoje
+  if (!perfilPago || !vencPerfil) return { updates: updates as T, camposPreservados }
+
+  const atualizar = params.acao === 'atualizar'
+  const dataDeliberada =
+    atualizar &&
+    params.dataVencimentoSolicitada != null &&
+    diaVencimento(params.dataVencimentoSolicitada) !== diaVencimento(params.vinculoAtual.data_vencimento)
+  const statusDeliberado =
+    atualizar &&
+    params.statusSolicitado != null &&
+    normalizarStatusInicial(params.statusSolicitado) !== normalizarStatusInicial(params.vinculoAtual.status)
+
+  if (!dataDeliberada) {
+    const resultante =
+      'data_vencimento' in updates
+        ? diaVencimento(updates.data_vencimento as string | null)
+        : diaVencimento(params.vinculoAtual.data_vencimento)
+    if (!resultante || resultante < vencPerfil) {
+      updates.data_vencimento = vencPerfil
+      camposPreservados.push('data_vencimento')
+    }
+  }
+
+  if (!statusDeliberado) {
+    const stPagResultante =
+      'status_pagamento' in updates ? updates.status_pagamento : params.vinculoAtual.status_pagamento
+    if (!pagamentoJaConfirmado(stPagResultante as string | null)) {
+      updates.status_pagamento = String(perfil?.status_pagamento).toLowerCase()
+      camposPreservados.push('status_pagamento')
+    }
+    const stResultante = 'status' in updates ? updates.status : params.vinculoAtual.status
+    if (String(stResultante || '').toLowerCase() === 'trial' && !perfilComBloqueioGravado(perfil)) {
+      updates.status = 'ativo'
+      camposPreservados.push('status')
+    }
+  }
+
+  const ultimoResultante =
+    'ultimo_pagamento' in updates
+      ? (updates.ultimo_pagamento as string | null)
+      : params.vinculoAtual.ultimo_pagamento
+  const ultimo = maiorDia(ultimoResultante, perfil?.ultimo_pagamento)
+  if (ultimo && ultimo !== diaVencimento(ultimoResultante)) {
+    updates.ultimo_pagamento = ultimo
+    camposPreservados.push('ultimo_pagamento')
+  }
+
+  return { updates: updates as T, camposPreservados }
 }

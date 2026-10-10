@@ -4,6 +4,7 @@ import { isUsuarioAdminServer } from '@/lib/access-server'
 import { PLANOS_CATALOGO, TRIAL_DIAS, type PlanoTier, type RecorrenciaPlano } from '@/lib/planosSaaS'
 import { isPerfilPermanente, resolverSnapshotAssinatura } from '@/lib/assinaturaAcesso'
 import { normalizarStatus } from '@/lib/access'
+import { dataNegocio, diaVencimento, fimDoDiaNegocioIso } from '@/lib/vigencia'
 
 type PerfilAssinaturaSync = {
   id?: string
@@ -33,7 +34,8 @@ export async function sincronizarAssinaturaComPerfil(userId: string, perfil?: Pe
 
   const vencimento = permanente
     ? '2099-12-31'
-    : String(perfil?.vencimento || dataMaisDias(30)).slice(0, 10)
+    : diaVencimento(perfil?.vencimento) || diaVencimento(dataMaisDias(30))
+  if (!vencimento) return false
   const valorMensal = Number(perfil?.valor_plano ?? 0)
 
   const { error } = await supabase.from('assinaturas').upsert(
@@ -42,7 +44,7 @@ export async function sincronizarAssinaturaComPerfil(userId: string, perfil?: Pe
       plano: `${tier}_mensal`,
       plano_tier: tier,
       status: 'ativa',
-      data_fim: `${vencimento}T23:59:59.999Z`,
+      data_fim: fimDoDiaNegocioIso(vencimento),
       data_trial_fim: null,
       proxima_cobranca: vencimento,
       trial_dias: 0,
@@ -151,7 +153,10 @@ export function montarPayloadAtivacao(params: {
   userId: string
   tier: PlanoTier
   recorrencia: RecorrenciaPlano
-  vencimentoIso: string
+  /** Data de negócio (YYYY-MM-DD) do novo vencimento. */
+  vencimentoDia: string
+  /** Data de negócio do pagamento aprovado. */
+  ultimoPagamentoDia?: string
   gatewayAssinaturaId?: string
   gatewayClienteId?: string
   valorPago?: number
@@ -161,6 +166,7 @@ export function montarPayloadAtivacao(params: {
   const cfg = PLANOS_CATALOGO[params.tier]
   const valorMensal = cfg?.precos.mensal ?? params.valorPago ?? 0
   const valorAnual = cfg?.precos.anual ?? valorMensal * 10
+  const fimVigencia = fimDoDiaNegocioIso(params.vencimentoDia)
 
   return {
     assinatura: {
@@ -168,8 +174,8 @@ export function montarPayloadAtivacao(params: {
       plano: planoChave,
       plano_tier: params.tier,
       status: 'ativa',
-      data_fim: params.vencimentoIso,
-      proxima_cobranca: params.vencimentoIso,
+      data_fim: fimVigencia,
+      proxima_cobranca: fimVigencia,
       data_trial_fim: null,
       trial_dias: 0,
       renovacao_automatica: params.renovacaoAutomatica !== false,
@@ -182,8 +188,8 @@ export function montarPayloadAtivacao(params: {
     perfil: {
       ativo: true,
       status: 'ativo',
-      vencimento: params.vencimentoIso,
-      ultimo_pagamento: new Date().toISOString(),
+      vencimento: params.vencimentoDia,
+      ultimo_pagamento: params.ultimoPagamentoDia || dataNegocio(),
       status_pagamento: 'pago',
       valor_plano: valorMensal,
       plano_tier: params.tier,

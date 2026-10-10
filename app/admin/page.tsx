@@ -59,6 +59,7 @@ import {
 } from '@/lib/admin-acao-comercial-ux'
 import { WHATSAPP_FALLBACK_EVENT, abrirWhatsappUrl, montarUrlWhatsapp } from '@/lib/abrirExterno'
 import { consultarAcessoPainel } from '@/lib/connect-auth-client'
+import { diasAteVencimento } from '@/lib/vigencia'
 import type { ReciboRenovacaoManual } from '@/lib/renovacaoManual'
 import {
   classificarFaixaSemUso,
@@ -213,13 +214,7 @@ function dataMaisDias(dias: number): string {
 }
 
 function daysUntil(dateText: string | null | undefined): number | null {
-  if (!dateText) return null
-  const today = new Date()
-  const target = new Date(`${dateText}T00:00:00`)
-  today.setHours(0, 0, 0, 0)
-  target.setHours(0, 0, 0, 0)
-  if (Number.isNaN(target.getTime())) return null
-  return Math.ceil((target.getTime() - today.getTime()) / 86400000)
+  return diasAteVencimento(dateText)
 }
 
 function isPermanent(profile: PerfilAdmin): boolean {

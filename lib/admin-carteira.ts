@@ -2,6 +2,8 @@
  * ADMIN.2.1 — domínio da carteira administrativa (Opção B).
  */
 
+import { diasAteVencimento as diasAteVencimentoNegocio } from './vigencia.ts'
+
 export type OrigemSistemaAdmin = 'connect' | 'terceiro'
 
 export type StatusVinculoAdmin =
@@ -294,10 +296,7 @@ export type ItemMetricasCarteira = {
 }
 
 function diasAteVencimento(vencimento?: string | null): number | null {
-  if (!vencimento) return null
-  const d = new Date(`${String(vencimento).slice(0, 10)}T12:00:00`)
-  if (Number.isNaN(d.getTime())) return null
-  return Math.floor((d.getTime() - Date.now()) / 86400000)
+  return diasAteVencimentoNegocio(vencimento)
 }
 
 function vencimentoPermanente(item: ItemMetricasCarteira): boolean {

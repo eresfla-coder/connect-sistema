@@ -130,7 +130,10 @@ export async function POST(request: NextRequest) {
           },
         }
         const resultado = await ativarPagamentoAprovado(pagamento, pagamentoMpSintetico)
-        await supabase.from('pagamentos').update({ status: 'pago' }).eq('id', pagamento.id)
+        if (resultado.jaProcessado) {
+          await registrarEvento(eventId, { body, preapproval }, 'already_processed')
+          return NextResponse.json({ ok: true, alreadyProcessed: true })
+        }
 
         await registrarEvento(eventId, { body, preapproval }, 'processed')
         return NextResponse.json({ ok: true, status: 'assinatura_ativa', vencimento: resultado.novoVencimento })
@@ -176,6 +179,7 @@ export async function POST(request: NextRequest) {
           failure_reason: String(pagamentoMp?.status_detail || statusMp || ''),
         })
         .eq('id', pagamento.id)
+        .neq('status', 'pago')
 
       await registrarEvento(eventId, { body, pagamentoMp }, statusLocal)
       return NextResponse.json({ ok: true, status: statusLocal })
@@ -187,6 +191,10 @@ export async function POST(request: NextRequest) {
     }
 
     const resultado = await ativarPagamentoAprovado(pagamento, pagamentoMp)
+    if (resultado.jaProcessado) {
+      await registrarEvento(eventId, { body, pagamentoMp }, 'already_processed')
+      return NextResponse.json({ ok: true, alreadyProcessed: true })
+    }
     await registrarEvento(eventId, { body, pagamentoMp }, 'processed')
 
     return NextResponse.json({ ok: true, status: 'pago', ...resultado })

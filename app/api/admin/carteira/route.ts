@@ -15,8 +15,8 @@ import {
 } from '@/lib/admin-carteira'
 import {
   camposIniciaisVinculoComercial,
-  dataCalendarioLocal,
   normalizarStatusInicial,
+  statusPagamentoEfetivo,
   type StatusInicialComercial,
 } from '@/lib/admin-ciclo-comercial'
 import {
@@ -41,6 +41,7 @@ import {
   respostaAdminTablesProbeError,
 } from '@/lib/admin-tables'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { dataNegocio } from '@/lib/vigencia'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -117,6 +118,7 @@ export async function GET(req: Request) {
 
     // ADMIN.2.5 — fonte oficial: somente admin_*. Sem dual-read de public.perfis.
     const itens: AdminListaItem[] = []
+    const hoje = dataNegocio()
     const { data: clientesAdmin, error } = await supabaseAdmin
       .from('admin_clientes')
       .select(
@@ -155,7 +157,11 @@ export async function GET(req: Request) {
           valor: v.valor != null ? Number(v.valor) : null,
           data_vencimento: v.data_vencimento ? String(v.data_vencimento) : null,
           dia_vencimento: v.dia_vencimento != null ? Number(v.dia_vencimento) : null,
-          status_pagamento: v.status_pagamento ? String(v.status_pagamento) : null,
+          status_pagamento: statusPagamentoEfetivo({
+            statusPagamento: v.status_pagamento ? String(v.status_pagamento) : null,
+            dataVencimento: v.data_vencimento ? String(v.data_vencimento) : null,
+            hoje,
+          }),
           acesso_connect: Boolean(v.acesso_connect),
           auth_user_id: v.auth_user_id ? String(v.auth_user_id) : null,
           perfil_id: v.perfil_id ? String(v.perfil_id) : null,
@@ -181,7 +187,7 @@ export async function GET(req: Request) {
         status: prim?.status || null,
         valor_plano: prim?.valor ?? null,
         vencimento: prim?.data_vencimento || null,
-        status_pagamento: primRaw.status_pagamento ? String(primRaw.status_pagamento) : null,
+        status_pagamento: prim ? prim.status_pagamento : null,
         ultimo_pagamento: primRaw.ultimo_pagamento ? String(primRaw.ultimo_pagamento) : null,
         data_criacao: (c as { created_at?: string | null }).created_at || null,
         sistemas,
@@ -262,7 +268,7 @@ export async function POST(req: Request) {
     try {
       camposComerciais = camposIniciaisVinculoComercial({
         statusInicial,
-        hoje: dataCalendarioLocal(),
+        hoje: dataNegocio(),
         diaVencimento: body.dia_vencimento != null && body.dia_vencimento !== '' ? Number(body.dia_vencimento) : null,
         diasTrial: body.dias_trial != null && body.dias_trial !== '' ? Number(body.dias_trial) : 7,
         dataVencimentoOverride: body.data_vencimento || null,

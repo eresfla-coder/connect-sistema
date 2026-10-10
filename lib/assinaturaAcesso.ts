@@ -1,6 +1,7 @@
 import { isUsuarioAdmin, normalizarStatus, type PerfilAdminCheck } from '@/lib/access'
 import { contarDocumentosPainelSync } from '@/lib/orcamentos-local'
 import { obterUserIdPainelSync } from '@/lib/connect-user-storage'
+import { diasAteVencimento } from '@/lib/vigencia'
 import {
   TRIAL_DIAS,
   normalizarRecorrencia,
@@ -90,10 +91,7 @@ export function contarDocumentosLocal(userId?: string | null): number {
 }
 
 export function diasRestantesDeData(dataIso?: string | null): number | null {
-  if (!dataIso) return null
-  const fim = new Date(dataIso)
-  if (Number.isNaN(fim.getTime())) return null
-  return Math.ceil((fim.getTime() - Date.now()) / 86400000)
+  return diasAteVencimento(dataIso)
 }
 
 export function isPerfilPermanente(perfil?: EntradaPerfilAssinatura | null): boolean {
