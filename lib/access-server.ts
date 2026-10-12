@@ -1,10 +1,9 @@
 /**
  * Admin master — server only. Nunca importar em componentes client.
- * ADMIN_EMAILS / CONNECT_ADMIN_EMAILS (vírgula) + role no perfil (isPerfilRoleAdmin).
+ * Admin = e-mail em ADMIN_EMAILS / CONNECT_ADMIN_EMAILS (vírgula).
+ * Campos de public.perfis (role, plano_tier, status) NÃO concedem admin.
  * @see docs/AUTENTICACAO-V1.md
  */
-import type { PerfilAdminCheck } from '@/lib/access'
-import { isPerfilRoleAdmin } from '@/lib/access'
 
 function parseAdminEmails(): string[] {
   const raw = String(process.env.ADMIN_EMAILS || process.env.CONNECT_ADMIN_EMAILS || '').trim()
@@ -29,7 +28,6 @@ export function isAdminMasterServer(email?: string | null): boolean {
   return isAdminEmailServer(email)
 }
 
-export function isUsuarioAdminServer(args?: { email?: string | null; perfil?: PerfilAdminCheck | null }) {
-  if (isAdminMasterServer(args?.email)) return true
-  return isPerfilRoleAdmin(args?.perfil)
+export function isUsuarioAdminServer(args?: { email?: string | null }) {
+  return isAdminMasterServer(args?.email)
 }

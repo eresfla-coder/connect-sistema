@@ -1,6 +1,6 @@
 /**
  * Guards server para APIs autenticadas.
- * requireAdminFromRequest: ADMIN_EMAILS (env) ou role no perfil — ver access-server.
+ * requireAdminFromRequest: e-mail em ADMIN_EMAILS (env); perfis não concede admin — ver access-server.
  * requireMasterAdminFromRequest: SOMENTE e-mail ∈ ADMIN_EMAILS (Modo Suporte).
  * @see docs/AUTENTICACAO-V1.md
  */
@@ -28,15 +28,6 @@ export async function requireAdminFromRequest(request: NextRequest | Request) {
   const email = String(user.email || '').toLowerCase()
 
   if (isUsuarioAdminServer({ email })) return user
-
-  const supabase = getSupabaseAdmin()
-  const { data: perfil } = await supabase
-    .from('perfis')
-    .select('role,plano_tier,status,email')
-    .eq('id', user.id)
-    .maybeSingle()
-
-  if (isUsuarioAdminServer({ email, perfil })) return user
 
   throw new Error('Acesso negado.')
 }

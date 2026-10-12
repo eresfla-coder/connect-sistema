@@ -33,9 +33,12 @@ export function isPerfilRoleAdmin(perfil?: PerfilAdminCheck | null) {
   return false
 }
 
-/** Admin master: perfil role/tier on client; e-mail master only on server (access-server). */
-export function isUsuarioAdmin(args?: { email?: string | null; perfil?: PerfilAdminCheck | null }) {
-  return isPerfilRoleAdmin(args?.perfil)
+/**
+ * Sempre false: perfis não concede admin e a lista de e-mails só existe no servidor.
+ * Admin real: isUsuarioAdminServer (servidor) ou adminLogado de /api/painel/acesso (browser).
+ */
+export function isUsuarioAdmin(_args?: { email?: string | null; perfil?: PerfilAdminCheck | null }) {
+  return false
 }
 
 /** E-mail do usuário Supabase (campo principal ou metadata OAuth). */

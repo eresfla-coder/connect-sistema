@@ -12,7 +12,6 @@ import {
   avisoTrial,
   dataMaisDias,
   emailDoUsuarioAuth,
-  isUsuarioAdmin,
   normalizarStatus,
 } from '@/lib/access'
 import { isUsuarioAdminServer } from '@/lib/access-server'
@@ -24,6 +23,12 @@ export const dynamic = 'force-dynamic'
 
 const API_TIMEOUT_MS = 8000
 
+/** Só colunas existentes em public.perfis: coluna inexistente faz o PostgREST falhar (42703). */
+const COLUNAS_PERFIL_PAINEL = 'id,email,ativo,status,vencimento,plano_tier'
+
+const MENSAGEM_PERFIL_INDISPONIVEL = 'Não foi possível validar seu acesso agora. Tente novamente em instantes.'
+const MENSAGEM_SEM_PERFIL = 'Não encontramos o cadastro desta conta. Fale com o suporte.'
+
 type PerfilPainel = {
   id: string
   email?: string | null
@@ -31,7 +36,43 @@ type PerfilPainel = {
   status?: string | null
   vencimento?: string | null
   plano_tier?: string | null
-  role?: string | null
+}
+
+type SupabaseUsuario = ReturnType<typeof supabaseAnonFromToken>
+
+/**
+ * Criação legítima do perfil inicial: só é chamada quando a leitura terminou sem erro
+ * e sem linha. Devolve o perfil efetivamente gravado (ou criado em paralelo), nunca um rascunho.
+ */
+async function criarPerfilInicial(
+  supabase: SupabaseUsuario,
+  user: { id: string; email?: string | null },
+  adminLogado: boolean,
+): Promise<PerfilPainel | null> {
+  const perfilNovo: PerfilPainel = {
+    id: user.id,
+    email: user.email ?? null,
+    ativo: true,
+    status: adminLogado ? 'ativo' : 'trial',
+    vencimento: adminLogado ? '2099-12-31' : dataMaisDias(7).slice(0, 10),
+    plano_tier: adminLogado ? 'empresa' : 'trial',
+  }
+
+  const { data: gravado, error: insertError } = await supabase
+    .from('perfis')
+    .insert([perfilNovo])
+    .select(COLUNAS_PERFIL_PAINEL)
+    .maybeSingle<PerfilPainel>()
+  if (!insertError && gravado) return gravado
+  if (insertError) console.error('ERRO_CRIAR_PERFIL_API:', insertError.code || '', insertError.message)
+
+  const { data: existente, error: releituraError } = await supabase
+    .from('perfis')
+    .select(COLUNAS_PERFIL_PAINEL)
+    .eq('id', user.id)
+    .maybeSingle<PerfilPainel>()
+  if (releituraError) console.error('ERRO_PERFIL_API:', releituraError.code || '', releituraError.message)
+  return releituraError ? null : existente
 }
 
 function getBearerToken(request: NextRequest) {
@@ -69,40 +110,35 @@ export async function GET(request: NextRequest) {
     }
 
     const emailNormalizado = emailDoUsuarioAuth(user)
+    const adminLogado = isUsuarioAdminServer({ email: emailNormalizado })
+
     const { data: perfilExistente, error } = await supabase
       .from('perfis')
-      .select('id,email,ativo,status,vencimento,plano_tier,role')
+      .select(COLUNAS_PERFIL_PAINEL)
       .eq('id', user.id)
       .maybeSingle<PerfilPainel>()
 
-    let adminLogado = isUsuarioAdmin({ email: emailNormalizado, perfil: perfilExistente })
-    if (!adminLogado) {
-      adminLogado = isUsuarioAdminServer({ email: emailNormalizado, perfil: perfilExistente })
+    // Falha de leitura não é "perfil ausente": nunca vira trial nem libera acesso.
+    if (error) {
+      console.error('ERRO_PERFIL_API:', error.code || '', error.message)
+      return NextResponse.json(
+        { ok: false, reason: 'perfil_indisponivel', message: MENSAGEM_PERFIL_INDISPONIVEL },
+        { status: 503 },
+      )
     }
 
     let perfil = perfilExistente
+    if (!perfil) {
+      perfil = await criarPerfilInicial(supabase, user, adminLogado)
+    }
 
-    if (error) {
-      console.error('ERRO_PERFIL_API:', error.message)
+    if (!perfil && adminLogado) {
+      // Admin é definido por ADMIN_EMAILS no servidor; o perfil é só apresentação.
+      perfil = { id: user.id, email: user.email ?? null, ativo: true, status: 'ativo', vencimento: '2099-12-31', plano_tier: 'empresa' }
     }
 
     if (!perfil) {
-      const perfilNovo: PerfilPainel = {
-        id: user.id,
-        email: user.email ?? null,
-        ativo: true,
-        status: adminLogado ? 'ativo' : 'trial',
-        vencimento: adminLogado ? '2099-12-31' : dataMaisDias(7).slice(0, 10),
-        plano_tier: adminLogado ? 'empresa' : 'trial',
-      }
-
-      const { error: insertError } = await supabase.from('perfis').upsert([perfilNovo], { onConflict: 'id' })
-      if (insertError) console.error('ERRO_CRIAR_PERFIL_API:', insertError.message)
-      perfil = perfilNovo
-    }
-
-    if (!perfil) {
-      return NextResponse.json({ ok: false, reason: 'sem_perfil' }, { status: 403 })
+      return NextResponse.json({ ok: false, reason: 'sem_perfil', message: MENSAGEM_SEM_PERFIL }, { status: 403 })
     }
 
     const statusNormalizado = normalizarStatus(perfil.status)

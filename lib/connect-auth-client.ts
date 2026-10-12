@@ -38,7 +38,10 @@ export async function consultarAcessoPainel(token: string, opts?: { forcar?: boo
         },
         ACESSO_TIMEOUT_MS,
       )
-      return (await res.json().catch(() => ({ ok: false, reason: 'erro_parse' }))) as AcessoPainelResumo
+      const corpo = (await res.json().catch(() => null)) as AcessoPainelResumo | null
+      if (!corpo || typeof corpo !== 'object') return { ok: false, reason: res.ok ? 'erro_parse' : `http_${res.status}` }
+      if (!res.ok && corpo.ok !== false) return { ok: false, reason: `http_${res.status}` }
+      return corpo
     } catch (error) {
       const message = error instanceof Error ? error.message : 'erro_rede'
       return { ok: false, reason: 'timeout', message }

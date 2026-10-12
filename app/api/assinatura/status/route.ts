@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 
     const { perfil, assinatura, snapshot } = await obterAssinaturaUsuario(user.id)
 
-    if (isUsuarioAdminServer({ email, perfil })) {
+    if (isUsuarioAdminServer({ email })) {
       const snapshotFinal = {
         ...snapshotAssinaturaAdmin(documentosUsados),
         documentosUsados,
