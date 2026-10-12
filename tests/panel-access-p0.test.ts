@@ -325,29 +325,24 @@ describe('PANEL.ACCESS.P0 — /api/painel/acesso', () => {
     assert.equal(escritasPerfis().length, 0)
   })
 
-  it('6. perfil inexistente: criação legítima, sem confundir com erro de banco', async () => {
+  it('6. perfil inexistente não é criado pelo token do cliente', async () => {
     const negado = await acessoPainel(TOKEN.A)
-    assert.equal(negado.status, 403, 'RLS de produção nega o INSERT: sem perfil, sem acesso')
+    assert.equal(negado.status, 403)
     assert.equal(negado.body.reason, 'sem_perfil')
     assert.equal(estado.db.perfis.length, 0)
+    assert.equal(escritasPerfis().length, 0)
 
     estado.rlsNegaInsertPerfis = false
-    const criado = await acessoPainel(TOKEN.A)
-    assert.equal(criado.status, 200)
-    assert.equal(criado.body.ok, true)
-    assert.equal(criado.body.isTrial, true)
-    assert.equal(estado.db.perfis.length, 1)
-    assert.equal(estado.db.perfis[0].status, 'teste')
-    assert.equal(criado.body.perfil.vencimento, estado.db.perfis[0].vencimento, 'resposta reflete o perfil gravado')
-
-    const segunda = await acessoPainel(TOKEN.A)
-    assert.equal(segunda.body.ok, true)
-    assert.equal(estado.db.perfis.length, 1, 'perfil existente não é recriado')
+    const deNovo = await acessoPainel(TOKEN.A)
+    assert.equal(deNovo.status, 403)
+    assert.equal(deNovo.body.reason, 'sem_perfil')
+    assert.equal(estado.db.perfis.length, 0)
+    assert.equal(escritasPerfis().length, 0)
   })
 
-  it('6b. perfil criado em paralelo (conflito) é relido, não sobrescrito', async () => {
+  it('6b. perfil que aparece depois da leitura não é sobrescrito', async () => {
     estado.rlsNegaInsertPerfis = false
-    const original = perfil(A, { vencimento: '2026-01-10' })
+    const original = perfil(A, { vencimento: '2026-01-10', status: 'ativo', ativo: true })
     estado.db.perfis = []
     const leitura = estado.clientes.authenticated.from
     let primeira = true
@@ -365,9 +360,12 @@ describe('PANEL.ACCESS.P0 — /api/painel/acesso', () => {
       return q
     }
     const r = await acessoPainel(TOKEN.A)
-    assert.equal(r.body.bloqueado, true)
+    assert.equal(r.status, 403)
+    assert.equal(r.body.reason, 'sem_perfil')
     assert.equal(estado.db.perfis.length, 1)
     assert.equal(estado.db.perfis[0].vencimento, '2026-01-10')
+    assert.equal(estado.db.perfis[0].status, 'ativo')
+    assert.equal(escritasPerfis().length, 0)
   })
 
   it('7. pagamento aprovado libera o vencido; bloqueio gravado continua (PAYMENT.P0)', async () => {
@@ -419,6 +417,17 @@ describe('PANEL.ACCESS.P0 — autorização administrativa', () => {
     const vencido = await acessoPainel(TOKEN.admin)
     assert.equal(vencido.body.adminLogado, true)
     assert.equal(vencido.body.bloqueado, false)
+
+    estado.db.perfis = []
+    perfil(ADMIN, { status: 'trial', plano_tier: 'trial', vencimento: emDias(3), ativo: true })
+    const trial = await acessoPainel(TOKEN.admin)
+    assert.equal(trial.body.adminLogado, true)
+    assert.equal(trial.body.bloqueado, false)
+    assert.equal(trial.body.perfil.status, 'ativo')
+    assert.equal(trial.body.perfil.plano_tier, 'empresa')
+    assert.equal(estado.db.perfis[0].status, 'trial', 'elevação de admin não grava o perfil')
+    assert.equal(estado.db.perfis[0].plano_tier, 'trial')
+    assert.equal(escritasPerfis().filter((e) => e.papel === 'authenticated').length, 0)
   })
 
   it('requireAdminFromRequest não consulta perfis; sem sessão é recusado', async () => {
@@ -438,6 +447,11 @@ describe('PANEL.ACCESS.P0 — autorização administrativa', () => {
     assert.doesNotMatch(fonte, /\brole\b/)
     assert.doesNotMatch(fonte, /perfil = perfilNovo/)
     assert.doesNotMatch(fonte, /isUsuarioAdmin\(/)
+    assert.doesNotMatch(fonte, /from\('perfis'\)[\s\S]{0,120}\.(insert|update|upsert|delete)/)
+    const login = ler('app/(auth)/login/page.tsx')
+    assert.doesNotMatch(login, /from\('perfis'\)[\s\S]{0,120}\.(insert|update|upsert|delete)/)
+    const empresa = ler('lib/empresa.ts')
+    assert.doesNotMatch(empresa, /from\('perfis'\)[\s\S]{0,120}\.(insert|update|upsert|delete)/)
   })
 
 })

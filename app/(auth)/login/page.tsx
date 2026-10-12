@@ -268,35 +268,12 @@ export default function LoginPage() {
         return
       }
 
-      const userId = data.user?.id
-
       if (data.session?.user) {
         marcarSessaoReal()
         sairDemoMode()
       }
 
-      if (userId) {
-        const { error: perfilError } = await supabase.from('perfis').upsert(
-          [
-            {
-              id: userId,
-              email: email.trim().toLowerCase(),
-              ativo: true,
-              status: 'trial',
-              plano_tier: 'trial',
-              vencimento: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            },
-          ],
-          { onConflict: 'id' }
-        )
-
-        if (perfilError) {
-          setErro('Conta criada, mas houve erro ao salvar o perfil.')
-          iniciarCooldown(5)
-          return
-        }
-      }
-
+      // O perfil nasce no trigger auth.users (criar_perfil). O browser não grava perfis.
       setMensagem('Conta criada com sucesso! Agora você já pode entrar.')
       setModo('entrar')
       setSenha('')

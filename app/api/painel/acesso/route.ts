@@ -10,7 +10,6 @@ import { createClient } from '@supabase/supabase-js'
 import {
   acessoBloqueado,
   avisoTrial,
-  dataMaisDias,
   emailDoUsuarioAuth,
   normalizarStatus,
 } from '@/lib/access'
@@ -36,43 +35,6 @@ type PerfilPainel = {
   status?: string | null
   vencimento?: string | null
   plano_tier?: string | null
-}
-
-type SupabaseUsuario = ReturnType<typeof supabaseAnonFromToken>
-
-/**
- * Criação legítima do perfil inicial: só é chamada quando a leitura terminou sem erro
- * e sem linha. Devolve o perfil efetivamente gravado (ou criado em paralelo), nunca um rascunho.
- */
-async function criarPerfilInicial(
-  supabase: SupabaseUsuario,
-  user: { id: string; email?: string | null },
-  adminLogado: boolean,
-): Promise<PerfilPainel | null> {
-  const perfilNovo: PerfilPainel = {
-    id: user.id,
-    email: user.email ?? null,
-    ativo: true,
-    status: adminLogado ? 'ativo' : 'trial',
-    vencimento: adminLogado ? '2099-12-31' : dataMaisDias(7).slice(0, 10),
-    plano_tier: adminLogado ? 'empresa' : 'trial',
-  }
-
-  const { data: gravado, error: insertError } = await supabase
-    .from('perfis')
-    .insert([perfilNovo])
-    .select(COLUNAS_PERFIL_PAINEL)
-    .maybeSingle<PerfilPainel>()
-  if (!insertError && gravado) return gravado
-  if (insertError) console.error('ERRO_CRIAR_PERFIL_API:', insertError.code || '', insertError.message)
-
-  const { data: existente, error: releituraError } = await supabase
-    .from('perfis')
-    .select(COLUNAS_PERFIL_PAINEL)
-    .eq('id', user.id)
-    .maybeSingle<PerfilPainel>()
-  if (releituraError) console.error('ERRO_PERFIL_API:', releituraError.code || '', releituraError.message)
-  return releituraError ? null : existente
 }
 
 function getBearerToken(request: NextRequest) {
@@ -128,9 +90,6 @@ export async function GET(request: NextRequest) {
     }
 
     let perfil = perfilExistente
-    if (!perfil) {
-      perfil = await criarPerfilInicial(supabase, user, adminLogado)
-    }
 
     if (!perfil && adminLogado) {
       // Admin é definido por ADMIN_EMAILS no servidor; o perfil é só apresentação.
@@ -141,20 +100,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: false, reason: 'sem_perfil', message: MENSAGEM_SEM_PERFIL }, { status: 403 })
     }
 
+    // Normalização e elevação de admin valem só para esta resposta. O token do cliente não grava perfis.
     const statusNormalizado = normalizarStatus(perfil.status)
     if (statusNormalizado !== perfil.status) {
-      await supabase.from('perfis').update({ status: statusNormalizado }).eq('id', user.id)
-      perfil.status = statusNormalizado
+      perfil = { ...perfil, status: statusNormalizado }
     }
 
     if (adminLogado && (perfil.status === 'trial' || perfil.plano_tier === 'trial')) {
-      await supabase
-        .from('perfis')
-        .update({ status: 'ativo', ativo: true, plano_tier: 'empresa', vencimento: '2099-12-31' })
-        .eq('id', user.id)
-      perfil.status = 'ativo'
-      perfil.ativo = true
-      perfil.plano_tier = 'empresa'
+      perfil = { ...perfil, status: 'ativo', ativo: true, plano_tier: 'empresa', vencimento: '2099-12-31' }
     }
 
     const diasAteFim = diasAteVencimento(perfil.vencimento)

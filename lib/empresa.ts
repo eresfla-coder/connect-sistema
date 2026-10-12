@@ -1,5 +1,4 @@
 import { supabase } from './supabase'
-import { dataMaisDias, normalizarStatus } from './access'
 
 type UserLike = {
   id: string
@@ -76,18 +75,20 @@ async function criarOuBuscarEmpresa(user: UserLike) {
 }
 
 export async function garantirEmpresa(user: UserLike) {
-  const email = String(user.email || '').trim().toLowerCase()
-  const nome = nomeDoUsuario(user)
-
-  const { data: perfilExistente } = await supabase
+  const { data: perfilExistente, error: leituraErro } = await supabase
     .from('perfis')
     .select('*')
     .eq('id', user.id)
     .maybeSingle<PerfilSaas>()
 
+  if (leituraErro) throw leituraErro
+  if (!perfilExistente) {
+    throw new Error('Não encontramos o cadastro desta conta.')
+  }
+
   let empresa: EmpresaSaas | null = null
 
-  if (perfilExistente?.empresa_id) {
+  if (perfilExistente.empresa_id) {
     const { data } = await supabase
       .from('empresas')
       .select('*')
@@ -100,27 +101,11 @@ export async function garantirEmpresa(user: UserLike) {
     empresa = await criarOuBuscarEmpresa(user)
   }
 
-  const perfilBase: PerfilSaas = {
-    id: user.id,
-    empresa_id: empresa.id,
-    email,
-    nome,
-    ativo: perfilExistente?.ativo ?? true,
-    status: normalizarStatus(perfilExistente?.status || 'trial'),
-    vencimento: perfilExistente?.vencimento || dataMaisDias(7),
-  }
-
-  const { error: perfilError } = await supabase
-    .from('perfis')
-    .upsert(perfilBase, { onConflict: 'id' })
-
-  if (perfilError) throw perfilError
-
   if (!empresa.trial_ate) {
     const trialAte = seteDiasIso()
     await supabase.from('empresas').update({ trial_ate: trialAte }).eq('id', empresa.id)
     empresa.trial_ate = trialAte
   }
 
-  return { perfil: perfilBase, empresa }
+  return { perfil: perfilExistente, empresa }
 }
