@@ -2,6 +2,63 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import {
+  classificarErroSenha,
+  criarTrocaUnica,
+  hrefSemSegredo,
+  MSG_LINK_INVALIDO,
+  MSG_REDE,
+  MSG_SENHA_CURTA,
+  MSG_SENHA_DIFERENTE,
+  MSG_SENHA_VAZIA,
+  MSG_VALIDANDO,
+  resumirErroAuth,
+  temVerificadorPkce,
+  validarLinkRecuperacao,
+  type ClienteRecuperacao,
+  type ResultadoRecuperacao,
+} from '@/lib/auth/recuperacao-senha'
+
+function clienteDaPagina(): ClienteRecuperacao {
+  return {
+    temVerificador: () => temVerificadorPkce(document.cookie),
+    initialize: async () => {
+      const { error } = await supabase.auth.initialize()
+      return { error: resumirErroAuth(error) }
+    },
+    onPasswordRecovery: (ouvinte) => {
+      const { data } = supabase.auth.onAuthStateChange((evento) => {
+        if (evento === 'PASSWORD_RECOVERY') ouvinte()
+      })
+      return () => data.subscription.unsubscribe()
+    },
+    definirSessao: async (accessToken, refreshToken) => {
+      const { data, error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      })
+      return {
+        error: resumirErroAuth(error),
+        autenticado: Boolean(data?.session?.user),
+      }
+    },
+  }
+}
+
+const umaVez = criarTrocaUnica()
+
+function iniciarValidacao(): Promise<ResultadoRecuperacao> {
+  const href = window.location.href
+  const limpa = hrefSemSegredo(href)
+  const atual = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (atual !== limpa) {
+    window.history.replaceState(window.history.state, '', limpa)
+  }
+  return umaVez('link-atual', () => validarLinkRecuperacao(href, clienteDaPagina()))
+}
+
+const validacaoInicial: Promise<ResultadoRecuperacao> | null =
+  typeof window === 'undefined' ? null : iniciarValidacao()
 
 export default function ResetSenhaPage() {
   const [novaSenha, setNovaSenha] = useState('')
@@ -11,44 +68,73 @@ export default function ResetSenhaPage() {
   const [mensagem, setMensagem] = useState('')
   const [erro, setErro] = useState('')
   const [tokenValido, setTokenValido] = useState(false)
+  const [validando, setValidando] = useState(true)
+  const [salvando, setSalvando] = useState(false)
 
   useEffect(() => {
-    const hash = window.location.hash
+    let ativo = true
+    const validacao = validacaoInicial
 
-    if (hash && hash.includes('access_token')) {
-      setTokenValido(true)
-    } else {
-      setErro('Link inválido ou expirado.')
+    if (!validacao) {
+      setErro(MSG_LINK_INVALIDO)
+      setValidando(false)
+      return
+    }
+
+    validacao.then((resultado) => {
+      if (!ativo) return
+      if ('mensagem' in resultado) setErro(resultado.mensagem)
+      else setTokenValido(true)
+      setValidando(false)
+    })
+
+    return () => {
+      ativo = false
     }
   }, [])
 
   async function alterarSenha() {
+    if (!tokenValido || salvando) return
+
     setErro('')
     setMensagem('')
 
     if (!novaSenha || !confirmarSenha) {
-      setErro('Preencha todos os campos.')
+      setErro(MSG_SENHA_VAZIA)
       return
     }
 
     if (novaSenha !== confirmarSenha) {
-      setErro('As senhas não coincidem.')
+      setErro(MSG_SENHA_DIFERENTE)
       return
     }
 
-    const { error } = await supabase.auth.updateUser({
-      password: novaSenha,
-    })
-
-    if (error) {
-      setErro('Erro ao atualizar senha.')
+    if (novaSenha.length < 6) {
+      setErro(MSG_SENHA_CURTA)
       return
     }
 
-    setMensagem('Senha alterada com sucesso! Redirecionando para o login...')
-    setTimeout(() => {
-      window.location.href = '/login'
-    }, 1200)
+    setSalvando(true)
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: novaSenha,
+      })
+
+      if (error) {
+        setErro(classificarErroSenha(resumirErroAuth(error)))
+        setSalvando(false)
+        return
+      }
+
+      setMensagem('Senha alterada com sucesso! Redirecionando para o login...')
+      setTimeout(() => {
+        window.location.href = '/login'
+      }, 1200)
+    } catch {
+      setErro(MSG_REDE)
+      setSalvando(false)
+    }
   }
 
   return (
@@ -185,6 +271,7 @@ export default function ResetSenhaPage() {
 
             <button
               onClick={alterarSenha}
+              disabled={salvando}
               style={{
                 width: '100%',
                 marginTop: 14,
@@ -203,6 +290,8 @@ export default function ResetSenhaPage() {
               ALTERAR SENHA
             </button>
           </>
+        ) : validando ? (
+          <p style={{ margin: '8px 0 0', color: '#cbd5e1', fontSize: 14 }}>{MSG_VALIDANDO}</p>
         ) : (
           <button
             type="button"

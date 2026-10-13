@@ -4,11 +4,17 @@
  * Login Connect — signIn grava cookie SSR; 1× consultarAcessoPainel; respeita ?redirect=.
  * Não chamar /api/assinatura/status aqui. @see docs/AUTENTICACAO-V1.md
  */
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { ativarModoDemo, marcarSessaoReal, sairDemoMode } from '@/lib/connect-demo'
 import { consultarAcessoPainel, resolverDestinoPosLogin } from '@/lib/connect-auth-client'
+import {
+  buscaSemRecuperacao,
+  decidirInicioRecuperacao,
+  lerChegadaRecuperacao,
+  MSG_CONTINUAR_NA_ORIGEM,
+} from '@/lib/auth/recuperacao-senha'
 
 type ModoAuth = 'entrar' | 'criar'
 
@@ -55,16 +61,15 @@ export default function LoginPage() {
   const [erro, setErro] = useState('')
   const [cooldown, setCooldown] = useState(0)
 
-  const redirectReset = useMemo(() => {
-    if (typeof window === 'undefined') return ''
+  useEffect(() => {
+    const chegada = lerChegadaRecuperacao(window.location.search)
+    if (!chegada.continuar) return
 
-    const origin = window.location.origin
+    if (chegada.email) setEmail(chegada.email)
+    setMensagem(MSG_CONTINUAR_NA_ORIGEM)
 
-    if (origin.includes('localhost') || origin.includes('192.168.')) {
-      return `${origin}/reset-senha`
-    }
-
-    return `${origin}/reset-senha`
+    const restante = buscaSemRecuperacao(window.location.search)
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${restante}`)
   }, [])
 
   useEffect(() => {
@@ -301,9 +306,15 @@ export default function LoginPage() {
 
     try {
       const emailNormalizado = email.trim().toLowerCase()
+      const decisao = decidirInicioRecuperacao(window.location.origin, emailNormalizado)
+
+      if (decisao.tipo === 'redirecionar') {
+        window.location.assign(decisao.destino)
+        return
+      }
 
       const { error } = await supabase.auth.resetPasswordForEmail(emailNormalizado, {
-        redirectTo: redirectReset || `${window.location.origin}/reset-senha`,
+        redirectTo: decisao.redirectTo,
       })
 
       if (error) {
