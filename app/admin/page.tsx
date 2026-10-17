@@ -15,6 +15,7 @@ import AdminAssinaturasMetricas from '@/components/admin/AdminAssinaturasMetrica
 import ModalRenovacaoManual, { type FormRenovacao } from '@/components/admin/ModalRenovacaoManual'
 import AdminBackupsModal from '@/components/admin/AdminBackupsModal'
 import AdminSistemasPanel from '@/components/admin/AdminSistemasPanel'
+import CadastrosPublicosPanel from '@/components/admin/CadastrosPublicosPanel'
 import AdminModoSuporteModal from '@/components/admin/AdminModoSuporteModal'
 import AdminModoSuporteBanner from '@/components/admin/AdminModoSuporteBanner'
 import {
@@ -344,7 +345,7 @@ export default function AdminSaasMasterPage() {
   const [erroAdmin, setErroAdmin] = useState('')
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<FiltroStatus>('todos')
-  const [aba, setAba] = useState<'clientes' | 'sistemas' | 'sessoes' | 'metricas' | 'saude'>('clientes')
+  const [aba, setAba] = useState<'clientes' | 'sistemas' | 'sessoes' | 'cadastros' | 'metricas' | 'saude'>('clientes')
   const [catalogoSistemas, setCatalogoSistemas] = useState<Array<{ id: string; nome: string; origem: string; ativo: boolean }>>([])
   const [adminTablesReadyFlag, setAdminTablesReadyFlag] = useState(false)
   const [healthItens, setHealthItens] = useState<Array<{ nome: string; status: string; detalhe?: string }>>([])
@@ -2026,6 +2027,7 @@ export default function AdminSaasMasterPage() {
           <button style={{ ...(aba === 'clientes' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('clientes')}>Clientes</button>
           <button style={{ ...(aba === 'sistemas' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('sistemas')}>Sistemas</button>
           <button style={{ ...(aba === 'sessoes' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('sessoes')}>Sessões ativas</button>
+          <button style={{ ...(aba === 'cadastros' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('cadastros')}>Cadastros e Testes</button>
           <button style={{ ...(aba === 'metricas' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('metricas')}>Uso e crescimento</button>
           <button style={{ ...(aba === 'saude' ? styles.tabActive : styles.tab), ...(isMobileAdmin ? styles.tabMobile : {}) }} onClick={() => setAba('saude')}>Saúde do sistema</button>
         </section>
@@ -2042,6 +2044,8 @@ export default function AdminSaasMasterPage() {
             }}
           />
         ) : null}
+
+        {aba === 'cadastros' ? <CadastrosPublicosPanel /> : null}
 
         {aba === 'clientes' && (
           <section style={{ ...styles.panel, ...(isMobileAdmin ? styles.panelMobile : {}) }}>

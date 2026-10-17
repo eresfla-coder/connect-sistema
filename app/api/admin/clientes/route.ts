@@ -425,6 +425,7 @@ export async function POST(req: Request) {
         email,
         password: senhaInicial,
         email_confirm: true,
+        app_metadata: { origem_conta: 'admin' },
       })
 
     if (createResult.error) {
