@@ -10,8 +10,17 @@ import { supabase } from '@/lib/supabase'
 import {
   extrairFormasPagamentoOrcamento,
   montarFormasPagamentoOrcamento,
-  OPCOES_PAGAMENTO_ORCAMENTO,
 } from '@/lib/orcamento-pagamento'
+import {
+  FORMAS_PAGAMENTO_EVENTO,
+  FORMAS_PAGAMENTO_KEY,
+  garantirFormasPagamentoLocais,
+  lerFormasPagamentoLocal,
+  nomesFormasAtivas,
+  opcoesFormasPagamentoOrcamento,
+  sincronizarFormasPagamentoDaNuvem,
+  type FormaPagamentoCadastro,
+} from '@/lib/formas-pagamento'
 import {
   OBSERVACAO_PADRAO_ORCAMENTO,
   validadeOrcamentoAtiva,
@@ -222,7 +231,7 @@ type Toast = {
 }
 
 const CONFIG_KEY = 'connect_configuracoes'
-const FORMAS_KEY = 'connect_formas_pagamento'
+const FORMAS_KEY = FORMAS_PAGAMENTO_KEY
 const ORCAMENTOS_KEY = 'connect_orcamentos_salvos'
 const ORCAMENTOS_EXCLUIDOS_CLOUD_KEY = 'connect_orcamentos_excluidos'
 const ORCAMENTOS_DELETED_PREFIX = 'connect_orcamentos_deleted_'
@@ -1260,7 +1269,8 @@ export default function OrcamentoPage() {
     logoUrl: '/logo-connect.png',
   })
 
-  const [formasPagamento, setFormasPagamento] = useState<string[]>(['PIX', 'DINHEIRO', 'CARTAO 1X'])
+  const [formasCadastro, setFormasCadastro] = useState<FormaPagamentoCadastro[]>([])
+  const formasPagamento = useMemo(() => nomesFormasAtivas(formasCadastro), [formasCadastro])
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [produtos, setProdutos] = useState<Produto[]>(produtosMock)
 
@@ -2060,27 +2070,20 @@ export default function OrcamentoPage() {
       })
       .catch(() => {})
 
-    const salvoFormas = localStorage.getItem(FORMAS_KEY)
-    if (salvoFormas) {
-      try {
-        const lista = JSON.parse(salvoFormas)
-        if (Array.isArray(lista) && lista.length > 0) {
-          const normalizadas = lista
-            .map((item) => {
-              if (typeof item === 'string') return item
-              if (item && typeof item === 'object' && 'nome' in item) return String(item.nome)
-              return ''
-            })
-            .filter(Boolean)
-
-          const unicas = normalizadas.filter((item, index, arr) => arr.indexOf(item) === index)
-          if (unicas.length > 0) {
-            setFormasPagamento(unicas)
-            setFormaPagamento(unicas[0])
-          }
-        }
-      } catch {}
+    const carregarFormasLocais = () => {
+      const lista = garantirFormasPagamentoLocais()
+      setFormasCadastro(lista)
+      const ativas = nomesFormasAtivas(lista)
+      if (ativas.length > 0) setFormaPagamento((atual) => atual || ativas[0])
     }
+    carregarFormasLocais()
+    void sincronizarFormasPagamentoDaNuvem().then((resultado) => {
+      if (resultado.lista.length > 0) {
+        setFormasCadastro(resultado.lista)
+        const ativas = nomesFormasAtivas(resultado.lista)
+        if (ativas.length > 0) setFormaPagamento((atual) => atual || ativas[0])
+      }
+    })
 
     void (async () => {
       const auth = await obterAuthOrcamentos(6)
@@ -2146,6 +2149,26 @@ export default function OrcamentoPage() {
     window.addEventListener('connect-cloud-hydrated', carregarDadosLocaisV78)
     return () => window.removeEventListener('connect-cloud-hydrated', carregarDadosLocaisV78)
   }, [])
+
+  useEffect(() => {
+    function recarregarFormasCadastro() {
+      const lista = lerFormasPagamentoLocal()
+      if (lista.length > 0) setFormasCadastro(lista)
+    }
+    window.addEventListener(FORMAS_PAGAMENTO_EVENTO, recarregarFormasCadastro)
+    window.addEventListener('connect-data-change', recarregarFormasCadastro)
+    window.addEventListener('storage', recarregarFormasCadastro)
+    return () => {
+      window.removeEventListener(FORMAS_PAGAMENTO_EVENTO, recarregarFormasCadastro)
+      window.removeEventListener('connect-data-change', recarregarFormasCadastro)
+      window.removeEventListener('storage', recarregarFormasCadastro)
+    }
+  }, [])
+
+  const opcoesPagamentoFormulario = useMemo(
+    () => opcoesFormasPagamentoOrcamento(formasCadastro, formasPagamentoSelecionadas),
+    [formasCadastro, formasPagamentoSelecionadas],
+  )
 
   useEffect(() => {
     let ativo = true
@@ -5246,16 +5269,20 @@ Se aprovar, me responda por aqui que já deixo tudo encaminhado ✅`
               <div style={cardStyle}>
                 <label style={{ ...labelStyle, marginBottom: 6 }}>Formas de pagamento</label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {OPCOES_PAGAMENTO_ORCAMENTO.map((opcao) => {
-                    const ativo = formasPagamentoSelecionadas.includes(opcao.label)
+                  {opcoesPagamentoFormulario.map((opcao) => {
+                    const ativo = formasPagamentoSelecionadas.some(
+                      (f) => f.trim().toLowerCase() === opcao.label.trim().toLowerCase(),
+                    )
                     return (
                       <button
                         key={opcao.id}
                         type="button"
                         onClick={() =>
-                          setFormasPagamentoSelecionadas((atual) =>
-                            atual.includes(opcao.label) ? atual.filter((f) => f !== opcao.label) : [...atual, opcao.label],
-                          )
+                          setFormasPagamentoSelecionadas((atual) => {
+                            const existe = atual.some((f) => f.trim().toLowerCase() === opcao.label.trim().toLowerCase())
+                            if (existe) return atual.filter((f) => f.trim().toLowerCase() !== opcao.label.trim().toLowerCase())
+                            return [...atual, opcao.label]
+                          })
                         }
                         style={{
                           minHeight: 32,

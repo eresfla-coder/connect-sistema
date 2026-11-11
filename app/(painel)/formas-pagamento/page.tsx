@@ -1,15 +1,17 @@
 'use client'
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-
-type FormaPagamento = {
-  id: number
-  nome: string
-  ativo: boolean
-}
-
-const FORMAS_KEY = 'connect_formas_pagamento'
-const PADROES = ['PIX', 'DINHEIRO', 'CARTÃO CRÉDITO', 'CARTÃO CRÉDITO PARCELADO', 'CARTÃO DÉBITO']
+import {
+  FORMAS_PAGAMENTO_PADRAO,
+  alternarFormaAtiva,
+  formasVisiveis,
+  garantirFormasPagamentoLocais,
+  marcarFormaExcluida,
+  salvarFormasPagamentoComSync,
+  sincronizarFormasPagamentoDaNuvem,
+  upsertFormaPagamento,
+  type FormaPagamentoCadastro,
+} from '@/lib/formas-pagamento'
 
 const pageBg = 'linear-gradient(180deg,#091223 0%,#0d1a31 100%)'
 const shellBg = 'linear-gradient(180deg,rgba(8,15,31,0.96) 0%,rgba(10,20,38,0.98) 100%)'
@@ -20,11 +22,13 @@ const text = '#f8fafc'
 const muted = '#8fa5c7'
 
 export default function FormasPagamentoPage() {
-  const [formas, setFormas] = useState<FormaPagamento[]>([])
+  const [formas, setFormas] = useState<FormaPagamentoCadastro[]>([])
   const [nome, setNome] = useState('')
   const [editandoId, setEditandoId] = useState<number | null>(null)
   const [busca, setBusca] = useState('')
   const [isMobile, setIsMobile] = useState(false)
+  const [statusSync, setStatusSync] = useState('')
+  const [salvando, setSalvando] = useState(false)
 
   useEffect(() => {
     const resize = () => setIsMobile(window.innerWidth < 768)
@@ -34,30 +38,27 @@ export default function FormasPagamentoPage() {
   }, [])
 
   useEffect(() => {
-    const salvo = localStorage.getItem(FORMAS_KEY)
-    if (salvo) {
-      try {
-        const lista = JSON.parse(salvo)
-        if (Array.isArray(lista) && lista.length > 0) {
-          if (typeof lista[0] === 'string') {
-            const convertida = lista.map((item, index) => ({ id: Date.now() + index, nome: String(item), ativo: true }))
-            setFormas(convertida)
-            localStorage.setItem(FORMAS_KEY, JSON.stringify(convertida))
-          } else {
-            setFormas(lista)
-          }
-          return
-        }
-      } catch {}
+    let ativo = true
+    setFormas(garantirFormasPagamentoLocais())
+    void sincronizarFormasPagamentoDaNuvem().then((resultado) => {
+      if (!ativo) return
+      const lista = resultado.lista.length ? resultado.lista : FORMAS_PAGAMENTO_PADRAO.map((n, i) => ({ id: i + 1, nome: n, ativo: true, excluido: false }))
+      setFormas(lista)
+      if (resultado.mensagem) setStatusSync(resultado.mensagem)
+      else if (resultado.origem === 'mesclado') setStatusSync('Sincronizado com a nuvem.')
+    })
+    return () => {
+      ativo = false
     }
-    const iniciais = PADROES.map((item, index) => ({ id: Date.now() + index, nome: item, ativo: true }))
-    setFormas(iniciais)
-    localStorage.setItem(FORMAS_KEY, JSON.stringify(iniciais))
   }, [])
 
-  function salvarLista(lista: FormaPagamento[]) {
+  async function persistir(lista: FormaPagamentoCadastro[]) {
+    setSalvando(true)
     setFormas(lista)
-    localStorage.setItem(FORMAS_KEY, JSON.stringify(lista))
+    const resultado = await salvarFormasPagamentoComSync(lista)
+    setFormas(resultado.lista)
+    setStatusSync(resultado.mensagem || (resultado.origem === 'mesclado' ? 'Salvo e sincronizado.' : 'Salvo neste aparelho.'))
+    setSalvando(false)
   }
 
   function limpar() {
@@ -65,49 +66,53 @@ export default function FormasPagamentoPage() {
     setEditandoId(null)
   }
 
-  function salvarForma() {
+  async function salvarForma() {
     const valor = nome.trim()
     if (!valor) {
       alert('Digite o nome da forma de pagamento.')
       return
     }
 
-    const existe = formas.some((item) => item.nome.trim().toLowerCase() === valor.toLowerCase() && item.id !== editandoId)
+    const existe = formas.some(
+      (item) => item.nome.trim().toLowerCase() === valor.toLowerCase() && item.id !== editandoId,
+    )
     if (existe) {
       alert('Essa forma de pagamento já existe.')
       return
     }
 
     if (editandoId !== null) {
-      salvarLista(formas.map((item) => (item.id === editandoId ? { ...item, nome: valor } : item)))
+      await persistir(upsertFormaPagamento(formas, { id: editandoId, nome: valor }))
       alert('Forma de pagamento atualizada com sucesso.')
     } else {
-      salvarLista([{ id: Date.now(), nome: valor, ativo: true }, ...formas])
+      await persistir(upsertFormaPagamento(formas, { nome: valor, ativo: true }))
       alert('Forma de pagamento criada com sucesso.')
     }
     limpar()
   }
 
-  function editarForma(item: FormaPagamento) {
+  function editarForma(item: FormaPagamentoCadastro) {
     setNome(item.nome)
     setEditandoId(item.id)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function excluirForma(id: number) {
+  async function excluirForma(id: number) {
     if (!window.confirm('Deseja excluir esta forma de pagamento?')) return
-    salvarLista(formas.filter((item) => item.id !== id))
+    // Tombstone: permanece no sync para não reaparecer vinda da nuvem.
+    await persistir(marcarFormaExcluida(formas, id))
     if (editandoId === id) limpar()
   }
 
-  function alternarStatus(id: number) {
-    salvarLista(formas.map((item) => (item.id === id ? { ...item, ativo: !item.ativo } : item)))
+  async function alternarStatus(id: number) {
+    await persistir(alternarFormaAtiva(formas, id))
   }
 
   const formasFiltradas = useMemo(() => {
+    const visiveis = formasVisiveis(formas)
     const termo = busca.trim().toLowerCase()
-    if (!termo) return formas
-    return formas.filter((item) => item.nome.toLowerCase().includes(termo))
+    if (!termo) return visiveis
+    return visiveis.filter((item) => item.nome.toLowerCase().includes(termo))
   }, [formas, busca])
 
   const inputStyle: CSSProperties = {
@@ -121,7 +126,12 @@ export default function FormasPagamentoPage() {
         <div style={{ color: muted, fontSize: 13, fontWeight: 900, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>
           Painel financeiro blindado
         </div>
-        <h1 style={{ margin: '0 0 16px 0', fontSize: isMobile ? 34 : 46, lineHeight: 1, fontWeight: 900, color: text }}>Formas de Pagamento</h1>
+        <h1 style={{ margin: '0 0 8px 0', fontSize: isMobile ? 34 : 46, lineHeight: 1, fontWeight: 900, color: text }}>Formas de Pagamento</h1>
+        {statusSync ? (
+          <div style={{ color: muted, fontWeight: 700, marginBottom: 12, fontSize: 13 }}>
+            {salvando ? 'Salvando… ' : ''}{statusSync}
+          </div>
+        ) : null}
 
         <div style={{ background: shellBg, borderRadius: 24, padding: isMobile ? 14 : 18, border, boxShadow: '0 16px 36px rgba(2,6,23,0.34)', marginBottom: 18 }}>
           <div style={{ background: cardBg, borderRadius: 20, padding: isMobile ? 14 : 18, border }}>
@@ -131,7 +141,7 @@ export default function FormasPagamentoPage() {
                 <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: PIX, CARTÃO 1X, BOLETO..." style={inputStyle} />
               </div>
               <button onClick={limpar} style={{ height: 46, border: 'none', borderRadius: 12, padding: '0 16px', fontWeight: 900, cursor: 'pointer', background: '#cbd5e1', color: '#0f172a' }}>Limpar</button>
-              <button onClick={salvarForma} style={{ height: 46, border: 'none', borderRadius: 12, padding: '0 18px', fontWeight: 900, cursor: 'pointer', background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#fff' }}>{editandoId !== null ? 'Salvar edição' : '+ Nova forma'}</button>
+              <button disabled={salvando} onClick={() => void salvarForma()} style={{ height: 46, border: 'none', borderRadius: 12, padding: '0 18px', fontWeight: 900, cursor: salvando ? 'wait' : 'pointer', background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#fff', opacity: salvando ? 0.7 : 1 }}>{editandoId !== null ? 'Salvar edição' : '+ Nova forma'}</button>
             </div>
           </div>
         </div>
@@ -153,9 +163,9 @@ export default function FormasPagamentoPage() {
                   <div style={{ marginTop: 8, display: 'inline-flex', padding: '6px 10px', borderRadius: 999, fontWeight: 800, fontSize: 11, background: item.ativo ? 'rgba(34,197,94,0.16)' : 'rgba(239,68,68,0.16)', color: item.ativo ? '#86efac' : '#fca5a5', border: '1px solid rgba(255,255,255,0.08)' }}>{item.ativo ? 'Ativa' : 'Inativa'}</div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3, auto)', gap: 10 }}>
-                  <button onClick={() => alternarStatus(item.id)} style={{ height: 42, border: 'none', borderRadius: 12, fontWeight: 900, cursor: 'pointer', background: 'linear-gradient(135deg,#facc15,#eab308)', color: '#111827', minWidth: 94 }}>{item.ativo ? 'Inativar' : 'Ativar'}</button>
-                  <button onClick={() => editarForma(item)} style={{ height: 42, border: 'none', borderRadius: 12, fontWeight: 900, cursor: 'pointer', background: 'linear-gradient(135deg,#3b82f6,#2563eb)', color: '#fff', minWidth: 88 }}>Editar</button>
-                  <button onClick={() => excluirForma(item.id)} style={{ height: 42, border: 'none', borderRadius: 12, fontWeight: 900, cursor: 'pointer', background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', minWidth: 88 }}>Excluir</button>
+                  <button disabled={salvando} onClick={() => void alternarStatus(item.id)} style={{ height: 42, border: 'none', borderRadius: 12, fontWeight: 900, cursor: 'pointer', background: 'linear-gradient(135deg,#facc15,#eab308)', color: '#111827', minWidth: 94 }}>{item.ativo ? 'Inativar' : 'Ativar'}</button>
+                  <button disabled={salvando} onClick={() => editarForma(item)} style={{ height: 42, border: 'none', borderRadius: 12, fontWeight: 900, cursor: 'pointer', background: 'linear-gradient(135deg,#3b82f6,#2563eb)', color: '#fff', minWidth: 88 }}>Editar</button>
+                  <button disabled={salvando} onClick={() => void excluirForma(item.id)} style={{ height: 42, border: 'none', borderRadius: 12, fontWeight: 900, cursor: 'pointer', background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', minWidth: 88 }}>Excluir</button>
                 </div>
               </div>
             ))}

@@ -13,6 +13,17 @@ import {
   type TipoPessoaEmpresa,
 } from '@/lib/configuracaoEmpresa'
 import { obterUserIdPainel, salvarLocalStorageUsuario } from '@/lib/connect-user-storage'
+import {
+  FORMAS_PAGAMENTO_KEY,
+  formasVisiveis,
+  gravarFormasPagamentoLocal,
+  marcarFormaExcluida,
+  mesclarFormasPagamento,
+  normalizarListaFormasPagamento,
+  salvarFormasPagamentoComSync,
+  upsertFormaPagamento,
+  type FormaPagamentoCadastro,
+} from '@/lib/formas-pagamento'
 import { buscarEnderecoPorCep } from '@/lib/viacep'
 import { ChangeEvent, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase-browser'
@@ -48,7 +59,7 @@ type ConfiguracaoSistema = {
 
 const CONFIG_KEY = 'connect_configuracoes'
 const CATEGORIAS_KEY = 'connect_categorias'
-const FORMAS_KEY = 'connect_formas_pagamento'
+const FORMAS_KEY = FORMAS_PAGAMENTO_KEY
 
 const CONFIG_PADRAO: ConfiguracaoSistema = {
   nomeEmpresa: '',
@@ -158,7 +169,7 @@ async function carregarConfigDaNuvem() {
   return json.data as Record<string, unknown>
 }
 
-async function salvarConfigNaNuvem(config: ConfiguracaoSistema, categorias: string[], formasPagamento: string[]) {
+async function salvarConfigNaNuvem(config: ConfiguracaoSistema, categorias: string[]) {
   const token = await obterTokenSessao()
   if (!token) return false
 
@@ -173,7 +184,7 @@ async function salvarConfigNaNuvem(config: ConfiguracaoSistema, categorias: stri
       data: {
         [CONFIG_KEY]: config,
         [CATEGORIAS_KEY]: categorias,
-        [FORMAS_KEY]: formasPagamento,
+        // Formas usam salvarFormasPagamentoComSync (GET→merge→PUT) para não sobrescrever a nuvem.
       },
     }),
   })
@@ -221,7 +232,8 @@ export default function ConfiguracoesPage() {
   const [novaCategoria, setNovaCategoria] = useState('')
   const [novaFormaPagamento, setNovaFormaPagamento] = useState('')
   const [categorias, setCategorias] = useState<string[]>(['GERAL', 'PRODUTOS', 'SERVIÇOS'])
-  const [formasPagamento, setFormasPagamento] = useState<string[]>(['PIX', 'DINHEIRO', 'CARTÃO 1X'])
+  const [formasCadastro, setFormasCadastro] = useState<FormaPagamentoCadastro[]>([])
+  const formasPagamento = useMemo(() => formasVisiveis(formasCadastro).map((f) => f.nome), [formasCadastro])
   const [config, setConfig] = useState<ConfiguracaoSistema>(CONFIG_PADRAO)
   const [buscandoCep, setBuscandoCep] = useState(false)
 
@@ -281,15 +293,16 @@ export default function ConfiguracoesPage() {
         }
 
         const formasNuvem = nuvem[FORMAS_KEY]
-        if (Array.isArray(formasNuvem) && ativo) {
-          const lista = normalizarLista(formasNuvem)
-          setFormasPagamento(lista)
-          localStorage.setItem(FORMAS_KEY, JSON.stringify(lista))
-        } else {
-          const formas = localStorage.getItem(FORMAS_KEY)
-          if (formas && ativo) {
-            const lista = JSON.parse(formas)
-            if (Array.isArray(lista)) setFormasPagamento(normalizarLista(lista))
+        const formasLocalRaw = localStorage.getItem(FORMAS_KEY)
+        let formasLocal: unknown = []
+        try { formasLocal = formasLocalRaw ? JSON.parse(formasLocalRaw) : [] } catch { formasLocal = [] }
+        if (ativo) {
+          const mesclada = Array.isArray(formasNuvem)
+            ? mesclarFormasPagamento(formasLocal, formasNuvem)
+            : normalizarListaFormasPagamento(formasLocal)
+          if (mesclada.length > 0) {
+            setFormasCadastro(mesclada)
+            gravarFormasPagamentoLocal(mesclada)
           }
         }
       } catch (e) {
@@ -432,11 +445,10 @@ export default function ConfiguracoesPage() {
     window.dispatchEvent(new Event('connect-data-change'))
   }
 
-  function salvarListaFormas(lista: string[]) {
-    const limpa = normalizarLista(lista)
-    setFormasPagamento(limpa)
-    localStorage.setItem(FORMAS_KEY, JSON.stringify(limpa))
-    window.dispatchEvent(new Event('connect-data-change'))
+  function salvarListaFormas(lista: FormaPagamentoCadastro[]) {
+    const limpa = normalizarListaFormasPagamento(lista)
+    setFormasCadastro(limpa)
+    gravarFormasPagamentoLocal(limpa)
   }
 
   function adicionarCategoria() {
@@ -449,7 +461,7 @@ export default function ConfiguracoesPage() {
   function adicionarFormaPagamento() {
     const nome = novaFormaPagamento.trim()
     if (!nome) return
-    salvarListaFormas([...formasPagamento, nome])
+    salvarListaFormas(upsertFormaPagamento(formasCadastro, { nome, ativo: true }))
     setNovaFormaPagamento('')
   }
 
@@ -458,7 +470,7 @@ export default function ConfiguracoesPage() {
   }
 
   function removerFormaPagamento(nome: string) {
-    salvarListaFormas(formasPagamento.filter((item) => item !== nome))
+    salvarListaFormas(marcarFormaExcluida(formasCadastro, nome))
   }
 
   function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -509,15 +521,24 @@ export default function ConfiguracoesPage() {
       salvarLocalStorageUsuario(CONFIG_KEY, userId, config)
       localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
       localStorage.setItem(CATEGORIAS_KEY, JSON.stringify(categorias))
-      localStorage.setItem(FORMAS_KEY, JSON.stringify(formasPagamento))
+      const formasParaSalvar = normalizarListaFormasPagamento(formasCadastro)
+      gravarFormasPagamentoLocal(formasParaSalvar)
+      setFormasCadastro(formasParaSalvar)
       window.dispatchEvent(new Event('connect-data-change'))
 
-      const okNuvem = await salvarConfigNaNuvem(config, categorias, formasPagamento)
+      // Formas: merge GET→PUT dedicado, para não apagar lista remota mais nova.
+      const syncFormas = await salvarFormasPagamentoComSync(formasParaSalvar, { token: await obterTokenSessao() })
+      if (syncFormas.lista.length) setFormasCadastro(syncFormas.lista)
+
+      const okNuvem = await salvarConfigNaNuvem(config, categorias)
+      const okFormas = syncFormas.ok && syncFormas.origem === 'mesclado'
 
       setMensagem(
-        okNuvem
+        okNuvem && okFormas
           ? 'Configurações salvas e sincronizadas na nuvem!'
-          : 'Configurações salvas neste aparelho. Verifique sua conexão para sincronizar.',
+          : okNuvem
+            ? (syncFormas.mensagem || 'Configurações salvas. Formas sincronizadas parcialmente.')
+            : 'Configurações salvas neste aparelho. Verifique sua conexão para sincronizar.',
       )
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Não foi possível salvar as configurações.'

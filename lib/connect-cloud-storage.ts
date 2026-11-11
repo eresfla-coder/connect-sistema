@@ -32,7 +32,46 @@ function itemTime(item: any): number {
   return Number.isFinite(asDate) ? asDate : 0
 }
 
-export function mergeConnectValue(localValue: unknown, cloudValue: unknown): unknown {
+export function mergeConnectValue(localValue: unknown, cloudValue: unknown, key?: string): unknown {
+  // Formas de pagamento: merge por nome (string[] legado ou {id,nome,ativo}), sem duplicar.
+  if (key === 'connect_formas_pagamento') {
+    // Import dinâmico evitado: lógica espelhada via require lazy no apply; aqui usamos merge genérico
+    // só quando ambos não são o formato de formas — o sync dedicado em lib/formas-pagamento.ts
+    // é a fonte oficial. Para backup/restore, mescla por nome estável.
+    const toItems = (value: unknown): any[] => {
+      if (!Array.isArray(value)) return []
+      return value.map((item, index) => {
+        if (typeof item === 'string') {
+          const nome = item.trim()
+          return nome ? { id: `nome:${nome.toLowerCase()}`, nome, ativo: true, atualizadoEm: 0 } : null
+        }
+        if (item && typeof item === 'object') {
+          const nome = String((item as any).nome || (item as any).label || '').trim()
+          if (!nome) return null
+          const excluido = (item as any).excluido === true
+          return {
+            ...item,
+            id: (item as any).id ?? `nome:${nome.toLowerCase()}`,
+            nome,
+            excluido,
+            ativo: excluido ? false : (item as any).ativo === false ? false : true,
+            atualizadoEm: Number((item as any).atualizadoEm || 0) || itemTime(item),
+          }
+        }
+        return null
+      }).filter(Boolean)
+    }
+    const merged = new Map<string, any>()
+    const add = (item: any) => {
+      const chave = String(item.nome || '').trim().toLowerCase()
+      if (!chave) return
+      const current = merged.get(chave)
+      if (!current || itemTime(item) >= itemTime(current)) merged.set(chave, item)
+    }
+    toItems(cloudValue).forEach(add)
+    toItems(localValue).forEach(add)
+    return Array.from(merged.values())
+  }
   if (Array.isArray(localValue) || Array.isArray(cloudValue)) {
     const merged = new Map<string, any>()
     const add = (item: any, sourceOrder: number) => {
@@ -70,7 +109,7 @@ export function applyCloudPayloadToLocal(payload: ConnectCloudPayload) {
     if (cloudValue === undefined || cloudValue === null) continue
     const localRaw = window.localStorage.getItem(key)
     const localValue = parseJson(localRaw)
-    const merged = mergeConnectValue(localValue, cloudValue)
+    const merged = mergeConnectValue(localValue, cloudValue, key)
     const nextRaw = JSON.stringify(merged)
     if (nextRaw !== localRaw) {
       window.localStorage.setItem(key, nextRaw)
